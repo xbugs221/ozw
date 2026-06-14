@@ -1,0 +1,255 @@
+{
+  "title": "Settings",
+  "tabs": {
+    "account": "Account",
+    "permissions": "Permissions",
+    "appearance": "Appearance"
+  },
+  "account": {
+    "title": "Account",
+    "language": "Language",
+    "languageLabel": "Display Language",
+    "languageDescription": "Choose your preferred language for the interface",
+    "username": "Username",
+    "email": "Email",
+    "profile": "Profile",
+    "changePassword": "Change Password"
+  },
+  "appearance": {
+    "title": "Appearance",
+    "theme": "Theme"
+  },
+  "actions": {
+    "saveChanges": "Save Changes",
+    "resetToDefaults": "Reset to Defaults",
+    "cancelChanges": "Cancel Changes"
+  },
+  "quickSettings": {
+    "title": "Quick Settings",
+    "sections": {
+      "appearance": "Appearance",
+      "toolDisplay": "Tool Display",
+      "viewOptions": "View Options",
+      "inputSettings": "Input Settings",
+      "whisperDictation": "Whisper Dictation"
+    },
+    "darkMode": "Dark Mode",
+    "autoExpandTools": "Auto-expand tools",
+    "showRawParameters": "Show raw parameters",
+    "showThinking": "Show thinking",
+    "autoScrollToBottom": "Auto-scroll to bottom",
+    "dragHandle": {
+      "dragging": "Dragging handle",
+      "closePanel": "Close settings panel",
+      "openPanel": "Open settings panel",
+      "draggingStatus": "Dragging...",
+      "toggleAndMove": "Click to toggle, drag to move"
+    },
+    "whisper": {
+      "modes": {
+        "default": "Default Mode",
+        "defaultDescription": "Direct transcription of your speech",
+        "prompt": "Prompt Enhancement",
+        "promptDescription": "Transform rough ideas into clear, detailed AI prompts",
+        "vibe": "Vibe Mode",
+        "vibeDescription": "Format ideas as clear agent instructions with details"
+      }
+    }
+  },
+  "mainTabs": {
+    "agents": "Agents",
+    "appearance": "Appearance",
+    "diagnostics": "Diagnostics"
+  },
+  "usage": {
+    "title": "Usage",
+    "description": "Review the current 5h / 7d remaining quota for supported agents.",
+    "providerDescription": "Refreshes automatically from the active account state",
+    "providers": {
+      "codex": "Codex"
+    }
+  },
+  "appearanceSettings": {
+    "darkMode": {
+      "label": "Dark Mode",
+      "description": "Toggle between light and dark themes"
+    }
+  },
+  "saveStatus": {
+    "success": "Settings saved successfully!",
+    "error": "Failed to save settings",
+    "saving": "Saving..."
+  },
+  "footerActions": {
+    "save": "Save Settings",
+    "cancel": "Cancel"
+  },
+  "agents": {
+    "runtime": {
+      "title": "Runtime",
+      "shortStatus": "Provided by ozw runtime"
+    },
+    "status": {
+      "authentication": "Authentication",
+      "authenticated": "Authenticated",
+      "notAuthenticated": "Not authenticated",
+      "apiKey": "API Key",
+      "configured": "Configured",
+      "notConfigured": "Not configured",
+      "cliAvailable": "CLI",
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "accountEmail": "Account email",
+      "loginMethod": "Authentication",
+      "loginOAuth": "Account login",
+      "loginApiKey": "API Key",
+      "unknown": "Unknown",
+      "defaultProvider": "Default provider",
+      "configuredProviders": "Providers",
+      "defaultModel": "Default model",
+      "modelSource": "Model source"
+    },
+    "account": {
+      "shared": {
+        "noCliDependencyTitle": "No standalone CLI dependency",
+        "noCliDependencyDescription": "Global settings no longer checks Codex or Pi commands; runtime dependency checks only cover oz flow."
+      },
+      "codex": {
+        "description": "OpenAI Codex AI assistant",
+        "runtime": "Codex sessions run through ozw's native provider runtime."
+      },
+      "pi": {
+        "description": "Pi coding agent manual session",
+        "runtime": "Pi sessions run through ozw's native provider runtime."
+      }
+    }
+  },
+  "diagnostics": {
+    "title": "Runtime diagnostics",
+    "description": "Server-visible oz command used by workflow automation.",
+    "loading": "Loading diagnostics...",
+    "loadError": "Failed to load diagnostics",
+    "unknown": "unknown",
+    "notFound": "not found",
+    "empty": "empty",
+    "status": {
+      "success": "Success",
+      "failed": "Failed"
+    },
+    "fields": {
+      "overall": "Overall status",
+      "commandPath": "Command path",
+      "home": "Run directory",
+      "version": "Version",
+      "contract": "Contract capabilities",
+      "contractMissing": "Missing contract capabilities",
+      "path": "PATH"
+    }
+  },
+  "permissions": {
+    "title": "Permission Settings",
+    "skipPermissions": {
+      "label": "Skip permission prompts (use with caution)"
+    },
+    "allowedTools": {
+      "title": "Allowed Tools",
+      "description": "Tools that are automatically allowed without prompting for permission",
+      "placeholder": "e.g., \"Bash(git log:*)\" or \"Write\"",
+      "quickAdd": "Quick add common tools:",
+      "empty": "No allowed tools configured"
+    },
+    "blockedTools": {
+      "title": "Blocked Tools",
+      "description": "Tools that are automatically blocked without prompting for permission",
+      "placeholder": "e.g., \"Bash(rm:*)\"",
+      "empty": "No blocked tools configured"
+    },
+    "allowedCommands": {
+      "title": "Allowed Shell Commands",
+      "description": "Shell commands that are automatically allowed without prompting",
+      "placeholder": "e.g., \"Shell(ls)\" or \"Shell(git status)\"",
+      "quickAdd": "Quick add common commands:",
+      "empty": "No allowed commands configured"
+    },
+    "blockedCommands": {
+      "title": "Blocked Shell Commands",
+      "description": "Shell commands that are automatically blocked",
+      "placeholder": "e.g., \"Shell(rm -rf)\" or \"Shell(sudo)\"",
+      "empty": "No blocked commands configured"
+    },
+    "toolExamples": {
+      "title": "Tool Pattern Examples:",
+      "bashGitLog": "- Allow all git log commands",
+      "bashGitDiff": "- Allow all git diff commands",
+      "write": "- Allow all Write tool usage",
+      "bashRm": "- Block all rm commands (dangerous)"
+    },
+    "shellExamples": {
+      "title": "Shell Command Examples:",
+      "ls": "- Allow ls command",
+      "gitStatus": "- Allow git status",
+      "npmInstall": "- Allow npm install",
+      "rmRf": "- Block recursive delete"
+    },
+    "codex": {
+      "permissionMode": "Permission Mode",
+      "description": "Controls how Codex handles file modifications and command execution",
+      "modes": {
+        "default": {
+          "title": "Default",
+          "description": "Workspace-write sandbox with approval prompts for untrusted commands."
+        },
+        "acceptEdits": {
+          "title": "Accept Edits",
+          "description": "All commands run automatically within the workspace. Full auto mode with sandboxed execution."
+        },
+        "bypassPermissions": {
+          "title": "Bypass Permissions",
+          "description": "Full system access with no restrictions. All commands run automatically with full disk and network access. Use with caution."
+        }
+      },
+      "technicalDetails": "Technical details",
+      "technicalInfo": {
+        "default": "sandboxMode=danger-full-access, approvalPolicy=never. Full local YOLO execution.",
+        "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never. All commands auto-execute within project directory.",
+        "bypassPermissions": "sandboxMode=danger-full-access, approvalPolicy=never. Full system access, use only in trusted environments.",
+        "overrideNote": "You can override this per-session using the mode button in the chat interface."
+      }
+    },
+    "actions": {
+      "add": "Add"
+    }
+  },
+  "mcpServers": {
+    "title": "MCP Servers",
+    "description": {
+      "codex": "Model Context Protocol servers provide additional tools and data sources to Codex"
+    },
+    "addButton": "Add MCP Server",
+    "empty": "No MCP servers configured",
+    "serverType": "Type",
+    "scope": {
+      "local": "local",
+      "user": "user"
+    },
+    "config": {
+      "command": "Command",
+      "url": "URL",
+      "args": "Args",
+      "environment": "Environment"
+    },
+    "tools": {
+      "title": "Tools",
+      "count": "({{count}}):",
+      "more": "+{{count}} more"
+    },
+    "actions": {
+      "edit": "Edit server",
+      "delete": "Delete server"
+    },
+    "help": {
+      "title": "About Codex MCP",
+      "description": "Codex supports stdio-based MCP servers. You can add servers that extend Codex's capabilities with additional tools and resources."
+    }
+  }
+}

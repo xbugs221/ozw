@@ -1,0 +1,206 @@
+{
+  "codeBlock": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyCode": "Copy code"
+  },
+  "copyMessage": {
+    "copy": "Copy message",
+    "copied": "Message copied"
+  },
+  "messageTypes": {
+    "user": "U",
+    "error": "Error",
+    "tool": "Tool",
+    "codex": "Codex",
+    "pi": "Pi",
+    "assistant": "Assistant"
+  },
+  "tools": {
+    "settings": "Tool Settings",
+    "error": "Tool Error",
+    "result": "Tool Result",
+    "viewParams": "View input parameters",
+    "viewRawParams": "View raw parameters",
+    "viewDiff": "View edit diff for",
+    "creatingFile": "Creating new file:",
+    "updatingTodo": "Updating Todo List",
+    "read": "Read",
+    "readFile": "Read file",
+    "updateTodo": "Update todo list",
+    "readTodo": "Read todo list",
+    "searchResults": "results"
+  },
+  "search": {
+    "found": "Found {{count}} {{type}}",
+    "file": "file",
+    "files": "files",
+    "pattern": "pattern:",
+    "in": "in:",
+    "placeholder": "Search chat history",
+    "enterPrompt": "Type and press Enter to search chat history.",
+    "searching": "Searching chat history...",
+    "noMatches": "No chat history matches found."
+  },
+  "fileOperations": {
+    "updated": "File updated successfully",
+    "created": "File created successfully",
+    "written": "File written successfully",
+    "diff": "Diff",
+    "newFile": "New File",
+    "viewContent": "View file content",
+    "viewFullOutput": "View full output ({{count}} chars)",
+    "contentDisplayed": "The file content is displayed in the diff view above"
+  },
+  "interactive": {
+    "title": "Interactive Prompt",
+    "waiting": "Waiting for your response in the CLI",
+    "instruction": "Please select an option in the running agent terminal.",
+    "selectedOption": "✓ Option {{number}} selected",
+    "instructionDetail": "In the CLI, you would select this option interactively using arrow keys or by typing the number."
+  },
+  "thinking": {
+    "title": "Thinking...",
+    "emoji": "💭 Thinking...",
+    "expand": "Show more",
+    "collapse": "Show less"
+  },
+  "json": {
+    "response": "JSON Response"
+  },
+  "permissions": {
+    "grant": "Grant permission for {{tool}}",
+    "added": "Permission added",
+    "addTo": "Adds {{entry}} to Allowed Tools.",
+    "retry": "Permission saved. Retry the request to use the tool.",
+    "error": "Unable to update permissions. Please try again.",
+    "openSettings": "Open settings"
+  },
+  "todo": {
+    "updated": "Todo list has been updated successfully",
+    "current": "Current Todo List"
+  },
+  "plan": {
+    "viewPlan": "📋 View implementation plan",
+    "title": "Implementation Plan"
+  },
+  "usageLimit": {
+    "resetAt": "Usage limit reached. Your limit will reset at **{{time}} {{timezone}}** - {{date}}"
+  },
+  "codex": {
+    "permissionMode": "Permission Mode",
+    "modes": {
+      "default": "Default Mode",
+      "acceptEdits": "Accept Edits",
+      "bypassPermissions": "Bypass Permissions",
+      "plan": "Plan Mode"
+    },
+    "descriptions": {
+      "default": "Workspace-write sandbox with approval prompts for untrusted commands.",
+      "acceptEdits": "All commands run automatically within the workspace. Full auto mode with sandboxed execution.",
+      "bypassPermissions": "Full system access with no restrictions. All commands run automatically with full disk and network access. Use with caution.",
+      "plan": "Planning mode - no commands are executed"
+    },
+    "technicalDetails": "Technical details"
+  },
+  "input": {
+    "placeholder": "Type your message...",
+    "placeholderDefault": "Type your message...",
+    "disabled": "Input disabled",
+    "attachFiles": "Attach files",
+    "attachFolder": "Attach folder",
+    "insertProjectFile": "Insert project file",
+    "searchProjectFiles": "Search project files...",
+    "noMatchingFiles": "No matching files",
+    "noProjectFiles": "No project files",
+    "send": "Send",
+    "stop": "Stop",
+    "hintText": {
+      "ctrlEnter": "Ctrl+Enter to send • Shift+Enter for new line"
+    },
+    "clickToChangeMode": "Click to change permission mode (or press Tab in input)",
+    "showAllCommands": "Show all commands",
+    "clearInput": "Clear input",
+    "scrollToBottom": "Scroll to bottom",
+    "usageRemaining": "5hours {{fiveHourValue}} / 7days {{sevenDayValue}} remaining"
+  },
+  "providerSelection": {
+    "title": "Choose Your AI Assistant",
+    "description": "Select a provider to start a new conversation",
+    "selectModel": "Select Model",
+    "selectReasoning": "Thinking Depth",
+    "providerInfo": {
+      "anthropic": "by Anthropic",
+      "openai": "by OpenAI",
+      "pi": "Pi Coding Agent"
+    },
+    "readyPrompt": {
+      "codex": "Ready to use Codex with {{model}} and {{effort}} thinking depth. Start typing your message below.",
+      "default": "Select a provider above to begin",
+      "pi": "Ready to use Pi. Start typing your message below."
+    }
+  },
+  "sessionControls": {
+    "title": "Session Settings",
+    "codexDescription": "New Codex model and reasoning effort apply to upcoming messages.",
+    "piDescription": "New Pi model and thinking level apply to upcoming messages.",
+    "buttonTitle": "Current model {{model}}, current depth {{depth}}",
+    "piButtonTitle": "Current model {{model}}, thinking depth {{depth}}",
+    "model": "Model",
+    "reasoningEffort": "Reasoning Effort",
+    "thinkingLevel": "Thinking Level",
+    "close": "Close"
+  },
+  "session": {
+    "continue": {
+      "title": "Continue your conversation",
+      "description": "Ask questions about your code, request changes, or get help with development tasks"
+    },
+    "loading": {
+      "olderMessages": "Loading older messages...",
+      "sessionMessages": "Loading session messages..."
+    },
+    "messages": {
+      "showingOf": "Showing {{shown}} of {{total}} messages",
+      "scrollToLoad": "Scroll up to load more",
+      "showingLast": "Showing last {{count}} messages ({{total}} total)",
+      "loadEarlier": "Load earlier messages",
+      "loadAll": "Load all messages",
+      "loadingAll": "Loading all messages...",
+      "allLoaded": "All messages loaded",
+      "perfWarning": "All messages loaded — scrolling may be slower. Click \"Scroll to bottom\" to restore performance."
+    }
+  },
+  "shell": {
+    "selectProject": {
+      "title": "Select a Project",
+      "description": "Choose a project to open an interactive shell in that directory"
+    },
+    "status": {
+      "newSession": "New Session",
+      "initializing": "Initializing...",
+      "restarting": "Restarting..."
+    },
+    "actions": {
+      "disconnect": "Disconnect",
+      "disconnectTitle": "Disconnect from shell",
+      "restart": "Restart",
+      "restartTitle": "Restart Shell (disconnect first)",
+      "connect": "Continue in Shell",
+      "connectTitle": "Connect to shell"
+    },
+    "loading": "Loading terminal...",
+    "connecting": "Connecting to shell...",
+    "startSession": "Start a new agent session",
+    "resumeSession": "Resume session: {{displayName}}...",
+    "runCommand": "Run {{command}} in {{projectName}}",
+    "startCli": "Starting agent CLI in {{projectName}}",
+    "defaultCommand": "command"
+  },
+  "projectSelection": {
+    "startChatWithProvider": "Select a project to start chatting with {{provider}}"
+  },
+  "tasks": {
+    "nextTaskPrompt": "Start the next task"
+  }
+}

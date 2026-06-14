@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": false,
+    "incremental": true,
+    "tsBuildInfoFile": ".tmp/tsbuildinfo/build.tsbuildinfo",
+    "outDir": "dist-node",
+    "rootDir": ".",
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": false,
+    "types": ["node"],
+    "declaration": false,
+    "sourceMap": true
+  },
+  "include": [
+    "backend/**/*.ts",
+    "backend/**/*.d.ts",
+    "shared/**/*.ts",
+    "scripts/**/*.ts"
+  ],
+  "exclude": [
+    "tests"
+  ]
+}

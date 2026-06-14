@@ -1,0 +1,51 @@
+{
+  "toolbar": {
+    "changes": "changes",
+    "previousChange": "Previous change",
+    "nextChange": "Next change",
+    "hideDiff": "Hide diff highlighting",
+    "showDiff": "Show diff highlighting",
+    "settings": "Editor Settings",
+    "collapse": "Collapse editor",
+    "expand": "Expand editor to full width"
+  },
+  "loading": "Loading {{fileName}}...",
+  "header": {
+    "showingChanges": "Showing changes"
+  },
+  "settingsPanel": {
+    "title": "Editor settings",
+    "theme": "Theme",
+    "darkTheme": "Dark",
+    "lightTheme": "Light",
+    "wordWrap": "Word wrap",
+    "minimap": "Show minimap",
+    "lineNumbers": "Show line numbers",
+    "fontSize": "Font size",
+    "close": "Close"
+  },
+  "actions": {
+    "download": "Download file",
+    "save": "Save",
+    "saving": "Saving...",
+    "saved": "Saved!",
+    "exitFullscreen": "Exit fullscreen",
+    "fullscreen": "Fullscreen",
+    "close": "Close",
+    "previewMarkdown": "Preview markdown",
+    "editMarkdown": "Edit markdown"
+  },
+  "binary": {
+    "message": "This file is binary and cannot be edited here.",
+    "detail": "Use download to keep the original bytes unchanged."
+  },
+  "image": {
+    "loading": "Loading image preview...",
+    "error": "Unable to load image preview."
+  },
+  "footer": {
+    "lines": "Lines:",
+    "characters": "Characters:",
+    "shortcuts": "Press Ctrl+S to save • Esc to close"
+  }
+}

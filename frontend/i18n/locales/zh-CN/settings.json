@@ -1,0 +1,255 @@
+{
+  "title": "设置",
+  "tabs": {
+    "account": "账户",
+    "permissions": "权限",
+    "appearance": "外观"
+  },
+  "account": {
+    "title": "账户",
+    "language": "语言",
+    "languageLabel": "显示语言",
+    "languageDescription": "选择您偏好的界面语言",
+    "username": "用户名",
+    "email": "邮箱",
+    "profile": "个人资料",
+    "changePassword": "修改密码"
+  },
+  "appearance": {
+    "title": "外观",
+    "theme": "主题"
+  },
+  "actions": {
+    "saveChanges": "保存更改",
+    "resetToDefaults": "重置为默认值",
+    "cancelChanges": "取消更改"
+  },
+  "quickSettings": {
+    "title": "快速设置",
+    "sections": {
+      "appearance": "外观",
+      "toolDisplay": "工具显示",
+      "viewOptions": "视图选项",
+      "inputSettings": "输入设置",
+      "whisperDictation": "Whisper 听写"
+    },
+    "darkMode": "深色模式",
+    "autoExpandTools": "自动展开工具",
+    "showRawParameters": "显示原始参数",
+    "showThinking": "显示思考过程",
+    "autoScrollToBottom": "自动滚动到底部",
+    "dragHandle": {
+      "dragging": "正在拖拽手柄",
+      "closePanel": "关闭设置面板",
+      "openPanel": "打开设置面板",
+      "draggingStatus": "正在拖拽...",
+      "toggleAndMove": "点击切换，拖拽移动"
+    },
+    "whisper": {
+      "modes": {
+        "default": "默认模式",
+        "defaultDescription": "直接转录您的语音",
+        "prompt": "提示词增强",
+        "promptDescription": "将粗略的想法转化为清晰、详细的 AI 提示词",
+        "vibe": "Vibe 模式",
+        "vibeDescription": "将想法格式化为带有详细说明的清晰智能体指令"
+      }
+    }
+  },
+  "mainTabs": {
+    "agents": "智能体",
+    "appearance": "外观",
+    "diagnostics": "诊断"
+  },
+  "usage": {
+    "title": "额度信息",
+    "description": "查看受支持智能体当前的 5h / 7d 剩余额度。",
+    "providerDescription": "按当前账号状态自动刷新",
+    "providers": {
+      "codex": "Codex"
+    }
+  },
+  "appearanceSettings": {
+    "darkMode": {
+      "label": "深色模式",
+      "description": "切换浅色和深色主题"
+    }
+  },
+  "saveStatus": {
+    "success": "设置保存成功！",
+    "error": "保存设置失败",
+    "saving": "保存中..."
+  },
+  "footerActions": {
+    "save": "保存设置",
+    "cancel": "取消"
+  },
+  "agents": {
+    "runtime": {
+      "title": "运行方式",
+      "shortStatus": "由 ozw 运行时提供"
+    },
+    "status": {
+      "authentication": "认证状态",
+      "authenticated": "已认证",
+      "notAuthenticated": "未认证",
+      "apiKey": "API Key",
+      "configured": "已配置",
+      "notConfigured": "未配置",
+      "cliAvailable": "CLI",
+      "available": "可用",
+      "unavailable": "不可用",
+      "accountEmail": "登录账号",
+      "loginMethod": "认证方式",
+      "loginOAuth": "账号登录",
+      "loginApiKey": "API Key",
+      "unknown": "未知",
+      "defaultProvider": "默认 Provider",
+      "configuredProviders": "已配置 Provider",
+      "defaultModel": "默认模型",
+      "modelSource": "模型来源"
+    },
+    "account": {
+      "shared": {
+        "noCliDependencyTitle": "无需独立 CLI 依赖",
+        "noCliDependencyDescription": "全局设置不再检测 Codex 或 Pi 命令；运行时依赖只保留工作流所需的 oz flow。"
+      },
+      "codex": {
+        "description": "OpenAI Codex AI 助手",
+        "runtime": "Codex 会话通过 ozw 的原生 provider 运行时处理。"
+      },
+      "pi": {
+        "description": "Pi 编程 agent 手动会话",
+        "runtime": "Pi 会话通过 ozw 的原生 provider 运行时处理。"
+      }
+    }
+  },
+  "diagnostics": {
+    "title": "运行诊断",
+    "description": "服务进程可见的 oz 命令，用于工作流自动化。",
+    "loading": "正在加载诊断...",
+    "loadError": "加载诊断失败",
+    "unknown": "未知",
+    "notFound": "未找到",
+    "empty": "空",
+    "status": {
+      "success": "成功",
+      "failed": "失败"
+    },
+    "fields": {
+      "overall": "整体状态",
+      "commandPath": "命令路径",
+      "home": "运行目录",
+      "version": "版本",
+      "contract": "契约能力",
+      "contractMissing": "缺少契约能力",
+      "path": "PATH"
+    }
+  },
+  "permissions": {
+    "title": "权限设置",
+    "skipPermissions": {
+      "label": "跳过权限提示（请谨慎使用）"
+    },
+    "allowedTools": {
+      "title": "允许的工具",
+      "description": "无需权限提示即可自动使用的工具",
+      "placeholder": "例如：\"Bash(git log:*)\" 或 \"Write\"",
+      "quickAdd": "快速添加常用工具：",
+      "empty": "未配置允许的工具"
+    },
+    "blockedTools": {
+      "title": "禁用的工具",
+      "description": "无需权限提示即可自动禁用的工具",
+      "placeholder": "例如：\"Bash(rm:*)\"",
+      "empty": "未配置禁用的工具"
+    },
+    "allowedCommands": {
+      "title": "允许的 Shell 命令",
+      "description": "无需权限提示即可自动执行的 Shell 命令",
+      "placeholder": "例如：\"Shell(ls)\" 或 \"Shell(git status)\"",
+      "quickAdd": "快速添加常用命令：",
+      "empty": "未配置允许的命令"
+    },
+    "blockedCommands": {
+      "title": "阻止的 Shell 命令",
+      "description": "自动阻止的 Shell 命令",
+      "placeholder": "例如：\"Shell(rm -rf)\" 或 \"Shell(sudo)\"",
+      "empty": "未配置阻止的命令"
+    },
+    "toolExamples": {
+      "title": "工具模式示例：",
+      "bashGitLog": "- 允许所有 git log 命令",
+      "bashGitDiff": "- 允许所有 git diff 命令",
+      "write": "- 允许所有 Write 工具使用",
+      "bashRm": "- 阻止所有 rm 命令（危险）"
+    },
+    "shellExamples": {
+      "title": "Shell 命令示例：",
+      "ls": "- 允许 ls 命令",
+      "gitStatus": "- 允许 git status",
+      "npmInstall": "- 允许 npm install",
+      "rmRf": "- 阻止递归删除"
+    },
+    "codex": {
+      "permissionMode": "权限模式",
+      "description": "控制 Codex 如何处理文件修改和命令执行",
+      "modes": {
+        "default": {
+          "title": "默认",
+          "description": "仅在工作区内读写；对非受信命令会请求确认。"
+        },
+        "acceptEdits": {
+          "title": "接受编辑",
+          "description": "所有命令在工作区内自动运行。具有沙箱执行的全自动模式。"
+        },
+        "bypassPermissions": {
+          "title": "绕过权限",
+          "description": "完全系统访问，无任何限制。所有命令自动运行，具有完整的磁盘和网络访问权限。请谨慎使用。"
+        }
+      },
+      "technicalDetails": "技术详情",
+      "technicalInfo": {
+        "default": "sandboxMode=danger-full-access, approvalPolicy=never。完全本地 YOLO 执行。",
+        "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never。所有命令在项目目录内自动执行。",
+        "bypassPermissions": "sandboxMode=danger-full-access, approvalPolicy=never。完全系统访问权限，仅在可信环境中使用。",
+        "overrideNote": "您可以使用聊天界面中的模式按钮按会话覆盖此设置。"
+      }
+    },
+    "actions": {
+      "add": "添加"
+    }
+  },
+  "mcpServers": {
+    "title": "MCP 服务器",
+    "description": {
+      "codex": "Model Context Protocol 服务器为 Codex 提供额外的工具和数据源"
+    },
+    "addButton": "添加 MCP 服务器",
+    "empty": "未配置 MCP 服务器",
+    "serverType": "类型",
+    "scope": {
+      "local": "本地",
+      "user": "用户"
+    },
+    "config": {
+      "command": "命令",
+      "url": "URL",
+      "args": "参数",
+      "environment": "环境变量"
+    },
+    "tools": {
+      "title": "工具",
+      "count": "（{{count}}）：",
+      "more": "还有 {{count}} 个"
+    },
+    "actions": {
+      "edit": "编辑服务器",
+      "delete": "删除服务器"
+    },
+    "help": {
+      "title": "关于 Codex MCP",
+      "description": "Codex 支持基于 stdio 的 MCP 服务器。您可以添加服务器，通过额外的工具和资源来扩展 Codex 的功能。"
+    }
+  }
+}

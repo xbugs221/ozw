@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# PURPOSE: Delegate pre-commit checks to the repository script.
+set -euo pipefail
+
+pnpm run precommit

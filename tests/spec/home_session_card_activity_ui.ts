@@ -1,0 +1,190 @@
+/**
+ * PURPOSE: Business tests for project-home session card read receipts.
+ */
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+
+import {
+  getSessionActivitySignature,
+  getSessionProjectName,
+  getViewedSessionKey,
+  hasUnreadSessionActivity,
+} from '../../frontend/components/main-content/view/subcomponents/sessionActivityState.ts';
+import { getSessionRouteNumber } from '../../frontend/utils/sessionCardDisplay.ts';
+
+test('historical project-home sessions are read on first visit until activity changes', () => {
+  /**
+   * A missing localStorage signature means the sidebar has not recorded a newer
+   * activity signature yet, so the project home must not light every old card.
+   */
+  const session = {
+    id: 'c1',
+    __provider: 'codex',
+    messageCount: 2,
+    updatedAt: '2026-04-29T01:00:00.000Z',
+  };
+  const signature = getSessionActivitySignature(session);
+
+  assert.equal(
+    hasUnreadSessionActivity({
+      isSelected: false,
+      viewedSignature: null,
+      activitySignature: signature,
+    }),
+    false,
+  );
+  assert.equal(
+    hasUnreadSessionActivity({
+      isSelected: false,
+      viewedSignature: '1:2026-04-29T00:00:00.000Z',
+      activitySignature: signature,
+    }),
+    true,
+  );
+});
+
+test('cross-project session cards use the source project key when clearing unread state', () => {
+  /**
+   * Worktree and cross-project sessions carry __projectName; read receipts must
+   * use that same key for rendering and click clearing.
+   */
+  const homeProjectName = 'main-project';
+  const session = {
+    id: 'c2',
+    __provider: 'codex',
+    __projectName: 'worktree-project',
+    messageCount: 4,
+    updatedAt: '2026-04-29T02:00:00.000Z',
+  };
+
+  const sourceProjectName = getSessionProjectName(homeProjectName, session);
+  const renderKey = getViewedSessionKey(sourceProjectName, session);
+  const clickClearKey = getViewedSessionKey(getSessionProjectName(homeProjectName, session), session);
+
+  assert.equal(sourceProjectName, 'worktree-project');
+  assert.equal(clickClearKey, renderKey);
+  assert.notEqual(renderKey, getViewedSessionKey(homeProjectName, session));
+});
+
+test('project-home session cards are wired to production activity rendering', async () => {
+  /**
+   * Guard the business path: the project overview card must use the activity
+   * helpers directly, not leave them as isolated acceptance-test utilities.
+   */
+  const overviewSource = await readFile(
+    new URL('../../frontend/components/main-content/view/subcomponents/ProjectOverviewPanel.tsx', import.meta.url),
+    'utf8',
+  );
+  const actionMenuSource = await readFile(
+    new URL('../../frontend/components/session-actions/SessionActionIconMenu.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(overviewSource, /formatTimeAgo\(sessionView\.sessionTime,\s*currentTime,\s*t\)/);
+  assert.match(overviewSource, /hasUnreadSessionActivity\(/);
+  assert.match(overviewSource, /writeViewedSessionSignature\(sessionKey,\s*activitySignature\)/);
+  assert.match(overviewSource, /<SessionActionIconMenu/);
+  assert.match(actionMenuSource, /<span>\{labels\.rename\}<\/span>/);
+  assert.match(actionMenuSource, /<span>\{favoriteLabel\}<\/span>/);
+  assert.match(actionMenuSource, /<span>\{labels\.delete\}<\/span>/);
+});
+
+test('project-home cards expose business sort choices while sidebar stays navigation-only', async () => {
+  /**
+   * Sorting must be a card-display concern. The visible #cN/#wN route numbers
+   * remain sourced from routeIndex while users can sort by update time, title,
+   * or provider.
+   */
+  const overviewSource = await readFile(
+    new URL('../../frontend/components/main-content/view/subcomponents/ProjectOverviewPanel.tsx', import.meta.url),
+    'utf8',
+  );
+  const sidebarProjectItemSource = await readFile(
+    new URL('../../frontend/components/sidebar/view/subcomponents/SidebarProjectItem.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(overviewSource, /value: 'updated', label: '最近消息'/);
+  assert.match(overviewSource, /value: 'title', label: '标题'/);
+  assert.match(overviewSource, /value: 'provider', label: 'Provider'/);
+  assert.match(overviewSource, /compareSessionsByCardSortMode\(sessionA, sessionB, sessionSortMode, t\)/);
+  assert.match(overviewSource, /min-w-\[9\.5rem\][^"]*pr-10/);
+  assert.doesNotMatch(sidebarProjectItemSource, /aria-label="手动会话排序"/);
+  assert.doesNotMatch(sidebarProjectItemSource, /aria-label="工作流排序"/);
+  assert.doesNotMatch(sidebarProjectItemSource, /新建/);
+  assert.doesNotMatch(sidebarProjectItemSource, /openWorkflowComposer|createProjectWorkflow/);
+});
+
+test('project-home manual sessions collapse after ten cards and show request-prefix titles', async () => {
+  /**
+   * The project homepage should stay scannable for busy repos: render the first
+   * ten manual session cards, fold the rest behind an explicit button, and use
+   * the first-request prefix as the visible card title.
+   */
+  const overviewSource = await readFile(
+    new URL('../../frontend/components/main-content/view/subcomponents/ProjectOverviewPanel.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(overviewSource, /DEFAULT_VISIBLE_MANUAL_SESSION_CARDS = 10/);
+  assert.match(overviewSource, /visibleSessions\.slice\(0, DEFAULT_VISIBLE_MANUAL_SESSION_CARDS\)/);
+  assert.match(overviewSource, /显示更多手动会话/);
+  assert.match(overviewSource, /收起手动会话/);
+  assert.match(overviewSource, /getManualSessionCardTitle\(sessionView\.sessionName\)/);
+  assert.match(overviewSource, /Array\.from\(normalizedName\)\.slice\(0, 20\)\.join\(''\)/);
+});
+
+test('manual session cards share compact route number metadata', async () => {
+  /**
+   * The workspace nav and project homepage should present the same cN number
+   * before updated time and provider identity, so users can match cards to URLs.
+   */
+  const overviewSource = await readFile(
+    new URL('../../frontend/components/main-content/view/subcomponents/ProjectOverviewPanel.tsx', import.meta.url),
+    'utf8',
+  );
+  const workspaceNavSource = await readFile(
+    new URL('../../frontend/components/app/ProjectWorkspaceNav.tsx', import.meta.url),
+    'utf8',
+  );
+  const sidebarSessionItemSource = await readFile(
+    new URL('../../frontend/components/sidebar/view/subcomponents/SidebarSessionItem.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.equal(getSessionRouteNumber({ routeIndex: 7, id: 'provider-id' }), '7');
+  assert.equal(getSessionRouteNumber({ id: 'c12' }), '12');
+  assert.equal(getSessionRouteNumber({ id: 'codex-provider-id' }), null);
+  assert.match(overviewSource, /getSessionRouteNumber\(session\)/);
+  assert.match(workspaceNavSource, /getSessionRouteNumber\(session\)/);
+  assert.match(sidebarSessionItemSource, /getSessionRouteNumber\(session\)/);
+  assert.match(overviewSource, /<SessionProviderLogo[\s\S]*className="h-3\.5 w-3\.5 shrink-0 text-muted-foreground"/);
+  assert.match(workspaceNavSource, /<SessionProviderLogo[\s\S]*className="h-3\.5 w-3\.5 shrink-0 text-muted-foreground"/);
+  assert.match(sidebarSessionItemSource, /<SessionProviderLogo[\s\S]*className="h-3\.5 w-3\.5 shrink-0 text-muted-foreground"/);
+});
+
+test('left navigation keeps workflow groups out of the project list', async () => {
+  /**
+   * Workflow history and active runs belong on the project homepage; the left
+   * navigation remains a project list without nested workflow cards.
+   */
+  const workspaceNavSource = await readFile(
+    new URL('../../frontend/components/app/ProjectWorkspaceNav.tsx', import.meta.url),
+    'utf8',
+  );
+  const sidebarProjectItemSource = await readFile(
+    new URL('../../frontend/components/sidebar/view/subcomponents/SidebarProjectItem.tsx', import.meta.url),
+    'utf8',
+  );
+  const sidebarProjectListSource = await readFile(
+    new URL('../../frontend/components/sidebar/view/subcomponents/SidebarProjectList.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(workspaceNavSource, /const activeWorkflows = useMemo\(\(\) => workflows\.filter\(\(workflow\) => !isWorkflowCompleted\(workflow\)\)/);
+  assert.match(workspaceNavSource, /\{activeWorkflows\.length > 0 && \(/);
+  assert.match(workspaceNavSource, /activeWorkflows\.map\(\(workflow\) =>/);
+  assert.doesNotMatch(sidebarProjectItemSource, /SidebarProjectWorkflows|project-workflow-group|暂无需求工作流/);
+  assert.doesNotMatch(sidebarProjectListSource, /SidebarProjectWorkflows|project-workflow-group/);
+});
