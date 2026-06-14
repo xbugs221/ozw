@@ -29,6 +29,49 @@ export const readProjectSortOrder = (): ProjectSortOrder => {
   return 'name';
 };
 
+const pickSessionDisplayText = (value: unknown): string => {
+  /**
+   * PURPOSE: Guard against malformed payloads where label-like fields may be
+   * objects/arrays and would otherwise be rendered as React children.
+   */
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return '';
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(pickSessionDisplayText).filter(Boolean).join(' ');
+  }
+
+  const dictValue = value as Record<string, unknown>;
+  const nestedText = dictValue.label
+    || dictValue.title
+    || dictValue.summary
+    || dictValue.name
+    || dictValue.text;
+
+  if (typeof nestedText === 'string' || typeof nestedText === 'number' || typeof nestedText === 'boolean') {
+    return String(nestedText);
+  }
+
+  return '';
+};
+
+const getFirstSessionDisplayText = (fallback: string, ...candidates: unknown[]): string => {
+  const next = candidates
+    .map((candidate) => pickSessionDisplayText(candidate).trim())
+    .find((text) => text.length > 0);
+
+  return next || fallback;
+};
+
 export const getSessionDate = (session: SessionWithProvider): Date => {
   return normalizeBusinessTimestamp(getSessionActivityTime(session)) || new Date(0);
 };
@@ -126,14 +169,35 @@ export const compareSessionsByCardSortMode = (
 
 export const getSessionName = (session: SessionWithProvider, t: TFunction): string => {
   if (session.__provider === 'codex') {
-    return session.label || session.routeTitle || session.summary || session.title || session.name || t('projects.codexSession');
+    return getFirstSessionDisplayText(
+      t('projects.codexSession'),
+      session.label,
+      session.routeTitle,
+      session.summary,
+      session.title,
+      session.name,
+    );
   }
 
   if (session.__provider === 'pi') {
-    return session.label || session.routeTitle || session.summary || session.title || session.name || t('projects.piSession');
+    return getFirstSessionDisplayText(
+      t('projects.piSession'),
+      session.label,
+      session.routeTitle,
+      session.summary,
+      session.title,
+      session.name,
+    );
   }
 
-  return session.label || session.routeTitle || session.summary || session.title || t('projects.newSession');
+  return getFirstSessionDisplayText(
+    t('projects.newSession'),
+    session.label,
+    session.routeTitle,
+    session.summary,
+    session.title,
+    session.name,
+  );
 };
 
 export const getSessionTime = (session: SessionWithProvider): string => {

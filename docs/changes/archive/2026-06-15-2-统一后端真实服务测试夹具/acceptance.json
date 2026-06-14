@@ -1,0 +1,46 @@
+{
+  "summary": "真实后端服务测试必须通过共享夹具启动、认证和清理，避免认证与数据库隔离逻辑重复漂移。",
+  "coverage": [
+    {
+      "spec": "需求：真实后端服务测试必须复用共享夹具 / 场景：真实 server 测试通过共享 helper 启动",
+      "tests": ["backend-service-fixture-contract"],
+      "evidence": ["backend-service-fixture-source"],
+      "risk": "只迁移重复真实 server 测试，不要求所有后端测试使用该 helper。"
+    },
+    {
+      "spec": "需求：真实后端服务测试必须复用共享夹具 / 场景：WebSocket 测试统一使用 Authorization header",
+      "tests": ["backend-service-fixture-contract"],
+      "evidence": ["backend-service-fixture-source"],
+      "risk": "浏览器端真实 WebSocket 行为继续由现有 e2e 覆盖。"
+    },
+    {
+      "spec": "需求：测试子进程必须隔离本机状态 / 场景：子进程环境统一隔离数据库和 JWT 密钥",
+      "tests": ["backend-service-fixture-contract"],
+      "evidence": ["backend-service-fixture-source"],
+      "risk": "不验证真实外部 provider 账号状态。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "backend-service-fixture-contract",
+      "source": "change_contract",
+      "path": "docs/changes/2-统一后端真实服务测试夹具/tests/backend-service-fixture.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/2-统一后端真实服务测试夹具/tests/backend-service-fixture.contract.test.ts",
+      "purpose": "证明真实后端服务测试的启动、认证 WebSocket 和本机状态隔离已收敛到共享 helper。",
+      "assertions": [
+        "helper 导出 startIsolatedBackendServer/registerTestUser/openAuthenticatedWebSocket/stopBackendServerFixture",
+        "helper 显式设置 DATABASE_PATH、JWT_SECRET、HOST 和 SESSION_PATH_SCAN_INTERVAL_MS",
+        "目标测试不再直接 spawn backend/index.ts，也不再使用 /ws?token="
+      ],
+      "expected_initial_failure": "当前仓库仍有测试自管 server 启动和认证样板，测试应失败于 helper 或迁移缺失。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "backend-service-fixture-source",
+      "kind": "state_snapshot",
+      "path": "test-results/backend-service-fixture/source-audit.json",
+      "purpose": "记录 helper 和迁移测试的源码审计结果；该文件不进入 git。"
+    }
+  ]
+}

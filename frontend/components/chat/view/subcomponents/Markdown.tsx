@@ -16,6 +16,7 @@ import type { Project } from '../../../../types/app';
 import { parseWorkspaceFileReference } from '../../utils/workspaceLinks';
 import { api } from '../../../../utils/api';
 import type { ProjectFileNode } from '../../utils/fileMentionTree';
+import { isImageFile } from '../../../file-tree/utils/fileTreeUtils';
 
 type MarkdownProps = {
   children: React.ReactNode;
@@ -232,9 +233,10 @@ function createMarkdownComponents(
 
       const workspaceLink = parseWorkspaceFileReference(href, selectedProject);
       const isKnownOpenableFile = Boolean(workspaceLink && openableFiles?.has(workspaceLink.filePath));
-      const shouldIntercept = Boolean(isKnownOpenableFile && onFileOpen);
+      const isWorkspaceImage = Boolean(workspaceLink && isImageFile(workspaceLink.filePath));
+      const shouldIntercept = Boolean((isKnownOpenableFile || isWorkspaceImage) && onFileOpen);
 
-      if (workspaceLink && !isKnownOpenableFile) {
+      if (workspaceLink && !isKnownOpenableFile && !isWorkspaceImage) {
         return <span>{children}</span>;
       }
 

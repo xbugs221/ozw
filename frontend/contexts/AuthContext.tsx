@@ -77,15 +77,16 @@ export const AuthProvider = ({ children }) => {
             setUser(userData.user);
             setNeedsSetup(false);
             await checkOnboardingStatus();
-          } else {
-            localStorage.removeItem('auth-token');
-            setToken(null);
-            setUser(null);
+            return;
           }
         } catch (error) {
           console.warn('Token verification was interrupted:', error);
         }
-        return;
+
+        // Token 无效或已过期时，回退到 /auth/status 进行首次初始化判断
+        localStorage.removeItem('auth-token');
+        setToken(null);
+        setUser(null);
       }
 
       // Check if system needs setup

@@ -11,6 +11,7 @@ import { listProjectWorkflows } from './workflows.js';
 import { getProjectLocalConfigPath as resolveProjectLocalConfigPath, readProjectLocalConfig, readProjectLocalConfigFile, writeProjectLocalConfig, } from './project-config-store.js';
 import { normalizeCodexFileOperationPayload, normalizeCodexFunctionCall, normalizeCodexRealtimeItem, normalizeCodexToolOutput, } from '../shared/codex-message-normalizer.js';
 import { configureProviderSessionReadModel, deleteProviderSessionIndexFile, indexProviderSessionFile, listIndexedProviderSessionsForProject, upsertProviderSessionIndex, } from './domains/projects/provider-session-read-model.js';
+import { buildProviderSessionListReadModel } from './domains/projects/provider-session-list-read-model.js';
 import { createDefaultProjectArchiveIndex, getProjectArchiveFilePath, loadProjectArchiveIndex, normalizeProjectArchiveIndex, saveProjectArchiveIndex, } from './domains/projects/project-archive-store.js';
 import { bindManualSessionProvider as bindManualSessionProviderInStore, finalizeManualSessionRoute as finalizeManualSessionRouteInStore, initManualSessionRoute as initManualSessionRouteInStore, } from './domains/projects/session-route-store.js';
 const projectDirectoryCache = new Map();
@@ -3298,10 +3299,6 @@ async function parseCodexSessionHeader(filePath) {
     || firstRecord.payload.timestamp
     || stat?.mtime?.toISOString()
     || new Date().toISOString();
-  const firstUserMessage = await readCodexFirstUserMessageForHeader(filePath);
-  const title = firstUserMessage
-    ? truncateSessionTitleFromUserMessage(firstUserMessage)
-    : 'Codex Session';
   return {
     id: thread,
     sourceSessionId: firstRecord.payload.id,
@@ -3311,8 +3308,8 @@ async function parseCodexSessionHeader(filePath) {
     model: firstRecord.payload.model || firstRecord.payload.model_provider,
     createdAt: timestamp,
     timestamp: stat?.mtime?.toISOString() || timestamp,
-    summary: title,
-    title,
+    summary: 'Codex Session',
+    title: 'Codex Session',
     messageCount: null,
     messageCountKnown: false,
     fileMtimeMs: typeof stat?.mtimeMs === 'number' ? stat.mtimeMs : null,
@@ -3543,30 +3540,14 @@ async function getCodexSessions(projectPath, options = {}) {
         ? { ...draft, origin: SESSION_ORIGIN_WORKFLOW }
         : draft;
     });
-    if (excludeWorkflowChildSessions) {
-      manualDraftRecords = manualDraftRecords.filter(
-        (draft) => draft.origin !== SESSION_ORIGIN_WORKFLOW
-          && !isWorkflowOwnedProviderSessionId(draft, resolvedWorkflowOwnedSessionIds),
-      );
-    }
-    const boundProviderSessionIds = new Set();
-    manualDraftRecords
-      .map((session) => session.providerSessionId)
-      .filter((sessionId) => typeof sessionId === 'string' && sessionId)
-      .forEach((sessionId) => boundProviderSessionIds.add(sessionId));
-    let standaloneSessions = sessions;
-    if (excludeWorkflowChildSessions) {
-            standaloneSessions = sessions.filter(
-        (session) => session.origin !== SESSION_ORIGIN_WORKFLOW
-          && !isWorkflowOwnedProviderSessionId(session, resolvedWorkflowOwnedSessionIds),
-      );
-    }
-    const routeVisibleStandaloneSessions = standaloneSessions
-      .filter((session) => !boundProviderSessionIds.has(session.id));
-    const sessionsWithDrafts = Array.from(
-      new Map([...routeVisibleStandaloneSessions, ...manualDraftRecords].map((session) => [session?.id, session])).values(),
-    )
-      .sort((sessionA, sessionB) => new Date(sessionB.lastActivity || 0) - new Date(sessionA.lastActivity || 0));
+    const sessionsWithDrafts = buildProviderSessionListReadModel({
+      provider: 'codex',
+      providerSessions: sessions,
+      manualDrafts: manualDraftRecords,
+      workflowOwnedSessionIds: resolvedWorkflowOwnedSessionIds,
+      excludeWorkflowChildSessions,
+      includeHidden: true,
+    });
     const annotatedSessions = await annotateSessionCollectionVisibility(sessionsWithDrafts, projectPath);
     const sessionsWithUiState = annotatedSessions.map((session) => applySessionUiState(
       session,
@@ -4048,37 +4029,26 @@ async function getPiSessions(projectPath, options = {}) {
     }),
   );
   drafts = [...drafts, ...persistedCNPiSessions];
-  if (excludeWorkflowChildSessions) {
-    drafts = drafts.filter((session) => !isWorkflowOwnedDraft({
+  const providerSessionsWithMetadata = indexedSessions
+    .map((session) => applySessionMetadataOverrides(session, summaryOverrideById, workflowMetadataById, 'pi', originById))
+    .map((session) => applySessionModelState(session, modelStateById));
+  const draftsWithMetadata = drafts
+    .map((session) => applySessionMetadataOverrides(session, summaryOverrideById, workflowMetadataById, 'pi', originById))
+    .map((session) => applySessionModelState(session, modelStateById));
+  const sessionsWithDrafts = buildProviderSessionListReadModel({
+    provider: 'pi',
+    providerSessions: providerSessionsWithMetadata,
+    manualDrafts: draftsWithMetadata.filter((session) => !excludeWorkflowChildSessions || !isWorkflowOwnedDraft({
       id: session.id,
       workflowId: session.workflowId,
       stageKey: session.stageKey,
       provider: 'pi',
-    }) && !isWorkflowOwnedProviderSessionId(session, resolvedWorkflowOwnedSessionIds));
-  }
-  const boundProviderSessionIds = new Set();
-  for (const draft of drafts) {
-    const psid = draft?.providerSessionId || draft?.provider_session_id;
-    if (typeof psid === 'string' && psid.trim()) {
-      boundProviderSessionIds.add(psid.trim());
-    }
-  }
-  const routeVisibleIndexedSessions = indexedSessions.filter(
-    (session) => !boundProviderSessionIds.has(session?.id),
-  );
-  const sessionsWithMetadata = Array.from(
-    new Map([...routeVisibleIndexedSessions, ...drafts].map((session) => [session?.id, session])).values(),
-  )
-    .map((session) => applySessionMetadataOverrides(session, summaryOverrideById, workflowMetadataById, 'pi', originById))
-    .map((session) => applySessionModelState(session, modelStateById));
-  let standaloneSessions = sessionsWithMetadata;
-  if (excludeWorkflowChildSessions) {
-        standaloneSessions = sessionsWithMetadata.filter(
-      (session) => session.origin !== SESSION_ORIGIN_WORKFLOW
-        && !isWorkflowOwnedProviderSessionId(session, resolvedWorkflowOwnedSessionIds),
-    );
-  }
-  const annotatedSessions = await annotateSessionCollectionVisibility(standaloneSessions, projectPath);
+    })),
+    workflowOwnedSessionIds: resolvedWorkflowOwnedSessionIds,
+    excludeWorkflowChildSessions,
+    includeHidden: true,
+  });
+  const annotatedSessions = await annotateSessionCollectionVisibility(sessionsWithDrafts, projectPath);
   const sessionsWithUiState = annotatedSessions.map((session) => applySessionUiState(
     session,
     projectPath,

@@ -14,6 +14,7 @@ import i18next from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import { createServer, type ViteDevServer } from 'vite';
 import type { ChatMessage, Provider } from '../../frontend/components/chat/types/types.ts';
+import type { Project } from '../../frontend/types/app.ts';
 import { mergePersistedAndOptimisticMessages } from '../../frontend/components/chat/utils/sessionMessageMerge.ts';
 import {
   filterRenderableMessages,
@@ -161,7 +162,12 @@ function ensureBrowserGlobals(): void {
 /**
  * Render the same React component used by the chat transcript.
  */
-async function renderMessage(message: ChatMessage, provider: Provider | string): Promise<string> {
+async function renderMessage(
+  message: ChatMessage,
+  provider: Provider | string,
+  selectedProject: Project | null = null,
+  onFileOpen?: (filePath: string) => void,
+): Promise<string> {
   await ensureI18n();
   const MessageComponent = await loadMessageComponent();
   const ThemeProvider = await loadThemeProvider();
@@ -179,7 +185,8 @@ async function renderMessage(message: ChatMessage, provider: Provider | string):
           autoExpandTools={false}
           showRawParameters={false}
           showThinking={false}
-          selectedProject={null}
+          selectedProject={selectedProject}
+          onFileOpen={onFileOpen}
         />
       </ThemeProvider>
     </I18nextProvider>,
@@ -424,4 +431,62 @@ test('Pi command tool card uses the same visible structure as Codex command tool
     normalizeHtmlFingerprint(codexHtml),
     'Pi and Codex command tool cards must share the same visible HTML structure',
   );
+});
+
+test('Codex view_image tool card opens the image path like a compact Read card', async () => {
+  /**
+   * The Codex view_image tool is a file-open affordance, not a generic JSON
+   * function card; users need the image path as a direct workspace link.
+   */
+  const selectedProject: Project = {
+    name: 'matx',
+    displayName: 'matx',
+    fullPath: '/home/zzl/projects/matx',
+    path: '/home/zzl/projects/matx',
+  };
+  const imagePath = '/home/zzl/projects/matx/test-results/final-view.png';
+  const html = await renderMessage(row({
+    type: 'assistant',
+    provider: 'codex',
+    source: 'codex-history',
+    isToolUse: true,
+    toolName: 'functions.view_image',
+    toolInput: { path: imagePath },
+    toolResult: null,
+    toolCallId: 'proposal-view-image-tool',
+    toolId: 'proposal-view-image-tool',
+    messageKey: 'codex:proposal-view-image-tool',
+    status: 'completed',
+  }), 'codex', selectedProject, () => undefined);
+  await writeEvidence('codex-view-image-tool-card.html', html);
+
+  assert.match(html, /data-testid="codex-tool-card"/, 'view_image must render through the shared tool card');
+  assert.match(visibleTextFromHtml(html), /View/, 'view_image card must use the compact View label');
+  assert.match(visibleTextFromHtml(html), /test-results\/final-view\.png/, 'view_image card must show the project-relative image path');
+  assert.doesNotMatch(visibleTextFromHtml(html), /functions\.view_image/, 'view_image must not fall back to a generic function title');
+});
+
+test('final assistant image links stay on the workspace file preview route', async () => {
+  /**
+   * Final replies often point at generated screenshots before the file tree
+   * index has reloaded, so image links must still use the workspace open flow.
+   */
+  const selectedProject: Project = {
+    name: 'matx',
+    displayName: 'matx',
+    fullPath: '/home/zzl/projects/matx',
+    path: '/home/zzl/projects/matx',
+  };
+  const html = await renderMessage(row({
+    type: 'assistant',
+    provider: 'codex',
+    source: 'codex-history',
+    content: 'Final image: [test-results/final-view.png](/home/zzl/projects/matx/test-results/final-view.png)',
+    messageKey: 'codex:final-image-link',
+  }), 'codex', selectedProject, () => undefined);
+  await writeEvidence('codex-final-image-link.html', html);
+
+  assert.match(html, /href="\/home\/zzl\/projects\/matx\/test-results\/final-view\.png"/, 'image link href must remain visible');
+  assert.doesNotMatch(html, /target="_blank"/, 'workspace image links must be intercepted instead of opening a blank browser tab');
+  assert.match(visibleTextFromHtml(html), /test-results\/final-view\.png/, 'final answer must keep the image path visible');
 });

@@ -12,48 +12,20 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import net from 'node:net';
-import { spawn } from 'node:child_process';
+import {
+  registerTestUser,
+  startIsolatedBackendServer,
+  stopBackendServerFixture,
+} from './helpers/backend-service-fixture.ts';
 import { writeFakeWorkflowTools } from './helpers/workflow-tools.ts';
 
 const CCFLOW_ROOT = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   '../..',
 );
-const TSX_CLI = 'node_modules/tsx/dist/cli.mjs';
-
-async function getFreePort() {
-  const server = net.createServer();
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const addr = server.address();
-  await new Promise((resolve) => server.close(resolve));
-  return addr.port;
-}
-
-async function waitForHealth(port, child, outputRef) {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`server exited early: ${outputRef.text}`);
-    }
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
-      if (res.ok) return;
-    } catch {}
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new Error(`server did not become healthy: ${outputRef.text}`);
-}
-
-async function stopServer(child, tempRoot) {
-  if (child && child.exitCode === null) {
-    child.kill('SIGTERM');
-    await Promise.race([
-      new Promise((r) => child.once('exit', r)),
-      new Promise((r) => setTimeout(r, 3000)),
-    ]);
-    if (child.exitCode === null) child.kill('SIGKILL');
-  }
+async function cleanupFixture(fixture, tempRoot) {
+  /** Stop the shared backend fixture and remove per-test temporary files. */
+  await stopBackendServerFixture(fixture);
   if (tempRoot) {
     await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
   }
@@ -67,7 +39,6 @@ test('/api/cli/pi/status returns available=true with commandPath and version whe
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-pi-cli-avail-'));
   const binDir = path.join(tempRoot, 'bin');
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   // Create a fake pi binary that reports a version
   await fs.mkdir(binDir, { recursive: true });
@@ -82,34 +53,21 @@ test('/api/cli/pi/status returns available=true with commandPath and version whe
     'exit 0',
   ].join('\n'), { mode: 0o755 });
 
-  const outputRef = { text: '' };
-  const child = spawn(process.execPath, [TSX_CLI, 'backend/index.ts'], {
-    cwd: CCFLOW_ROOT,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      HOST: '127.0.0.1',
-      DATABASE_PATH: databasePath,
-      PATH: `${binDir}:${process.env.PATH || ''}`,
-      SESSION_PATH_SCAN_INTERVAL_MS: '0',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  child.stdout.on('data', (c) => { outputRef.text += c.toString(); });
-  child.stderr.on('data', (c) => { outputRef.text += c.toString(); });
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
+    fixture = await startIsolatedBackendServer({
+      cwd: CCFLOW_ROOT,
+      databasePath,
+      env: {
+        PATH: `${binDir}:${process.env.PATH || ''}`,
+      },
+    });
 
     // Register a user to get an auth token for the authenticated endpoint
-    const regRes = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'pi-cli-tester', password: 'cli-pass' }),
-    });
-    const { token } = await regRes.json();
+    const { token } = await registerTestUser(fixture, { username: 'pi-cli-tester', password: 'cli-pass' });
 
-    const res = await fetch(`http://127.0.0.1:${port}/api/cli/pi/status`, {
+    const res = await fetch(`${fixture.baseUrl}/api/cli/pi/status`, {
       headers: { authorization: `Bearer ${token}` },
     });
     const data = await res.json();
@@ -129,7 +87,7 @@ test('/api/cli/pi/status returns available=true with commandPath and version whe
     const dataText = JSON.stringify(data);
     assert.ok(!dataText.includes('sk-'), 'must not contain API key pattern');
   } finally {
-    await stopServer(child, tempRoot);
+    await cleanupFixture(fixture, tempRoot);
   }
 });
 
@@ -140,40 +98,26 @@ test('/api/cli/pi/status returns available=true with commandPath and version whe
 test('/api/cli/pi/status returns available=false when pi is not on PATH', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-pi-cli-absent-'));
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   // Create a bin directory with oz and wo but WITHOUT pi.
   const workBinDir = path.join(tempRoot, 'work-bin');
   await writeFakeWorkflowTools(workBinDir);
 
-  const outputRef = { text: '' };
-  const child = spawn(process.execPath, [TSX_CLI, 'backend/index.ts'], {
-    cwd: CCFLOW_ROOT,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      HOST: '127.0.0.1',
-      DATABASE_PATH: databasePath,
-      PATH: `${workBinDir}:/usr/bin:/usr/local/bin`,
-      SESSION_PATH_SCAN_INTERVAL_MS: '0',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  child.stdout.on('data', (c) => { outputRef.text += c.toString(); });
-  child.stderr.on('data', (c) => { outputRef.text += c.toString(); });
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
+    fixture = await startIsolatedBackendServer({
+      cwd: CCFLOW_ROOT,
+      databasePath,
+      env: {
+        PATH: `${workBinDir}:/usr/bin:/usr/local/bin`,
+      },
+    });
 
     // Register to get auth token
-    const regRes = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'pi-absent-tester', password: 'absent-pass' }),
-    });
-    const { token } = await regRes.json();
+    const { token } = await registerTestUser(fixture, { username: 'pi-absent-tester', password: 'absent-pass' });
 
-    const res = await fetch(`http://127.0.0.1:${port}/api/cli/pi/status`, {
+    const res = await fetch(`${fixture.baseUrl}/api/cli/pi/status`, {
       headers: { authorization: `Bearer ${token}` },
     });
     const data = await res.json();
@@ -187,7 +131,7 @@ test('/api/cli/pi/status returns available=false when pi is not on PATH', async 
       `error must explain pi is not found, got: ${data.error}`,
     );
   } finally {
-    await stopServer(child, tempRoot);
+    await cleanupFixture(fixture, tempRoot);
   }
 });
 
@@ -200,7 +144,6 @@ test('Pi CLI on PATH allows native Pi sessions regardless of co provider gate', 
   const binDir = path.join(tempRoot, 'bin');
   const coHome = path.join(tempRoot, 'co');
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   // Pi is on PATH, but co says providers.pi=false
   await fs.mkdir(binDir, { recursive: true });
@@ -224,36 +167,23 @@ test('Pi CLI on PATH allows native Pi sessions regardless of co provider gate', 
 
   await fs.mkdir(path.join(coHome, 'requests', 'pending'), { recursive: true });
 
-  const outputRef = { text: '' };
-  const child = spawn(process.execPath, [TSX_CLI, 'backend/index.ts'], {
-    cwd: CCFLOW_ROOT,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      HOST: '127.0.0.1',
-      DATABASE_PATH: databasePath,
-      CCFLOW_CO_HOME: coHome,
-      SESSION_PATH_SCAN_INTERVAL_MS: '0',
-      PATH: `${binDir}:${process.env.PATH || ''}`,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  child.stdout.on('data', (c) => { outputRef.text += c.toString(); });
-  child.stderr.on('data', (c) => { outputRef.text += c.toString(); });
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
+    fixture = await startIsolatedBackendServer({
+      cwd: CCFLOW_ROOT,
+      databasePath,
+      env: {
+        CCFLOW_CO_HOME: coHome,
+        PATH: `${binDir}:${process.env.PATH || ''}`,
+      },
+    });
 
     // Register a user for authenticated API calls
-    const regRes = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'gate-tester', password: 'gate-pass' }),
-    });
-    const { token } = await regRes.json();
+    const { token } = await registerTestUser(fixture, { username: 'gate-tester', password: 'gate-pass' });
 
     // First verify Pi CLI status shows available
-    const cliRes = await fetch(`http://127.0.0.1:${port}/api/cli/pi/status`, {
+    const cliRes = await fetch(`${fixture.baseUrl}/api/cli/pi/status`, {
       headers: { authorization: `Bearer ${token}` },
     });
     const cliData = await cliRes.json();
@@ -271,6 +201,6 @@ test('Pi CLI on PATH allows native Pi sessions regardless of co provider gate', 
     const pendingFiles = await fs.readdir(path.join(coHome, 'requests', 'pending')).catch(() => []);
     assert.equal(pendingFiles.length, 0, 'must not write any co-style pending request');
   } finally {
-    await stopServer(child, tempRoot);
+    await cleanupFixture(fixture, tempRoot);
   }
 });

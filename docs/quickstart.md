@@ -1,44 +1,44 @@
-# Quick Start
+# 快速开始
 
-English | [中文](./quickstart_zh.md)
+[English](./quickstart_en.md) | 中文
 
 ---
 
-This guide will get **ozw** up and running on your local machine or server.
+本指南将帮助你在本地或服务器上启动并运行 **ozw**。
 
-### 1. Prerequisites
-- **Node.js 22+** and **pnpm 10.33+**.
-- **oz**: Must be installed on your system `PATH`. ozw relies on it for `openspec` proposals and workflow execution.
+### 1. 检查基础环境
+- **Node.js 22+** 与 **pnpm 10.33+**。
+- **oz**：必须安装在系统 `PATH` 中。ozw 依赖它来处理 `openspec` 提案和执行工作流。
 
-### 2. Setup and Run
+### 2. 获取并启动
 ```sh
 git clone https://github.com/xbugs221/ozw.git
 cd ozw
 pnpm install
 pnpm start
 ```
-`pnpm start` builds both frontend and backend and launches the service.
+`pnpm start` 会编译前端和后端并启动服务。
 
-### 3. Enable "Relay Coding" (Recommended)
-To fully leverage the cross-device benefits, run ozw in a web-accessible environment:
-- **Cloud Server:** Run it directly on your remote VPS.
-- **Local Workstation:** Use a reverse proxy like `frp`, `nps`, or `Cloudflare Tunnel`.
+### 3. 实现“编程接力”（推荐配置）
+为了发挥 ozw 跨设备接力的最大优势，建议将其部署在公网可达的环境中：
+- **公网服务器：** 直接在服务器启动。
+- **本地开发机：** 使用 `frp`、`nps` 或 `Cloudflare Tunnel`。
 
-**Example (frp):**
-Map your local 5173 (frontend) and 3001 (backend) ports to a public domain.
+**配置示例 (frp):**
+将本地的 5173（前端）和 3001（后端）映射到你的公网域名。
 
-### 4. Verification
-Open ozw in your browser.
-1. Confirm the file tree loads your project correctly.
-2. Go to the Workflows view and ensure you see active changes listed by `oz`.
-3. Start an `oz` run and check if you can monitor its progress from another device.
+### 4. 验证
+打开浏览器访问你的 ozw 地址。
+1. 确认文件树能正常加载你的项目。
+2. 在 Workflows 视图中确认能看到 `oz` 列出的活跃变更。
+3. 尝试启动一个 `oz` 运行记录，并观察它是否在多台设备间同步状态。
 
 ---
 
-## 🚀 Useful Commands
+## 🚀 进阶技巧
 
 ```sh
-pnpm typecheck      # Check for type errors
-pnpm test:server    # Run backend tests
-pnpm test:e2e       # Run browser tests
+pnpm typecheck      # 检查代码类型错误
+pnpm test:server    # 运行后端测试
+pnpm test:e2e       # 运行浏览器端测试
 ```

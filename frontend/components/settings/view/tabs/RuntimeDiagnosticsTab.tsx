@@ -5,15 +5,21 @@ import { api } from '../../../../utils/api';
 
 type RuntimeCommandDiagnostics = {
   name: string;
+  available?: boolean;
+  authenticated?: boolean | 'unknown' | null;
   command_path?: string;
+  commandPath?: string;
   path: string;
   home?: string;
-  version?: { ok: boolean; output: string; error?: string };
+  version?: string | { ok: boolean; output: string; error?: string };
   contract?: { ok: boolean; missing?: string[]; capabilities?: string[]; version?: string; error?: string };
+  requiredAction?: string;
+  error?: string;
 };
 
 type RuntimeDiagnostics = {
-  ok: boolean;
+  ok?: boolean;
+  ready?: boolean;
   commands: Record<string, RuntimeCommandDiagnostics>;
   path: string;
 };
@@ -35,7 +41,11 @@ function RuntimeCommandRow({ command }: { command: RuntimeCommandDiagnostics }) 
    * Render path, version, and runner contract details for one external CLI.
    */
   const { t } = useTranslation('settings');
-  const versionText = command.version?.output || command.version?.error || 'unknown';
+  const commandPath = command.commandPath || command.command_path || command.path || '';
+  const versionText = typeof command.version === 'string'
+    ? command.version || command.error || 'unknown'
+    : command.version?.output || command.version?.error || 'unknown';
+  const commandOk = command.available ?? (Boolean(commandPath) && (typeof command.version === 'string' || command.version?.ok !== false) && command.contract?.ok !== false);
   const contractText = command.contract
     ? command.contract.ok
       ? `${t('diagnostics.fields.contract')}: ${command.contract.capabilities?.join(', ') || t('diagnostics.status.success')}`
@@ -45,12 +55,14 @@ function RuntimeCommandRow({ command }: { command: RuntimeCommandDiagnostics }) 
     <div className="border border-border rounded-md p-3 space-y-2">
       <div className="flex items-center justify-between gap-3">
         <div className="font-medium text-foreground">{command.name}</div>
-        <StatusPill ok={Boolean(command.path) && command.version?.ok !== false && command.contract?.ok !== false} />
+        <StatusPill ok={commandOk} />
       </div>
-      <div className="text-sm text-muted-foreground break-all">{t('diagnostics.fields.commandPath')}: {command.command_path || command.path || t('diagnostics.notFound')}</div>
+      <div className="text-sm text-muted-foreground break-all">{t('diagnostics.fields.commandPath')}: {commandPath || t('diagnostics.notFound')}</div>
       {command.home && <div className="text-sm text-muted-foreground break-all">{t('diagnostics.fields.home')}: {command.home}</div>}
       <div className="text-sm text-muted-foreground break-all">{t('diagnostics.fields.version')}: {versionText}</div>
       {contractText && <div className="text-sm text-muted-foreground break-all">{contractText}</div>}
+      {command.requiredAction && <div className="text-sm text-muted-foreground break-all">{command.requiredAction}</div>}
+      {command.error && <div className="text-sm text-destructive break-all">{command.error}</div>}
     </div>
   );
 }
@@ -95,7 +107,7 @@ export default function RuntimeDiagnosticsTab() {
         <div className="space-y-3">
           <div className="flex items-center justify-between rounded-md border border-border p-3">
             <span className="text-sm font-medium text-foreground">{t('diagnostics.fields.overall')}</span>
-            <StatusPill ok={diagnostics.ok} />
+            <StatusPill ok={diagnostics.ready ?? Boolean(diagnostics.ok)} />
           </div>
           {Object.values(diagnostics.commands || {}).map((command) => (
             <RuntimeCommandRow key={command.name} command={command} />

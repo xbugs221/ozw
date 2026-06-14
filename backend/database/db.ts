@@ -29,6 +29,7 @@ const API_KEY_PREFIX_LENGTH = 8;
 // Use DATABASE_PATH environment variable if set, otherwise use default location
 const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, 'auth.db');
 const INIT_SQL_PATH = path.join(__dirname, 'init.sql');
+const DATABASE_PATH_DEFAULTED_BY_LOAD_ENV = process.env.OZW_DATABASE_PATH_DEFAULTED === 'true';
 
 // Ensure database directory exists if custom path is provided
 if (process.env.DATABASE_PATH) {
@@ -45,9 +46,9 @@ if (process.env.DATABASE_PATH) {
   }
 }
 
-// As part of 1.19.2 we are introducing a new location for auth.db. The below handles exisitng moving legacy database from install directory to new location
+// As part of 1.19.2 we are introducing a new location for auth.db. The below handles existing moving legacy database from install directory to new location
 const LEGACY_DB_PATH = path.join(__dirname, 'auth.db');
-if (DB_PATH !== LEGACY_DB_PATH && !fs.existsSync(DB_PATH) && fs.existsSync(LEGACY_DB_PATH)) {
+if (DATABASE_PATH_DEFAULTED_BY_LOAD_ENV && DB_PATH !== LEGACY_DB_PATH && !fs.existsSync(DB_PATH) && fs.existsSync(LEGACY_DB_PATH)) {
   try {
     fs.copyFileSync(LEGACY_DB_PATH, DB_PATH);
     console.log(`[MIGRATION] Copied database from ${LEGACY_DB_PATH} to ${DB_PATH}`);

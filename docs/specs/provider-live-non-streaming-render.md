@@ -1,7 +1,5 @@
 # 规格：Provider Live 节流流式渲染
 
-> 合并自归档提案：`2026-06-09-92-修复Codex和Pi前端非流式块渲染`
-
 ## 验收矩阵
 
 | 需求 | 场景 | required_tests | required_evidence | 真实数据来源 | 入口路径 | 关键断言 | 剩余风险 |

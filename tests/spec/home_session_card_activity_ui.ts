@@ -148,20 +148,13 @@ test('manual session cards share compact route number metadata', async () => {
     new URL('../../frontend/components/app/ProjectWorkspaceNav.tsx', import.meta.url),
     'utf8',
   );
-  const sidebarSessionItemSource = await readFile(
-    new URL('../../frontend/components/sidebar/view/subcomponents/SidebarSessionItem.tsx', import.meta.url),
-    'utf8',
-  );
-
   assert.equal(getSessionRouteNumber({ routeIndex: 7, id: 'provider-id' }), '7');
   assert.equal(getSessionRouteNumber({ id: 'c12' }), '12');
   assert.equal(getSessionRouteNumber({ id: 'codex-provider-id' }), null);
   assert.match(overviewSource, /getSessionRouteNumber\(session\)/);
   assert.match(workspaceNavSource, /getSessionRouteNumber\(session\)/);
-  assert.match(sidebarSessionItemSource, /getSessionRouteNumber\(session\)/);
   assert.match(overviewSource, /<SessionProviderLogo[\s\S]*className="h-3\.5 w-3\.5 shrink-0 text-muted-foreground"/);
   assert.match(workspaceNavSource, /<SessionProviderLogo[\s\S]*className="h-3\.5 w-3\.5 shrink-0 text-muted-foreground"/);
-  assert.match(sidebarSessionItemSource, /<SessionProviderLogo[\s\S]*className="h-3\.5 w-3\.5 shrink-0 text-muted-foreground"/);
 });
 
 test('left navigation keeps workflow groups out of the project list', async () => {

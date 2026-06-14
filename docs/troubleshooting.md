@@ -1,42 +1,42 @@
-# Troubleshooting
+# 故障排除
 
-English | [中文](./troubleshooting_zh.md)
+[English](./troubleshooting_en.md) | 中文
 
 ---
 
-Something not working? Here are the most common hiccups and how to fix them.
+遇到问题了？这里列出几个最常见的问题和解决方法。
 
-### 1. `oz` is missing
-If ozw won't start, double-check your tools:
+### 1. 找不到 `oz`
+如果 ozw 启动失败，请先检查工具是否就绪：
 ```sh
 oz --version
 ```
-Make sure it is in your `PATH`. ozw needs to find it exactly as you do in your terminal.
+确保它在你的 `PATH` 环境变量中。ozw 必须能像你在终端里那样直接调用它。
 
-### 2. Workflows aren't showing up
-ozw only shows active changes that `oz` knows about. Run this to check:
+### 2. 工作流（Workflows）没显示出来
+ozw 只会显示 `oz` 能识别出来的活跃变更。你可以运行这个命令查一下：
 ```sh
 oz list --json
 ```
-If your changes don't appear there, they won't appear in ozw either.
+如果这里没列出来，ozw 的界面里也不会有。
 
-### 3. Workflow state looks "stuck" or wrong
-The real source of truth for workflow execution comes from `oz`. If the UI seems out of sync, check the `oz` status output or peek at the server logs.
+### 3. 工作流状态看起来不对劲
+工作流执行状态以 `oz` 输出为准。如果界面显示不一致，可以检查 `oz` 的状态输出或者看一眼服务器日志。
 
-### 4. Chat provider (Codex/Pi) isn't working
-ozw doesn't log you in; it just reads your existing session.
-- **Fix:** Log in via the provider's own CLI or website, then restart ozw.
+### 4. AI 聊天（Codex/Pi）没反应
+ozw 不负责登录，它只是“借用”你现有的会话。
+- **解决方法：** 先在浏览器或对应的 CLI 里登录好，然后重启 ozw 即可。
 
-### 5. Frontend won't open
-Check your terminal logs for the correct URL. Usually it's:
+### 5. 网页打不开
+看一眼终端日志里的地址。通常是：
 **http://localhost:5173**
-If the port is taken, you can change it by setting the `PORT` or `VITE_PORT` environment variable.
+如果端口被占用了，你可以通过设置环境变量 `PORT` 或 `VITE_PORT` 来更换端口。
 
-### 6. Installation fails (Native dependencies)
-ozw uses some "native" parts (like `node-pty`). If `pnpm install` fails, make sure you have a C++ compiler and Node.js headers installed on your machine.
+### 6. 安装失败（原生依赖问题）
+ozw 用到了一些原生库（比如 `node-pty`）。如果 `pnpm install` 报错，请确保你的电脑上安装了 C++ 编译器和 Node.js 的头文件（Headers）。
 
 ---
 
-## 🛠 Need More Help?
+## 🛠 更多帮助
 
-Still stuck? Check the server logs in your terminal or [open an issue](https://github.com/xbugs221/ozw/issues).
+还是没搞定？看看终端里的服务器日志，或者去 [GitHub 提个 Issue](https://github.com/xbugs221/ozw/issues)。

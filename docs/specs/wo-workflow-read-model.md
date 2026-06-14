@@ -1,7 +1,5 @@
 # 规格：oz flow 工作流 read model
 
-> 合并自归档提案：`2026-06-04-69-适配oz flow计划验收合并阶段并开放QA-JSON链接`、`2026-06-11-99-重设计oz flow工作流卡片移除DAG审查`、`2026-06-12-104-重设计工作流详情阶段图`、`2026-06-14-112-wo工作流读模型分层`
-
 ### 需求：oz flow 工作流 read model 必须按业务概念分层
 
 #### 场景：stage、session、artifact、DAG 和 summary 迁出巨型文件
@@ -57,8 +55,6 @@
 - 并且后端 diagnostics 应包含缺失路径提示
 
 ---
-
-> 以下合并自归档提案：`2026-06-09-90-适配oz flow合入oz后的DAG工作流审查页`
 
 ### 需求：ozw 把 oz flow graph JSON 转成可审查 workflow DAG read model
 
@@ -153,8 +149,6 @@
 - **并且** 用户不需要打开独立 DAG 审查面板也能从阶段树进入这些 target
 
 ---
-
-> 以下合并自归档提案：`2026-06-10-93-对齐oz flow状态栏新格式`
 
 ### 需求：状态摘要必须使用 oz flow runtime JSON
 

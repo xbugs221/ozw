@@ -22,13 +22,13 @@ async function withTemporaryAuthHome(testBody) {
   const run = async () => {
     const originalHome = process.env.HOME;
     const originalDatabasePath = process.env.DATABASE_PATH;
-    const originalLocalhostBypass = process.env.CCFLOW_TRUST_LOCALHOST_AUTH;
+    const originalLocalhostBypass = process.env.CBW_TRUST_LOCALHOST_AUTH;
     const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-auth-localhost-test-'));
     const tempDatabasePath = path.join(tempHome, '.ozw', 'auth.db');
 
     process.env.HOME = tempHome;
     process.env.DATABASE_PATH = tempDatabasePath;
-    delete process.env.CCFLOW_TRUST_LOCALHOST_AUTH;
+    process.env.CBW_TRUST_LOCALHOST_AUTH = 'true';
 
     try {
       await initializeTemporaryDatabase(tempDatabasePath);
@@ -47,9 +47,9 @@ async function withTemporaryAuthHome(testBody) {
       }
 
       if (originalLocalhostBypass) {
-        process.env.CCFLOW_TRUST_LOCALHOST_AUTH = originalLocalhostBypass;
+        process.env.CBW_TRUST_LOCALHOST_AUTH = originalLocalhostBypass;
       } else {
-        delete process.env.CCFLOW_TRUST_LOCALHOST_AUTH;
+        delete process.env.CBW_TRUST_LOCALHOST_AUTH;
       }
 
       await fs.rm(tempHome, { recursive: true, force: true });

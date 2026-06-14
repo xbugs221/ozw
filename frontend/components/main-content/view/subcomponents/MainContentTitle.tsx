@@ -10,6 +10,30 @@ import { copyTextToClipboard } from '../../../../utils/clipboard';
 
 const Check = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>;
 
+function pickSessionDisplayText(value: unknown): string {
+  /**
+   * PURPOSE: Prevent non-text payloads from leaking into React children and
+   * causing "Objects are not valid as a React child".
+   */
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return '';
+}
+
+function getFirstSessionDisplayText(fallback: string, ...candidates: unknown[]): string {
+  const match = candidates
+    .map((candidate) => pickSessionDisplayText(candidate).trim())
+    .find((text) => text.length > 0);
+
+  return match || fallback;
+}
+
 type MainContentTitleProps = {
   activeTab: AppTab;
   selectedProject: Project | null;
@@ -27,10 +51,20 @@ function getTabTitle(activeTab: AppTab, t: (key: string) => string) {
 
 function getSessionTitle(session: ProjectSession): string {
   if (session.__provider === 'codex') {
-    return (session.routeTitle as string) || (session.summary as string) || (session.name as string) || 'Codex Session';
+    return getFirstSessionDisplayText(
+      'Codex Session',
+      session.routeTitle,
+      session.summary,
+      session.name,
+    );
   }
 
-  return (session.routeTitle as string) || (session.summary as string) || (session.name as string) || 'New Session';
+  return getFirstSessionDisplayText(
+    'New Session',
+    session.routeTitle,
+    session.summary,
+    session.name,
+  );
 }
 
 function isTemporaryOrRouteSessionId(sessionId: string): boolean {

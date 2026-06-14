@@ -134,8 +134,8 @@ import {
 } from '../workflows.js';
 import {
     checkRequiredRuntimeDependencies,
-    getRuntimeDependencyDiagnostics,
 } from '../runtime-dependencies.js';
+import { buildRuntimeReadinessReport } from '../runtime-readiness.js';
 import { getCodexModelCatalog } from '../codex-models.js';
 import { getPiModelCatalog } from '../pi-models.js';
 import { resolveCodexCliPath } from '../codex-cli.js';
@@ -934,11 +934,10 @@ app.use('/api/settings', authenticateToken, settingsRoutes);
 
 app.get('/api/diagnostics/runtime-dependencies', authenticateToken, async (req, res) => {
     /**
-     * PURPOSE: Expose resolved CLI paths for settings and diagnostics without
-     * allowing runtime path overrides. Only workflow tools (oz flow) are checked;
-     * agent providers (codex/pi) are surfaced through the agents settings tab.
+     * PURPOSE: Expose one runtime readiness report for workflow and agent CLIs
+     * without allowing request-time PATH overrides.
      */
-    const diagnostics = getRuntimeDependencyDiagnostics();
+    const diagnostics = await buildRuntimeReadinessReport();
     res.json(diagnostics);
 });
 

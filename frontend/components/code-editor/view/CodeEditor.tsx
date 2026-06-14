@@ -83,6 +83,7 @@ export default function CodeEditor({
   const isMarkdownFile = fileType === 'markdown';
   const isImageFile = fileType === 'image';
   const isBinaryFile = fileType === 'binary';
+  const effectiveProjectPath = file.projectPath || projectPath;
   const showDownload = true;
   const showSave = editable && !isBinaryFile && !isImageFile;
 
@@ -265,7 +266,7 @@ export default function CodeEditor({
             {isBinaryFile ? (
               <CodeEditorBinaryPlaceholder
                 filePath={file.path}
-                projectPath={file.projectPath}
+                projectPath={effectiveProjectPath}
                 message={t('binary.message')}
                 detail={t('binary.detail')}
               />
@@ -274,7 +275,7 @@ export default function CodeEditor({
                 projectName={file.projectName}
                 fileName={file.name}
                 filePath={file.path}
-                projectPath={file.projectPath}
+                projectPath={effectiveProjectPath}
                 loadingLabel={t('image.loading')}
                 errorLabel={t('image.error')}
               />

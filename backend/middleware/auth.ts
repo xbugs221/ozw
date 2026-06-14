@@ -89,6 +89,31 @@ const normalizeHostname = (value: string = ''): string => {
 };
 
 /**
+ * Return the first string value from a normal or multi-value HTTP header.
+ */
+const getHeaderValue = (value: string | string[] | undefined): string => {
+  if (Array.isArray(value)) {
+    return String(value[0] || '');
+  }
+  return String(value || '');
+};
+
+/**
+ * Return the first forwarded host because proxies append comma-separated hops.
+ */
+const getForwardedHost = (value: string | string[] | undefined): string => {
+  return getHeaderValue(value).split(',')[0]?.trim() || '';
+};
+
+/**
+ * Return whether a hostname is a loopback host allowed for local auth bypass.
+ */
+const isLoopbackHostname = (hostname: string): boolean => {
+  const normalizedHost = normalizeHostname(hostname);
+  return normalizedHost === 'localhost' || normalizedHost === '127.0.0.1' || normalizedHost === '::1';
+};
+
+/**
  * Normalize peer address to detect loopback safely without trusting headers.
  */
 const isLoopbackAddress = (address: string | undefined): boolean => {
@@ -108,9 +133,13 @@ const isLoopbackHostRequest = (req: express.Request): boolean => {
     return false;
   }
 
-  const normalizedHost = normalizeHostname(req?.hostname || req?.headers?.host || '');
+  const forwardedHost = getForwardedHost(req?.headers?.['x-forwarded-host']);
+  if (forwardedHost && !isLoopbackHostname(forwardedHost)) {
+    return false;
+  }
 
-  if (normalizedHost !== 'localhost' && normalizedHost !== '127.0.0.1' && normalizedHost !== '::1') {
+  const requestHost = getHeaderValue(req?.headers?.host) || req?.hostname || '';
+  if (!isLoopbackHostname(requestHost)) {
     return false;
   }
 

@@ -1,0 +1,65 @@
+{
+  "summary": "Provider 会话列表核心业务规则应从 backend/projects.ts 拆到独立 read model，并保持项目首页展示行为不变。",
+  "coverage": [
+    {
+      "spec": "需求：Provider 会话列表 read model 保持现有业务展示规则 / 场景：手动草稿绑定的 provider session 不重复显示",
+      "tests": ["provider-session-list-read-model-contract"],
+      "evidence": ["provider-session-list-output"],
+      "risk": "不覆盖 JSONL 扫描路径，沿用现有后端测试。"
+    },
+    {
+      "spec": "需求：Provider 会话列表 read model 保持现有业务展示规则 / 场景：workflow-owned session 从普通会话列表过滤",
+      "tests": ["provider-session-list-read-model-contract"],
+      "evidence": ["provider-session-list-output"],
+      "risk": "workflow 详情页子会话展示由现有 workflow 测试覆盖。"
+    },
+    {
+      "spec": "需求：projects.ts 只协调依赖，不承载核心列表规则 / 场景：`projects.ts` 不再内联核心列表组装规则",
+      "tests": ["provider-session-list-source-boundary"],
+      "evidence": ["provider-session-list-source-audit"],
+      "risk": "不以固定行数作为验收标准，避免无意义拆分。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "provider-session-list-read-model-contract",
+      "source": "change_contract",
+      "path": "docs/changes/3-拆分Provider会话列表读模型/tests/provider-session-list-read-model.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/3-拆分Provider会话列表读模型/tests/provider-session-list-read-model.contract.test.ts",
+      "purpose": "证明新 read model 保持 provider session 与手动路由、workflow-owned 过滤的业务规则。",
+      "assertions": [
+        "绑定到 cN 的 provider 原始 session 不重复显示",
+        "workflow-owned session 从普通手动会话列表过滤",
+        "输出保留 routeIndex 和 providerSessionId"
+      ],
+      "expected_initial_failure": "当前仓库没有 provider-session-list-read-model 模块，测试应失败于模块缺失。"
+    },
+    {
+      "id": "provider-session-list-source-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/3-拆分Provider会话列表读模型/tests/provider-session-list-read-model.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/3-拆分Provider会话列表读模型/tests/provider-session-list-read-model.contract.test.ts",
+      "purpose": "证明 projects.ts 调用新 read model，而不是继续内联核心列表规则。",
+      "assertions": [
+        "projects.ts 导入 buildProviderSessionListReadModel",
+        "新模块包含 bound provider session 和 workflow-owned session 过滤逻辑",
+        "projects.ts 不再直接维护 boundProviderSessionIds 过滤块"
+      ],
+      "expected_initial_failure": "当前 projects.ts 仍内联会话列表过滤逻辑。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "provider-session-list-output",
+      "kind": "state_snapshot",
+      "path": "test-results/provider-session-list/read-model-output.json",
+      "purpose": "保存纯 read model 输出样例；该文件不进入 git。"
+    },
+    {
+      "id": "provider-session-list-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/provider-session-list/source-audit.json",
+      "purpose": "保存 projects.ts 与新模块源码边界审计结果；该文件不进入 git。"
+    }
+  ]
+}

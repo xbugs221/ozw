@@ -402,6 +402,42 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     }
   },
 
+  view_image: {
+    input: {
+      type: 'one-line',
+      label: 'View',
+      getValue: (input) => getFileOperationPath(input),
+      action: 'open-file',
+      colorScheme: {
+        primary: 'text-gray-700 dark:text-gray-300',
+        background: '',
+        border: 'border-gray-300 dark:border-gray-600',
+        icon: 'text-gray-500 dark:text-gray-400'
+      }
+    },
+    result: {
+      hideOnSuccess: true
+    }
+  },
+
+  'functions.view_image': {
+    input: {
+      type: 'one-line',
+      label: 'View',
+      getValue: (input) => getFileOperationPath(input),
+      action: 'open-file',
+      colorScheme: {
+        primary: 'text-gray-700 dark:text-gray-300',
+        background: '',
+        border: 'border-gray-300 dark:border-gray-600',
+        icon: 'text-gray-500 dark:text-gray-400'
+      }
+    },
+    result: {
+      hideOnSuccess: true
+    }
+  },
+
   Edit: {
     input: {
       type: 'collapsible',

@@ -38,9 +38,13 @@ export default function CodeEditorImagePreview({
       try {
         setError(null);
         setImageUrl(null);
+        const imageQuery = new URLSearchParams({ path: filePath });
+        if (projectPath) {
+          imageQuery.set('projectPath', projectPath);
+        }
 
         const response = await authenticatedFetch(
-          `/api/projects/${projectName}/files/content?path=${encodeURIComponent(filePath)}`,
+          `/api/projects/${projectName}/files/content?${imageQuery.toString()}`,
           { signal: controller.signal },
         );
 
@@ -67,7 +71,7 @@ export default function CodeEditorImagePreview({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [errorLabel, filePath, projectName]);
+  }, [errorLabel, filePath, projectName, projectPath]);
 
   if (error) {
     return (

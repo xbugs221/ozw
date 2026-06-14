@@ -2,7 +2,7 @@
  * PURPOSE: Render the scrollable chat transcript, including history pagination affordances.
  */
 import { useTranslation } from 'react-i18next';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   Dispatch,
   KeyboardEvent as ReactKeyboardEvent,
@@ -113,6 +113,8 @@ export default function ChatMessagesPane({
   const allocatedKeysRef = useRef<Set<string>>(new Set());
   const generatedMessageKeyCounterRef = useRef(0);
   const measuredHeightsRef = useRef<Map<string, number>>(new Map());
+  const pendingMeasurementFrameRef = useRef<number | null>(null);
+  const hasPendingMeasurementUpdateRef = useRef(false);
   const [measurementVersion, setMeasurementVersion] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -200,8 +202,27 @@ export default function ChatMessagesPane({
     const previousHeight = measuredHeightsRef.current.get(messageKey);
     if (!previousHeight || Math.abs(previousHeight - nextHeight) > 1) {
       measuredHeightsRef.current.set(messageKey, nextHeight);
-      setMeasurementVersion((version) => version + 1);
+      hasPendingMeasurementUpdateRef.current = true;
+      if (pendingMeasurementFrameRef.current === null) {
+        pendingMeasurementFrameRef.current = window.requestAnimationFrame(() => {
+          pendingMeasurementFrameRef.current = null;
+          if (!hasPendingMeasurementUpdateRef.current) {
+            return;
+          }
+          hasPendingMeasurementUpdateRef.current = false;
+          setMeasurementVersion((version) => version + 1);
+        });
+      }
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pendingMeasurementFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingMeasurementFrameRef.current);
+        pendingMeasurementFrameRef.current = null;
+      }
+    };
   }, []);
 
   useLayoutEffect(() => {

@@ -11,104 +11,35 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import net from 'node:net';
-import { spawn } from 'node:child_process';
-import WebSocket from 'ws';
+import {
+  openAuthenticatedWebSocket,
+  registerTestUser,
+  startIsolatedBackendServer,
+  stopBackendServerFixture,
+} from './helpers/backend-service-fixture.ts';
 import { writeFakeWorkflowTools } from './helpers/workflow-tools.ts';
 
 const CCFLOW_ROOT = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   '../..',
 );
-const TSX_CLI = 'node_modules/tsx/dist/cli.mjs';
-
-async function getFreePort() {
-  const server = net.createServer();
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const addr = server.address();
-  await new Promise((resolve) => server.close(resolve));
-  return addr.port;
-}
-
-function registerCleanupHooks(child, tempRoot) {
-  const cleanup = async () => {
-    if (child && child.exitCode === null) {
-      child.kill('SIGTERM');
-      await Promise.race([
-        new Promise((r) => child.once('exit', r)),
-        new Promise((r) => setTimeout(r, 3000)),
-      ]);
-      if (child.exitCode === null) child.kill('SIGKILL');
-    }
-    if (tempRoot) {
-      await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
-    }
-  };
-  process.on('exit', cleanup);
-  return cleanup;
-}
-
-async function waitForHealth(port, child, outputRef) {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`server exited early: ${outputRef.text}`);
-    }
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
-      if (res.ok) return;
-    } catch {}
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new Error(`server did not become healthy: ${outputRef.text}`);
-}
-
-async function registerUser(port) {
-  const res = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: 'pi-tester', password: 'pi-pass' }),
-  });
-  return res.json();
-}
-
-function openWs(port, token) {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`,
-      { headers: { Host: `127.0.0.1:${port}` } },
-    );
-    ws.once('open', () => resolve(ws));
-    ws.once('error', reject);
-  });
-}
-
 function collectWsMessages(ws) {
   const messages = [];
   ws.on('message', (data) => messages.push(JSON.parse(data.toString())));
   return messages;
 }
 
-async function spawnCcflowServer(port, binDir, coHome, databasePath) {
+async function spawnCcflowServer(binDir, coHome, databasePath) {
   /** Start ozw with fake workflow CLIs so Pi tests do not depend on host PATH. */
   await writeFakeWorkflowTools(binDir);
-  const outputRef = { text: '' };
-  const child = spawn(process.execPath, [TSX_CLI, 'backend/index.ts'], {
+  return startIsolatedBackendServer({
     cwd: CCFLOW_ROOT,
+    databasePath,
     env: {
-      ...process.env,
-      PORT: String(port),
-      HOST: '127.0.0.1',
-      DATABASE_PATH: databasePath,
       CCFLOW_CO_HOME: coHome,
-      SESSION_PATH_SCAN_INTERVAL_MS: '0',
       PATH: `${binDir}:${process.env.PATH || ''}`,
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
   });
-  child.stdout.on('data', (c) => { outputRef.text += c.toString(); });
-  child.stderr.on('data', (c) => { outputRef.text += c.toString(); });
-  return { child, outputRef };
 }
 
 async function writeFakeCoWithPi(binDir, coHome, includePi = true) {
@@ -138,18 +69,16 @@ test('pi-command sends native events through WebSocket (no co writes)', async ()
   const coHome = path.join(tempRoot, 'co');
   const binDir = path.join(tempRoot, 'bin');
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   await writeFakeCoWithPi(binDir, coHome, true);
   await setupRequestDirs(coHome);
 
-  const { child, outputRef } = await spawnCcflowServer(port, binDir, coHome, databasePath);
-  const cleanup = registerCleanupHooks(child, tempRoot);
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
-    const { token } = await registerUser(port);
-    const ws = await openWs(port, token);
+    fixture = await spawnCcflowServer(binDir, coHome, databasePath);
+    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
     // Use non-cN session ID to avoid triggering cN draft creation
@@ -177,7 +106,7 @@ test('pi-command sends native events through WebSocket (no co writes)', async ()
       pendingFiles = await fs.readdir(pendingDir);
     } catch {}
     assert.equal(pendingFiles.length, 0,
-      `must not write any co-request-v1 pending requests (native runtime, not co). Server: ${outputRef.text.slice(-400)}`);
+      `must not write any co-request-v1 pending requests (native runtime, not co). Server: ${fixture.output.text.slice(-400)}`);
 
     // The native runtime should send status plus either accepted or explicit rejection/error.
     const statusEvents = messages.filter((m) => m.type === 'session-status');
@@ -203,7 +132,8 @@ test('pi-command sends native events through WebSocket (no co writes)', async ()
 
     ws.close();
   } finally {
-    await cleanup();
+    await stopBackendServerFixture(fixture);
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
@@ -217,18 +147,16 @@ test('abort-session with provider=pi handles accepted and rejected native starts
   const coHome = path.join(tempRoot, 'co');
   const binDir = path.join(tempRoot, 'bin');
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   await writeFakeCoWithPi(binDir, coHome, true);
   await setupRequestDirs(coHome);
 
-  const { child, outputRef } = await spawnCcflowServer(port, binDir, coHome, databasePath);
-  const cleanup = registerCleanupHooks(child, tempRoot);
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
-    const { token } = await registerUser(port);
-    const ws = await openWs(port, token);
+    fixture = await spawnCcflowServer(binDir, coHome, databasePath);
+    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
     // 1. Start a running Pi session first
@@ -282,7 +210,8 @@ test('abort-session with provider=pi handles accepted and rejected native starts
 
     ws.close();
   } finally {
-    await cleanup();
+    await stopBackendServerFixture(fixture);
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
@@ -295,18 +224,16 @@ test('abort-session with provider=pi sends session-aborted via WebSocket', async
   const coHome = path.join(tempRoot, 'co');
   const binDir = path.join(tempRoot, 'bin');
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   await writeFakeCoWithPi(binDir, coHome, true);
   await setupRequestDirs(coHome);
 
-  const { child, outputRef } = await spawnCcflowServer(port, binDir, coHome, databasePath);
-  const cleanup = registerCleanupHooks(child, tempRoot);
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
-    const { token } = await registerUser(port);
-    const ws = await openWs(port, token);
+    fixture = await spawnCcflowServer(binDir, coHome, databasePath);
+    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
     ws.send(JSON.stringify({
@@ -328,7 +255,7 @@ test('abort-session with provider=pi sends session-aborted via WebSocket', async
       pendingFiles = await fs.readdir(pendingDir);
     } catch {}
     assert.equal(pendingFiles.length, 0,
-      `must not write any co-request-v1 abort request (native runtime). Server: ${outputRef.text.slice(-400)}`);
+      `must not write any co-request-v1 abort request (native runtime). Server: ${fixture.output.text.slice(-400)}`);
 
     // Check session-aborted event via WebSocket
     const abortedEvent = messages.find((m) => m.type === 'session-aborted');
@@ -337,7 +264,8 @@ test('abort-session with provider=pi sends session-aborted via WebSocket', async
 
     ws.close();
   } finally {
-    await cleanup();
+    await stopBackendServerFixture(fixture);
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
@@ -350,19 +278,17 @@ test('providers.pi=false gate does not crash server (native runtime)', async () 
   const coHome = path.join(tempRoot, 'co');
   const binDir = path.join(tempRoot, 'bin');
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   // Fake co with Pi unavailable (co providers.pi=false)
   await writeFakeCoWithPi(binDir, coHome, false);
   await setupRequestDirs(coHome);
 
-  const { child, outputRef } = await spawnCcflowServer(port, binDir, coHome, databasePath);
-  const cleanup = registerCleanupHooks(child, tempRoot);
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
-    const { token } = await registerUser(port);
-    const ws = await openWs(port, token);
+    fixture = await spawnCcflowServer(binDir, coHome, databasePath);
+    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
     ws.send(JSON.stringify({
@@ -399,7 +325,8 @@ test('providers.pi=false gate does not crash server (native runtime)', async () 
 
     ws.close();
   } finally {
-    await cleanup();
+    await stopBackendServerFixture(fixture);
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
@@ -412,17 +339,15 @@ test('check-session-status returns isProcessing from native runtime', async () =
   const coHome = path.join(tempRoot, 'co');
   const binDir = path.join(tempRoot, 'bin');
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   await writeFakeCoWithPi(binDir, coHome, true);
 
-  const { child, outputRef } = await spawnCcflowServer(port, binDir, coHome, databasePath);
-  const cleanup = registerCleanupHooks(child, tempRoot);
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
-    const { token } = await registerUser(port);
-    const ws = await openWs(port, token);
+    fixture = await spawnCcflowServer(binDir, coHome, databasePath);
+    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
     ws.send(JSON.stringify({
@@ -444,7 +369,8 @@ test('check-session-status returns isProcessing from native runtime', async () =
 
     ws.close();
   } finally {
-    await cleanup();
+    await stopBackendServerFixture(fixture);
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
@@ -457,17 +383,15 @@ test('check-session-status for unknown session returns isProcessing=false', asyn
   const coHome = path.join(tempRoot, 'co');
   const binDir = path.join(tempRoot, 'bin');
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   await writeFakeCoWithPi(binDir, coHome, true);
 
-  const { child, outputRef } = await spawnCcflowServer(port, binDir, coHome, databasePath);
-  const cleanup = registerCleanupHooks(child, tempRoot);
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
-    const { token } = await registerUser(port);
-    const ws = await openWs(port, token);
+    fixture = await spawnCcflowServer(binDir, coHome, databasePath);
+    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
     ws.send(JSON.stringify({
@@ -489,7 +413,8 @@ test('check-session-status for unknown session returns isProcessing=false', asyn
 
     ws.close();
   } finally {
-    await cleanup();
+    await stopBackendServerFixture(fixture);
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
@@ -502,18 +427,16 @@ test('get-active-sessions returns pi and codex arrays from native runtime', asyn
   const coHome = path.join(tempRoot, 'co');
   const binDir = path.join(tempRoot, 'bin');
   const databasePath = path.join(tempRoot, 'auth.db');
-  const port = await getFreePort();
 
   await writeFakeCoWithPi(binDir, coHome, true);
   await setupRequestDirs(coHome);
 
-  const { child, outputRef } = await spawnCcflowServer(port, binDir, coHome, databasePath);
-  const cleanup = registerCleanupHooks(child, tempRoot);
+  let fixture;
 
   try {
-    await waitForHealth(port, child, outputRef);
-    const { token } = await registerUser(port);
-    const ws = await openWs(port, token);
+    fixture = await spawnCcflowServer(binDir, coHome, databasePath);
+    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
     ws.send(JSON.stringify({ type: 'get-active-sessions' }));
@@ -527,6 +450,7 @@ test('get-active-sessions returns pi and codex arrays from native runtime', asyn
 
     ws.close();
   } finally {
-    await cleanup();
+    await stopBackendServerFixture(fixture);
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
