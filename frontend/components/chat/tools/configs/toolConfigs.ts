@@ -267,8 +267,6 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   Bash: {
     input: {
       type: 'content',
-      title: '',
-      defaultOpen: false,
       contentType: 'context-command',
       getContentProps: (input, helpers) => ({
         payload: getShellCommandPayload(input, helpers?.toolResult),
@@ -283,8 +281,6 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   exec_command: {
     input: {
       type: 'content',
-      title: '',
-      defaultOpen: false,
       contentType: 'context-command',
       getContentProps: (input, helpers) => ({
         payload: getShellCommandPayload(input, helpers?.toolResult),
@@ -299,8 +295,6 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   'functions.exec_command': {
     input: {
       type: 'content',
-      title: '',
-      defaultOpen: false,
       contentType: 'context-command',
       getContentProps: (input, helpers) => ({
         payload: getShellCommandPayload(input, helpers?.toolResult),
@@ -378,63 +372,61 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
 
   Read: {
     input: {
-      type: 'one-line',
-      label: 'Read',
-      getValue: (input) => getFileOperationPath(input),
-      action: 'open-file',
-      colorScheme: {
-        primary: 'text-gray-700 dark:text-gray-300',
-        background: '',
-        border: 'border-gray-300 dark:border-gray-600',
-        icon: 'text-gray-500 dark:text-gray-400'
-      }
-    },
-    result: {
       type: 'collapsible',
-      title: 'Read error',
+      title: (input) => getFileOperationPath(input) || 'file',
       displayToolName: 'Read',
       defaultOpen: false,
-      contentType: 'text',
-      getContentProps: (result) => ({
-        content: normalizeExecResultPayload(result),
-        format: 'code',
-      })
+      wrapTitle: true,
+      contentType: 'markdown',
+      getContentProps: (input, helpers) => {
+        const filePath = getFileOperationPath(input) || 'unknown';
+        const fileContent = normalizeExecResultPayload(helpers?.toolResult);
+        const hasContent = typeof fileContent === 'string' && fileContent.trim();
+        return {
+          content: hasContent
+            ? `\`\`\`\n${fileContent}\n\`\`\``
+            : `📄 \`${filePath}\``,
+        };
+      },
+    },
+    result: {
+      hidden: true
     }
   },
 
   view_image: {
     input: {
-      type: 'one-line',
-      label: 'View',
-      getValue: (input) => getFileOperationPath(input),
-      action: 'open-file',
-      colorScheme: {
-        primary: 'text-gray-700 dark:text-gray-300',
-        background: '',
-        border: 'border-gray-300 dark:border-gray-600',
-        icon: 'text-gray-500 dark:text-gray-400'
-      }
+      type: 'collapsible',
+      title: (input) => getFileOperationPath(input) || 'file',
+      displayToolName: 'View',
+      defaultOpen: false,
+      wrapTitle: true,
+      contentType: 'text',
+      getContentProps: (input) => ({
+        content: `🖼️ \`${getFileOperationPath(input) || 'unknown'}\``,
+        format: 'plain',
+      })
     },
     result: {
-      hideOnSuccess: true
+      hidden: true
     }
   },
 
   'functions.view_image': {
     input: {
-      type: 'one-line',
-      label: 'View',
-      getValue: (input) => getFileOperationPath(input),
-      action: 'open-file',
-      colorScheme: {
-        primary: 'text-gray-700 dark:text-gray-300',
-        background: '',
-        border: 'border-gray-300 dark:border-gray-600',
-        icon: 'text-gray-500 dark:text-gray-400'
-      }
+      type: 'collapsible',
+      title: (input) => getFileOperationPath(input) || 'file',
+      displayToolName: 'View',
+      defaultOpen: false,
+      wrapTitle: true,
+      contentType: 'text',
+      getContentProps: (input) => ({
+        content: `🖼️ \`${getFileOperationPath(input) || 'unknown'}\``,
+        format: 'plain',
+      })
     },
     result: {
-      hideOnSuccess: true
+      hidden: true
     }
   },
 

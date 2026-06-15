@@ -14,7 +14,8 @@
     "tool": "Tool",
     "codex": "Codex",
     "pi": "Pi",
-    "assistant": "Assistant"
+    "assistant": "Assistant",
+    "thinking": "Thinking"
   },
   "tools": {
     "settings": "Tool Settings",

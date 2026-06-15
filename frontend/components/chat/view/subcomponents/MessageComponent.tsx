@@ -396,34 +396,71 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
                 </div>
               </div>
             ) : message.isThinking ? (
-              /* Thinking messages — default collapsed to latest 3 lines */
+              /* Thinking messages — collapsed to single-line summary with ▶ triangle */
               <div className="text-sm text-gray-700 dark:text-gray-300">
                 {(() => {
                   const thinkingContent = String(message.content || '');
-                  const lines = thinkingContent.split('\n');
-                  const shouldCollapse = lines.length > 3;
-                  const displayContent = shouldCollapse && !thinkingExpanded
-                    ? lines.slice(-3).join('\n')
-                    : thinkingContent;
-                  return (
-                    <>
-                      <Markdown
-                        className="prose prose-sm max-w-none dark:prose-invert prose-gray"
-                        selectedProject={selectedProject}
-                        onFileOpen={onFileOpen}
-                      >
-                        {displayContent}
-                      </Markdown>
-                      {shouldCollapse && (
-                        <button
-                          type="button"
-                          onClick={() => setThinkingExpanded((prev) => !prev)}
-                          className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:underline cursor-pointer focus:outline-none"
+                  const lines = thinkingContent.split('\n').filter((l) => l.trim());
+                  const lastLine = lines.length > 0 ? lines[lines.length - 1] : '';
+                  const hasMultipleLines = lines.length > 1;
+
+                  if (!hasMultipleLines && lines.length === 1) {
+                    return (
+                      <div className="flex items-start gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        <svg className="w-3 h-3 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                        <Markdown
+                          className="prose prose-sm max-w-none dark:prose-invert prose-gray min-w-0"
+                          selectedProject={selectedProject}
+                          onFileOpen={onFileOpen}
                         >
-                          {thinkingExpanded ? t('thinking.collapse') : t('thinking.expand')}
-                        </button>
+                          {lastLine}
+                        </Markdown>
+                      </div>
+                    );
+                  }
+
+                  if (!hasMultipleLines && lines.length === 0) {
+                    return null;
+                  }
+
+                  return (
+                    <details
+                      className="group/tk"
+                      open={thinkingExpanded}
+                      onToggle={(event) => {
+                        const open = event.currentTarget.open;
+                        setThinkingExpanded(open);
+                      }}
+                    >
+                      <summary className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 py-0.5">
+                        <svg
+                          className="w-3 h-3 transition-transform duration-150 group-open/tk:rotate-90 flex-shrink-0"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                        <span className="font-medium text-gray-500 dark:text-gray-400 flex-shrink-0">
+                          {t('messageTypes.thinking', { defaultValue: 'Thinking' })}
+                        </span>
+                        <span className="text-gray-300 dark:text-gray-600 text-[10px] flex-shrink-0">/</span>
+                        <span className="truncate text-gray-500 dark:text-gray-400">{lastLine}</span>
+                      </summary>
+                      {thinkingExpanded && (
+                        <div className="mt-1.5 pl-[18px]">
+                          <Markdown
+                            className="prose prose-sm max-w-none dark:prose-invert prose-gray"
+                            selectedProject={selectedProject}
+                            onFileOpen={onFileOpen}
+                          >
+                            {thinkingContent}
+                          </Markdown>
+                        </div>
                       )}
-                    </>
+                    </details>
                   );
                 })()}
               </div>

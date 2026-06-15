@@ -197,7 +197,7 @@ export default function ChatComposer({
   const canSubmit = !isComposerSubmitting && Boolean(trimmedInput) && isConnected;
   const piSteeringCount = piQueueState?.steering.length || 0;
   const piFollowUpCount = piQueueState?.followUp.length || 0;
-  const showPiRunningQueue = provider === 'pi' && isLoading;
+  const showPiRunningQueue = provider === 'pi' && isLoading && Boolean(activeTurnStartedAt);
   const isPiUnavailable = provider === 'pi' && Boolean(piUnavailableMessage);
   const canSendCurrentProvider = canSubmit && !isPiUnavailable;
   const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false);

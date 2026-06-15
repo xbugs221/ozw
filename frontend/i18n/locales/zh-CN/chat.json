@@ -14,7 +14,8 @@
     "tool": "工具",
     "codex": "Codex",
     "pi": "Pi",
-    "assistant": "助手"
+    "assistant": "助手",
+    "thinking": "思考"
   },
   "tools": {
     "settings": "工具设置",
