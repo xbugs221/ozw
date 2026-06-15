@@ -7,6 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -18,7 +19,7 @@ let homeIsolationQueue = Promise.resolve();
 /**
  * Execute each test under an isolated HOME directory and auth database path.
  */
-async function withTemporaryAuthHome(testBody) {
+async function withTemporaryAuthHome(testBody, options = {}) {
   const run = async () => {
     const originalHome = process.env.HOME;
     const originalDatabasePath = process.env.DATABASE_PATH;
@@ -28,7 +29,11 @@ async function withTemporaryAuthHome(testBody) {
 
     process.env.HOME = tempHome;
     process.env.DATABASE_PATH = tempDatabasePath;
-    process.env.CBW_TRUST_LOCALHOST_AUTH = 'true';
+    if (Object.prototype.hasOwnProperty.call(options, 'trustLocalhostAuth')) {
+      process.env.CBW_TRUST_LOCALHOST_AUTH = String(options.trustLocalhostAuth);
+    } else {
+      delete process.env.CBW_TRUST_LOCALHOST_AUTH;
+    }
 
     try {
       await initializeTemporaryDatabase(tempDatabasePath);
@@ -123,7 +128,7 @@ function createSingleUser(userDb) {
   userDb.createUser('local-owner', 'not-used-for-bypass');
 }
 
-test('localhost direct access bypasses login but public hostnames still require credentials', async () => {
+test('localhost direct access bypasses login by default but public hostnames still require credentials', async () => {
   await withTemporaryAuthHome(async () => {
     const { authenticateToken, authRoutes, userDb } = await loadAuthModules();
     createSingleUser(userDb);
@@ -177,4 +182,72 @@ test('localhost direct access bypasses login but public hostnames still require 
       server.close();
     }
   });
+});
+
+test('localhost direct access can be disabled explicitly', async () => {
+  const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-auth-localhost-disabled-test-'));
+  const tempDatabasePath = path.join(tempHome, '.ozw', 'auth.db');
+  await initializeTemporaryDatabase(tempDatabasePath);
+
+  try {
+    const script = `
+      import assert from 'node:assert/strict';
+      import { once } from 'node:events';
+      import express from 'express';
+      import authRoutes from './backend/routes/auth.ts';
+      import { authenticateToken } from './backend/middleware/auth.ts';
+      import { userDb } from './backend/database/db.ts';
+
+      (async () => {
+        userDb.createUser('local-owner', 'not-used-for-bypass');
+        const app = express();
+        app.use(express.json());
+        app.use('/api/auth', authRoutes);
+        app.get('/api/protected', authenticateToken, (req, res) => {
+          res.json({ username: req.user.username });
+        });
+        const server = app.listen(0, '127.0.0.1');
+        await once(server, 'listening');
+        try {
+          const address = server.address();
+          const baseUrl = 'http://127.0.0.1:' + address.port;
+          const localhostHost = new URL(baseUrl).host.replace('127.0.0.1', 'localhost');
+          const status = await fetch(baseUrl + '/api/auth/status', { headers: { Host: localhostHost } });
+          assert.equal(status.status, 200);
+          assert.deepEqual(await status.json(), {
+            needsSetup: false,
+            isAuthenticated: false,
+            authBypass: false,
+            user: null,
+          });
+          const protectedResponse = await fetch(baseUrl + '/api/protected', { headers: { Host: localhostHost } });
+          assert.equal(protectedResponse.status, 401);
+        } finally {
+          server.close();
+        }
+      })().catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+    `;
+    const result = spawnSync('pnpm', ['exec', 'tsx', '--eval', script], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        HOME: tempHome,
+        DATABASE_PATH: tempDatabasePath,
+        CBW_TRUST_LOCALHOST_AUTH: 'false',
+        JWT_SECRET: process.env.JWT_SECRET || 'localhost-disabled-test-secret',
+      },
+      encoding: 'utf8',
+    });
+
+    assert.equal(
+      result.status,
+      0,
+      `explicit false localhost auth check failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+  } finally {
+    await fs.rm(tempHome, { recursive: true, force: true });
+  }
 });
