@@ -20,6 +20,8 @@ const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results', 'project-list-s
 const CONTRACT_SESSION_ID = 'spec-project-summary-codex-session';
 const CONTRACT_SESSION_TITLE = '首页轻量化合同-Codex会话';
 const CONTRACT_WORKFLOW_CHANGE = '首页轻量化合同工作流';
+const LIVE_REFRESH_RUN_ID = 'run-project-summary-live-refresh';
+const LIVE_REFRESH_WORKFLOW_CHANGE = '首页轻量化停留刷新工作流';
 
 /**
  * Return the isolated Playwright HOME that owns provider JSONL history.
@@ -87,15 +89,28 @@ async function writeWorkflowFixture() {
    * while the default project summary proves it no longer embeds that data.
    */
   await fs.rm(resolveFlowRunsRoot(PRIMARY_FIXTURE_PROJECT_PATH), { recursive: true, force: true });
-  const statePath = resolveFlowRunStatePath(PRIMARY_FIXTURE_PROJECT_PATH, 'run-project-summary-api');
+  await writeWorkflowState('run-project-summary-api', CONTRACT_WORKFLOW_CHANGE, 'running', 'execution', '2026-06-11T08:05:00.000Z');
+}
+
+/**
+ * Persist the workflow runner state used by overview and live refresh tests.
+ */
+async function writeWorkflowState(runId: string, changeName: string, status: string, stage: string, updatedAt: string) {
+  /**
+   * PURPOSE: Update the same real oz flow state file a Go runner watcher reads
+   * so browser tests exercise the production refresh contract.
+   */
+  const statePath = resolveFlowRunStatePath(PRIMARY_FIXTURE_PROJECT_PATH, runId);
   await fs.mkdir(path.dirname(statePath), { recursive: true });
   await fs.writeFile(statePath, `${JSON.stringify({
-    run_id: 'run-project-summary-api',
-    change_name: CONTRACT_WORKFLOW_CHANGE,
-    status: 'running',
-    stage: 'execution',
-    updated_at: '2026-06-11T08:05:00.000Z',
-    stages: { execution: 'running' },
+    run_id: runId,
+    change_name: changeName,
+    status,
+    stage,
+    updated_at: updatedAt,
+    stages: stage === 'done'
+      ? { execution: 'completed', review_1: 'completed', qa_1: 'completed', archive: 'completed' }
+      : { execution: 'running' },
     sessions: {},
     paths: {},
     error: '',
@@ -228,11 +243,52 @@ test('单项目 overview 按需返回最近会话和 workflow 概览', async ({ 
   expect(Array.isArray(overview.json?.codexSessions), 'overview 必须按需返回 Codex 最近会话').toBe(true);
   expect(Array.isArray(overview.json?.workflows), 'overview 必须按需返回 workflow 概览').toBe(true);
   expect(
-    overview.json.codexSessions.some((session) => String(session.summary || session.title || '').includes(CONTRACT_SESSION_TITLE)),
-    'overview 必须包含写入的真实 Codex 合同会话',
+    overview.json.codexSessions.some((session) => session.id === CONTRACT_SESSION_ID),
+    'overview 必须包含写入的真实 Codex 合同会话记录',
   ).toBe(true);
   expect(
     overview.json.workflows.some((workflow) => String(workflow.title || workflow.objective || '').includes(CONTRACT_WORKFLOW_CHANGE)),
     'overview 必须包含写入的真实 wo 合同工作流',
   ).toBe(true);
+});
+
+test('workflow 详情停留时响应 runner state 文件变化', async ({ page }) => {
+  await writeWorkflowState(
+    LIVE_REFRESH_RUN_ID,
+    LIVE_REFRESH_WORKFLOW_CHANGE,
+    'running',
+    'execution',
+    '2026-06-11T08:05:00.000Z',
+  );
+
+  const projectList = await fetchJson(page.request, '/api/projects');
+  expect(projectList.response.ok()).toBe(true);
+  const project = projectList.json.find((entry) => entry.fullPath === PRIMARY_FIXTURE_PROJECT_PATH || entry.path === PRIMARY_FIXTURE_PROJECT_PATH);
+  expect(project, '需要先从轻量项目清单中获得项目路由').toBeTruthy();
+
+  const routePrefix = project.routePath || project.fullPath || project.path;
+  await page.goto(`${routePrefix}/runs/${LIVE_REFRESH_RUN_ID}`, { waitUntil: 'networkidle' });
+  await expect(page.getByText(`Go runner: ${LIVE_REFRESH_RUN_ID}`)).toBeVisible();
+  await expect(page.getByText('状态: running')).toBeVisible();
+
+  await page.screenshot({
+    path: path.join(EVIDENCE_DIR, 'workflow-detail-before-refresh.png'),
+    fullPage: true,
+  });
+
+  await page.waitForTimeout(1200);
+  await writeWorkflowState(
+    LIVE_REFRESH_RUN_ID,
+    LIVE_REFRESH_WORKFLOW_CHANGE,
+    'done',
+    'done',
+    '2026-06-11T08:06:00.000Z',
+  );
+
+  await expect(page.getByText('状态: completed')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('阶段: done')).toBeVisible();
+  await page.screenshot({
+    path: path.join(EVIDENCE_DIR, 'workflow-detail-after-refresh.png'),
+    fullPage: true,
+  });
 });

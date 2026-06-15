@@ -1317,7 +1317,7 @@ export default function WorkflowDetailView({
     setFreshWorkflow((current) => (
       current?.identityKey === identityKey ? current : null
     ));
-    api.projectWorkflow(project.name, workflow.id)
+    api.projectWorkflow(project.name, workflow.id, project.fullPath || project.path || '')
       .then(async (response) => {
         if (!response.ok || cancelled) {
           return;

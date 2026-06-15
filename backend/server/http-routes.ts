@@ -1156,6 +1156,10 @@ app.get('/api/projects/:projectName/overview', authenticateToken, async (req, re
             return res.status(404).json({ error: 'Project not found' });
         }
         res.json(overview);
+
+        void ensureGoRunnerWatchersForProjects([overview], watchGoWorkflowRun).catch((error: any) => {
+            console.warn('[projects:overview] Background watcher registration failed:', error?.message || error);
+        });
     } catch (error: any) {
         res.status(error.statusCode || 500).json({ error: error.message });
     }
@@ -1189,11 +1193,23 @@ app.get('/api/projects/:projectName/workflows', authenticateToken, async (req, r
 /**
  * Resolve a project-scoped workflow request to an existing project directory.
  */
-async function resolveExistingWorkflowProjectPath(projectName: string) {
+async function resolveExistingWorkflowProjectPath(projectName: string, requestedProjectPath = '') {
     /**
      * PURPOSE: Support both reversible legacy project names and live-only
      * project route identifiers whose synthetic names cannot be decoded.
      */
+    const normalizedRequestedPath = typeof requestedProjectPath === 'string' ? requestedProjectPath.trim() : '';
+    if (normalizedRequestedPath) {
+        try {
+            const stat = await fsPromises.stat(normalizedRequestedPath);
+            if (stat.isDirectory()) {
+                return normalizedRequestedPath;
+            }
+        } catch {
+            // Fall through to legacy name resolution and project-list lookup.
+        }
+    }
+
     const extractedPath = await extractProjectDirectory(projectName);
     try {
         const stat = await fsPromises.stat(extractedPath);
@@ -1275,7 +1291,10 @@ app.get('/api/projects/:projectName/workflows/:workflowId', authenticateToken, a
         const workflow = await heavyReadCoalescer.run(
             `projects:workflow:${req.params.projectName}:${req.params.workflowId}`,
             async () => {
-                const projectPath = await resolveExistingWorkflowProjectPath(String(req.params.projectName));
+                const projectPath = await resolveExistingWorkflowProjectPath(
+                    String(req.params.projectName),
+                    typeof req.query?.projectPath === 'string' ? req.query.projectPath : '',
+                );
                 if (!projectPath) {
                     return { missingProject: true };
                 }

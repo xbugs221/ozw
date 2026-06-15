@@ -801,12 +801,14 @@ export function useProjectsState({
         }
         return mergeProjectOverview(currentProject, overview);
       });
+      return overview;
     } catch (error) {
       if (isInterruptedFetch(error)) {
         console.warn('Project overview fetch was interrupted:', error);
       } else {
         console.error('Error fetching project overview:', error);
       }
+      return null;
     } finally {
       if (projectOverviewRequestKeyRef.current === projectKey) {
         projectOverviewRequestKeyRef.current = null;
@@ -1445,8 +1447,10 @@ export function useProjectsState({
 
       if (!selectedSession) {
         if (selectedWorkflow) {
+          const overview = await fetchProjectOverview(refreshedProject);
+          const workflowSource = overview || refreshedProject;
           const refreshedWorkflow =
-            refreshedProject.workflows?.find((workflow) => workflow.id === selectedWorkflow.id) || null;
+            workflowSource.workflows?.find((workflow) => workflow.id === selectedWorkflow.id) || null;
 
           if (serialize(refreshedWorkflow) !== serialize(selectedWorkflow)) {
             setSelectedWorkflow(refreshedWorkflow);
@@ -1478,7 +1482,7 @@ export function useProjectsState({
         console.error('Error refreshing sidebar:', error);
       }
     }
-  }, [projects, requestCoordinatedProjectRefresh, selectedProject, selectedSession, selectedWorkflow]);
+  }, [fetchProjectOverview, projects, requestCoordinatedProjectRefresh, selectedProject, selectedSession, selectedWorkflow]);
 
   handleSidebarRefreshRef.current = handleSidebarRefresh;
 

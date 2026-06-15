@@ -112,8 +112,10 @@ export const api = {
   },
   projectWorkflows: (projectName: string): Promise<Response> =>
     authenticatedFetch(`${projectApiPath(projectName)}/workflows`),
-  projectWorkflow: (projectName: string, workflowId: string): Promise<Response> =>
-    authenticatedFetch(`${projectApiPath(projectName)}/workflows/${encodeRouteSegment(workflowId)}`),
+  projectWorkflow: (projectName: string, workflowId: string, projectPath?: string): Promise<Response> => {
+    const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
+    return authenticatedFetch(`${projectApiPath(projectName)}/workflows/${encodeRouteSegment(workflowId)}${query}`);
+  },
   projectOpenSpecChanges: (projectName: string, projectPath?: string): Promise<Response> => {
     const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
     return authenticatedFetch(`${projectApiPath(projectName)}/openspec/changes${query}`);
