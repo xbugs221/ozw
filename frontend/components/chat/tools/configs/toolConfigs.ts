@@ -520,67 +520,45 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
 
   Grep: {
     input: {
-      type: 'one-line',
-      label: 'Grep',
-      getValue: (input) => input.pattern,
-      getSecondary: (input) => input.path ? `in ${input.path}` : undefined,
-      action: 'jump-to-results',
-      colorScheme: {
-        primary: 'text-gray-700 dark:text-gray-300',
-        secondary: 'text-gray-500 dark:text-gray-400',
-        background: '',
-        border: 'border-gray-400 dark:border-gray-500',
-        icon: 'text-gray-500 dark:text-gray-400'
-      }
+      type: 'collapsible',
+      title: (input) => {
+        const p = input.pattern || '';
+        const dir = input.path || '';
+        return dir ? `${p} in ${dir}` : p || 'search';
+      },
+      displayToolName: 'Grep',
+      defaultOpen: false,
+      wrapTitle: true,
+      contentType: 'file-list',
+      getContentProps: (input, helpers) => {
+        const toolData = helpers?.toolResult?.toolUseResult || {};
+        return { files: toolData.filenames || [] };
+      },
     },
     result: {
-      type: 'collapsible',
-      defaultOpen: false,
-      title: (result) => {
-        const toolData = result.toolUseResult || {};
-        const count = toolData.numFiles || toolData.filenames?.length || 0;
-        return `Found ${count} ${count === 1 ? 'file' : 'files'}`;
-      },
-      contentType: 'file-list',
-      getContentProps: (result) => {
-        const toolData = result.toolUseResult || {};
-        return {
-          files: toolData.filenames || []
-        };
-      }
+      hidden: true
     }
   },
 
   Glob: {
     input: {
-      type: 'one-line',
-      label: 'Glob',
-      getValue: (input) => input.pattern,
-      getSecondary: (input) => input.path ? `in ${input.path}` : undefined,
-      action: 'jump-to-results',
-      colorScheme: {
-        primary: 'text-gray-700 dark:text-gray-300',
-        secondary: 'text-gray-500 dark:text-gray-400',
-        background: '',
-        border: 'border-gray-400 dark:border-gray-500',
-        icon: 'text-gray-500 dark:text-gray-400'
-      }
+      type: 'collapsible',
+      title: (input) => {
+        const p = input.pattern || '';
+        const dir = input.path || '';
+        return dir ? `${p} in ${dir}` : p || 'glob';
+      },
+      displayToolName: 'Glob',
+      defaultOpen: false,
+      wrapTitle: true,
+      contentType: 'file-list',
+      getContentProps: (input, helpers) => {
+        const toolData = helpers?.toolResult?.toolUseResult || {};
+        return { files: toolData.filenames || [] };
+      },
     },
     result: {
-      type: 'collapsible',
-      defaultOpen: false,
-      title: (result) => {
-        const toolData = result.toolUseResult || {};
-        const count = toolData.numFiles || toolData.filenames?.length || 0;
-        return `Found ${count} ${count === 1 ? 'file' : 'files'}`;
-      },
-      contentType: 'file-list',
-      getContentProps: (result) => {
-        const toolData = result.toolUseResult || {};
-        return {
-          files: toolData.filenames || []
-        };
-      }
+      hidden: true
     }
   },
 
@@ -592,6 +570,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     input: {
       type: 'collapsible',
       title: 'Updating todo list',
+      displayToolName: 'Todo',
       defaultOpen: false,
       contentType: 'todo-list',
       getContentProps: (input) => ({
@@ -599,9 +578,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       })
     },
     result: {
-      type: 'collapsible',
-      contentType: 'success-message',
-      getMessage: () => 'Todo list updated'
+      hidden: true
     }
   },
 
@@ -640,88 +617,81 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
 
   TaskCreate: {
     input: {
-      type: 'one-line',
-      label: 'Task',
-      getValue: (input) => input.subject || 'Creating task',
-      getSecondary: (input) => input.status || undefined,
-      action: 'none',
-      colorScheme: {
-        primary: 'text-gray-700 dark:text-gray-300',
-        border: 'border-violet-400 dark:border-violet-500',
-        icon: 'text-violet-500 dark:text-violet-400'
-      }
+      type: 'collapsible',
+      title: (input) => input.subject || 'Creating task',
+      displayToolName: 'Task',
+      defaultOpen: false,
+      wrapTitle: true,
+      contentType: 'text',
+      getContentProps: (input) => {
+        const parts = [];
+        if (input.subject) parts.push(`**Subject:** ${input.subject}`);
+        if (input.description) parts.push(`**Description:** ${input.description}`);
+        if (input.status) parts.push(`**Status:** ${input.status}`);
+        return { content: parts.join('\n\n') || 'Creating task', format: 'markdown' };
+      },
     },
     result: {
-      hideOnSuccess: true
+      hidden: true
     }
   },
 
   TaskUpdate: {
     input: {
-      type: 'one-line',
-      label: 'Task',
-      getValue: (input) => {
+      type: 'collapsible',
+      title: (input) => {
         const parts = [];
         if (input.taskId) parts.push(`#${input.taskId}`);
         if (input.status) parts.push(input.status);
         if (input.subject) parts.push(`"${input.subject}"`);
         return parts.join(' → ') || 'updating';
       },
-      action: 'none',
-      colorScheme: {
-        primary: 'text-gray-700 dark:text-gray-300',
-        border: 'border-violet-400 dark:border-violet-500',
-        icon: 'text-violet-500 dark:text-violet-400'
-      }
+      displayToolName: 'Task',
+      defaultOpen: false,
+      wrapTitle: true,
+      contentType: 'text',
+      getContentProps: (input) => {
+        const parts = [];
+        if (input.subject) parts.push(`**Subject:** ${input.subject}`);
+        if (input.description) parts.push(`**Description:** ${input.description}`);
+        if (input.status) parts.push(`**Status:** ${input.status}`);
+        return { content: parts.join('\n\n') || 'updating', format: 'markdown' };
+      },
     },
     result: {
-      hideOnSuccess: true
+      hidden: true
     }
   },
 
   TaskList: {
     input: {
-      type: 'one-line',
-      label: 'Tasks',
-      getValue: () => 'listing tasks',
-      action: 'none',
-      colorScheme: {
-        primary: 'text-gray-500 dark:text-gray-400',
-        border: 'border-violet-400 dark:border-violet-500',
-        icon: 'text-violet-500 dark:text-violet-400'
-      }
+      type: 'collapsible',
+      title: 'Task list',
+      displayToolName: 'Tasks',
+      defaultOpen: false,
+      contentType: 'task',
+      getContentProps: (input, helpers) => ({
+        content: String(helpers?.toolResult?.content || '')
+      }),
     },
     result: {
-      type: 'collapsible',
-      defaultOpen: false,
-      title: 'Task list',
-      contentType: 'task',
-      getContentProps: (result) => ({
-        content: String(result?.content || '')
-      })
+      hidden: true
     }
   },
 
   TaskGet: {
     input: {
-      type: 'one-line',
-      label: 'Task',
-      getValue: (input) => input.taskId ? `#${input.taskId}` : 'fetching',
-      action: 'none',
-      colorScheme: {
-        primary: 'text-gray-700 dark:text-gray-300',
-        border: 'border-violet-400 dark:border-violet-500',
-        icon: 'text-violet-500 dark:text-violet-400'
-      }
+      type: 'collapsible',
+      title: (input) => input.taskId ? `Task #${input.taskId}` : 'Task details',
+      displayToolName: 'Task',
+      defaultOpen: false,
+      contentType: 'task',
+      getContentProps: (input, helpers) => ({
+        content: String(helpers?.toolResult?.content || '')
+      }),
     },
     result: {
-      type: 'collapsible',
-      defaultOpen: false,
-      title: 'Task details',
-      contentType: 'task',
-      getContentProps: (result) => ({
-        content: String(result?.content || '')
-      })
+      hidden: true
     }
   },
 
@@ -1172,18 +1142,17 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       title: 'Parameters',
       defaultOpen: false,
       contentType: 'text',
-      getContentProps: (input) => ({
-        content: typeof input === 'string' ? input : JSON.stringify(input, null, 2),
-        format: 'code'
-      })
+      getContentProps: (input, helpers) => {
+        const inputStr = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
+        const resultContent = String(helpers?.toolResult?.content || '').trim();
+        const combined = resultContent
+          ? `${inputStr}\n\n---\n${resultContent}`
+          : inputStr;
+        return { content: combined, format: 'code' };
+      }
     },
     result: {
-      type: 'collapsible',
-      contentType: 'text',
-      getContentProps: (result) => ({
-        content: String(result?.content || ''),
-        format: 'plain'
-      })
+      hidden: true
     }
   }
 };
