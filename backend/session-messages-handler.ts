@@ -2,9 +2,14 @@
  * Session messages HTTP handler — extracted from backend/index.ts so both the
  * Express route and integration tests call the same implementation.
  */
-import { extractProjectDirectory, getManualSessionRouteRuntime, getCodexSessions, getPiSessions, getCodexSessionMessages, getPiSessionMessages } from './projects.js';
-import { getNativeSessionLiveTranscript, getPiSessionCompletedSnapshot, clearPiSessionSnapshot } from './native-agent-runtime.js';
-import { clearActiveTurnOverlay, getActiveTurnOverlay } from './active-turn-overlay.js';
+import { extractProjectDirectory, getCodexSessions, getPiSessions, getCodexSessionMessages, getPiSessionMessages } from './projects.js';
+import { getProviderActiveTurnOverlay, clearProviderActiveTurnOverlay } from './domains/provider-runtime/active-turn-store.js';
+import { resolveProviderSessionBinding } from './domains/provider-runtime/provider-session-binding.js';
+import {
+  clearProviderLiveTranscriptSnapshot,
+  getProviderCompletedTranscriptSnapshot,
+  getProviderLiveTranscriptSnapshot,
+} from './domains/provider-runtime/live-transcript-store.js';
 
 type MessageRecord = Record<string, any>;
 type ProviderName = "codex" | "pi";
@@ -86,7 +91,7 @@ export function mergeHistoryWithActiveTurnOverlay(historyMessages: MessageRecord
   }
   const composed = mergeAndDedupMessagesWithCoverage(historyMessages, liveMessages);
   if (activeTurnOverlay?.status === 'completing' && composed.uncoveredCount === 0) {
-    clearActiveTurnOverlay(
+    clearProviderActiveTurnOverlay(
       activeTurnOverlay.provider || '',
       activeTurnOverlay.sessionId || '',
       activeTurnOverlay.projectPath || '',
@@ -330,11 +335,12 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
             projectPath = typeof queryProjectPath === 'string' && queryProjectPath.trim()
                 ? queryProjectPath.trim()
                 : await extractProjectDirectory(projectName);
-            const runtimeContext = await getManualSessionRouteRuntime(
+            const runtimeContext = await resolveProviderSessionBinding({
                 projectName,
                 projectPath,
-                sessionId,
-            );
+                routeSessionId: sessionId,
+                provider: resolvedProvider,
+            });
 
             const cNProvider: ProviderName = runtimeContext?.provider === 'pi'
                 ? 'pi'
@@ -346,7 +352,7 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
             // transcript snapshot so completed turns (from disk) and the
             // current running turn (from snapshot) are both visible after a
             // page refresh or follow-latest refresh.
-            const liveSnapshot = getNativeSessionLiveTranscript(cNProvider, sessionId, projectPath);
+            const liveSnapshot = getProviderLiveTranscriptSnapshot(cNProvider, sessionId, projectPath);
             if (liveSnapshot !== null && liveSnapshot.length > 0) {
                 const providerSessionIdForMerge = runtimeContext?.providerSessionId || '';
                 if (providerSessionIdForMerge) {
@@ -357,10 +363,10 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
                         const jsonlMessages = (jsonlResult && typeof jsonlResult === 'object') ? (jsonlResult.messages || []) : [];
                         if (jsonlMessages.length > 0) {
                             if (cNProvider === 'pi') {
-                                clearPiSessionSnapshot(sessionId, projectPath);
+                                clearProviderLiveTranscriptSnapshot(sessionId, projectPath);
                             }
                             const runtimeMerged = mergeAndDedupMessages(jsonlMessages, liveSnapshot);
-                            const activeOverlay = getActiveTurnOverlay(cNProvider, sessionId, projectPath);
+                            const activeOverlay = getProviderActiveTurnOverlay(cNProvider, sessionId, projectPath);
                             const merged = mergeHistoryWithActiveTurnOverlay(runtimeMerged, activeOverlay);
                             return res.json({ messages: merged, total: merged.length, hasMore: false, source: activeOverlay ? 'history+active-turn-overlay' : 'merged-jsonl+live' });
                         }
@@ -368,7 +374,7 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
                         // JSONL not available yet — fall back to live snapshot alone.
                     }
                 }
-                const activeOverlay = getActiveTurnOverlay(cNProvider, sessionId, projectPath);
+                const activeOverlay = getProviderActiveTurnOverlay(cNProvider, sessionId, projectPath);
                 const liveMessages = activeOverlay
                     ? mergeHistoryWithActiveTurnOverlay(liveSnapshot.map(normalizeLiveMessageToJsonlShape), activeOverlay)
                     : liveSnapshot.map(normalizeLiveMessageToJsonlShape);
@@ -379,7 +385,7 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
             if (!providerSessionId) {
                 // For completed Pi sessions without a providerSessionId yet, try the
                 // snapshot bridge — the JSONL may not be flushed before pi-complete.
-                const snapshot = getPiSessionCompletedSnapshot(sessionId, projectPath);
+                const snapshot = getProviderCompletedTranscriptSnapshot(sessionId, projectPath);
                 if (snapshot && snapshot.length > 0) {
                     return res.json({ messages: snapshot.map(normalizeLiveMessageToJsonlShape), total: snapshot.length, hasMore: false, source: 'live-snapshot-bridge' });
                 }
@@ -395,17 +401,17 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
             if (cNProvider === 'pi' && nativeResult && typeof nativeResult === 'object') {
                 const messages = nativeResult.messages;
                 if (Array.isArray(messages) && messages.length > 0) {
-                    clearPiSessionSnapshot(sessionId, projectPath);
+                    clearProviderLiveTranscriptSnapshot(sessionId, projectPath);
                 } else {
                     // JSONL is not yet ready — fall back to the snapshot bridge.
-                    const snapshot = getPiSessionCompletedSnapshot(sessionId, projectPath);
+                    const snapshot = getProviderCompletedTranscriptSnapshot(sessionId, projectPath);
                     if (snapshot && snapshot.length > 0) {
                         return res.json({ messages: snapshot.map(normalizeLiveMessageToJsonlShape), total: snapshot.length, hasMore: false, source: 'live-snapshot-bridge' });
                     }
                 }
             }
 
-            const activeOverlay = getActiveTurnOverlay(cNProvider, sessionId, projectPath);
+            const activeOverlay = getProviderActiveTurnOverlay(cNProvider, sessionId, projectPath);
             if (activeOverlay) {
                 const nativeMessages = nativeResult && typeof nativeResult === 'object'
                     ? (Array.isArray(nativeResult.messages) ? nativeResult.messages : [])

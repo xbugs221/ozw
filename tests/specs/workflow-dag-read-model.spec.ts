@@ -1,4 +1,4 @@
-// Sources: 90-适配oz flow合入oz后的DAG工作流审查页, 93-对齐oz flow状态栏新格式, 99-重设计oz flow工作流卡片移除DAG审查
+// Sources: 17-Workflow读模型Schema化, 90-适配oz flow合入oz后的DAG工作流审查页, 93-对齐oz flow状态栏新格式, 99-重设计oz flow工作流卡片移除DAG审查
 // @ts-nocheck -- 创建阶段契约测试：执行阶段负责把 workflowDag 类型收紧。
 /**
  * PURPOSE: Verify ozw converts oz flow graph JSON into an inspectable workflow DAG
@@ -16,6 +16,46 @@ import { resolveFlowRunsRoot } from '../../backend/domains/workflows/flow-runtim
 
 const CHANGE_NAME = '90-DAG审查页fixture';
 const RUN_ID = 'run-dag-review-contract';
+const WORKFLOW_BOUNDARY_EVIDENCE_DIR = path.join(process.cwd(), 'test-results', '10-workflow-boundary');
+const WORKFLOW_SCHEMA_EVIDENCE_DIR = path.join(process.cwd(), 'test-results', '17-workflow-read-model-schema');
+
+/**
+ * 判断仓库相对路径是否存在。
+ */
+async function repoPathExists(relativePath) {
+  try {
+    await fs.access(path.join(process.cwd(), relativePath));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 读取仓库源码文件。
+ */
+async function readRepoSource(relativePath) {
+  return fs.readFile(path.join(process.cwd(), relativePath), 'utf8');
+}
+
+/**
+ * 统计 read model 源码里的宽泛 any 使用。
+ */
+function countAnyRecords(source) {
+  return (source.match(/Record<string,\s*any>|\bany\b/g) || []).length;
+}
+
+/**
+ * 写入 workflow schema 源码审计证据。
+ */
+async function writeWorkflowSchemaAudit(snapshot) {
+  await fs.mkdir(WORKFLOW_SCHEMA_EVIDENCE_DIR, { recursive: true });
+  await fs.writeFile(
+    path.join(WORKFLOW_SCHEMA_EVIDENCE_DIR, 'source-audit.json'),
+    `${JSON.stringify(snapshot, null, 2)}\n`,
+    'utf8',
+  );
+}
 
 /**
  * Run a callback inside an isolated project, state root, and fake oz flow CLI.
@@ -323,6 +363,23 @@ test('oz flow graph JSON becomes workflowDag with session and artifact review ta
     await fs.mkdir(resultDir, { recursive: true });
     const snapshotPath = path.join(resultDir, 'read-model-snapshot.json');
     await fs.writeFile(snapshotPath, `${JSON.stringify(workflow.workflowDag, null, 2)}\n`, 'utf8');
+
+    await fs.mkdir(WORKFLOW_BOUNDARY_EVIDENCE_DIR, { recursive: true });
+    await fs.writeFile(
+      path.join(WORKFLOW_BOUNDARY_EVIDENCE_DIR, 'readmodel.json'),
+      `${JSON.stringify({
+        id: workflow.id,
+        title: workflow.title,
+        stage: workflow.stage,
+        runState: workflow.runState,
+        dagSource: workflow.workflowDag?.source,
+        nodeCount: workflow.workflowDag?.nodes.length || 0,
+        artifactCount: workflow.workflowDag?.artifacts.length || 0,
+        childSessionCount: workflow.childSessions.length,
+        stageInspectionCount: workflow.stageInspections.length,
+      }, null, 2)}\n`,
+      'utf8',
+    );
   });
 });
 
@@ -1126,6 +1183,22 @@ test('runner process with unsupported explicit provider is not downgraded to cod
       workflow.runnerDiagnostics.warnings.some((warning) => warning.includes('Unsupported runner process provider claude')),
       'read model must warn when an explicit process provider is unsupported',
     );
+
+    await fs.mkdir(WORKFLOW_BOUNDARY_EVIDENCE_DIR, { recursive: true });
+    await fs.writeFile(
+      path.join(WORKFLOW_BOUNDARY_EVIDENCE_DIR, 'process-snapshot.json'),
+      `${JSON.stringify({
+        runnerProcesses: workflow.runnerProcesses,
+        childSessions: workflow.childSessions.map((session) => ({
+          id: session.id,
+          provider: session.provider,
+          stageKey: session.stageKey,
+          routePath: session.routePath,
+        })),
+        diagnostics: workflow.runnerDiagnostics,
+      }, null, 2)}\n`,
+      'utf8',
+    );
   });
 });
 
@@ -1556,4 +1629,44 @@ test('workflow stage inspections absorb graph-only DAG review targets', async ()
       'graph-only artifact target must keep an openable path',
     );
   });
+});
+
+test('workflow read model uses schema boundaries before consuming external JSON', async () => {
+  const stateSchemaPath = 'backend/domains/workflows/read-model/workflow-state-schema.ts';
+  const graphSchemaPath = 'backend/domains/workflows/read-model/workflow-graph-schema.ts';
+  const statusSummary = await readRepoSource('backend/domains/workflows/read-model/status-summary.ts');
+  const dagReadModel = await readRepoSource('backend/domains/workflows/read-model/dag-read-model.ts');
+  const snapshot = {
+    hasStateSchema: await repoPathExists(stateSchemaPath),
+    hasGraphSchema: await repoPathExists(graphSchemaPath),
+    statusSummaryImportsSchema: /workflow-state-schema|workflow-graph-schema/.test(statusSummary),
+    dagImportsSchema: /workflow-state-schema|workflow-graph-schema/.test(dagReadModel),
+    statusSummaryAnyCount: countAnyRecords(statusSummary),
+    dagAnyCount: countAnyRecords(dagReadModel),
+  };
+
+  await writeWorkflowSchemaAudit(snapshot);
+
+  assert.equal(snapshot.hasStateSchema, true, 'workflow-state-schema.ts must exist');
+  assert.equal(snapshot.hasGraphSchema, true, 'workflow-graph-schema.ts must exist');
+  assert.equal(snapshot.statusSummaryImportsSchema, true, 'status-summary.ts must import schema normalizers');
+  assert.equal(snapshot.dagImportsSchema, true, 'dag-read-model.ts must import schema normalizers');
+  assert.ok(snapshot.statusSummaryAnyCount <= 8, `status-summary.ts any usage must stay bounded, got ${snapshot.statusSummaryAnyCount}`);
+  assert.ok(snapshot.dagAnyCount <= 8, `dag-read-model.ts any usage must stay bounded, got ${snapshot.dagAnyCount}`);
+});
+
+test('workflow schema modules export business normalizers', async () => {
+  const expectedModules = [
+    ['backend/domains/workflows/read-model/workflow-state-schema.ts', ['normalizeWorkflowState', 'WorkflowState']],
+    ['backend/domains/workflows/read-model/workflow-graph-schema.ts', ['normalizeWorkflowGraph', 'WorkflowGraph']],
+  ];
+
+  for (const [modulePath, exports] of expectedModules) {
+    assert.equal(await repoPathExists(modulePath), true, `${modulePath} must exist`);
+    const source = await readRepoSource(modulePath);
+    assert.match(source, /PURPOSE|目的|workflow|schema/i, `${modulePath} must explain its workflow schema purpose`);
+    for (const exportName of exports) {
+      assert.match(source, new RegExp(`export\\s+(function|interface|type)\\s+${exportName}\\b`), `${modulePath} must export ${exportName}`);
+    }
+  }
 });

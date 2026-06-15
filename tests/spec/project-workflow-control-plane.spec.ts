@@ -16,6 +16,8 @@ import {
 import { ensurePlaywrightFixture, PLAYWRIGHT_FIXTURE_HOME, PLAYWRIGHT_FIXTURE_PROJECT_PATHS } from '../e2e/helpers/playwright-fixture.ts';
 import { resolveFlowRunStatePath } from '../../backend/domains/workflows/flow-runtime-paths.ts';
 
+const WORKFLOW_BOUNDARY_EVIDENCE_DIR = path.join(process.cwd(), 'test-results', '10-workflow-boundary');
+
 /**
  * Write one synthetic Codex session fixture so acceptance tests can exercise
  * real project-discovery behavior with more than five visible sessions.
@@ -470,7 +472,7 @@ test.describe('项目内需求工作流控制面', () => {
 
     await expect(page.getByTestId('workflow-inspection-tree')).toHaveCount(0);
     await expect(page.getByTestId('workflow-status-tree-row-execution').getByRole('button', { name: /SUMMARY.md/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /workflow-output/ })).toBeVisible();
+    await expect(page.getByTestId('workflow-status-tree-row-execution').getByRole('button', { name: /workflow-output/ })).toBeVisible();
   });
 
   test('2030 需求工作流详情默认落在项目作用域详情路由', async ({ page }) => {
@@ -544,23 +546,30 @@ test.describe('项目内需求工作流控制面', () => {
       },
     ]);
 
-    await openFixtureProject(page, { reset: false });
-    await openFixtureManualSessionFromOverview(page);
-    await expect(page).toHaveURL(/\/workspace\/fixture-project\/c\d+$/);
+    fs.mkdirSync(WORKFLOW_BOUNDARY_EVIDENCE_DIR, { recursive: true });
+    try {
+      await openFixtureProject(page, { reset: false });
+      await openFixtureManualSessionFromOverview(page);
+      await expect(page).toHaveURL(/\/workspace\/fixture-project\/c\d+$/);
 
-    await openFixtureProject(page, { reset: false });
-    await page.getByRole('button', { name: /登录升级/ }).click();
+      await openFixtureProject(page, { reset: false });
+      await page.getByRole('button', { name: /登录升级/ }).click();
 
-    await expect(page.getByTestId('workflow-status-tree')).toBeVisible();
-    await expect(page.getByTestId('workflow-status-tree-row-execution')).toContainText('执行阶段');
-    await page.getByTestId('workflow-status-tree-row-execution').getByRole('button', { name: '执行阶段' }).click();
-    await expect(page).toHaveURL(/\/runs\/run-fixture\/sessions\/execution$/);
+      await expect(page.getByTestId('workflow-status-tree')).toBeVisible();
+      await expect(page.getByTestId('workflow-status-tree-row-execution')).toContainText('执行阶段');
+      await page.getByTestId('workflow-status-tree-row-execution').getByRole('button', { name: '执行阶段' }).click();
+      await expect(page).toHaveURL(/\/runs\/run-fixture\/sessions\/execution$/);
 
-    await page.goBack({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: '登录升级' }).last()).toBeVisible();
-    await expect(page.getByTestId('workflow-status-tree-row-review_1').getByRole('button', { name: '审核阶段' })).toBeVisible();
-    await page.getByTestId('workflow-status-tree-row-review_1').getByRole('button', { name: '审核阶段' }).click();
-    await expect(page).toHaveURL(/\/runs\/run-fixture\/sessions\/review_1$/);
+      await page.goBack({ waitUntil: 'domcontentloaded' });
+      await expect(page.getByRole('heading', { name: '登录升级' }).last()).toBeVisible();
+      await expect(page.getByTestId('workflow-status-tree-row-review_1').getByRole('button', { name: '审核阶段' })).toBeVisible();
+      await page.getByTestId('workflow-status-tree-row-review_1').getByRole('button', { name: '审核阶段' }).click();
+      await expect(page).toHaveURL(/\/runs\/run-fixture\/sessions\/review_1$/);
+    } finally {
+      await page.context().tracing.stop({
+        path: path.join(WORKFLOW_BOUNDARY_EVIDENCE_DIR, 'route-trace.zip'),
+      });
+    }
   });
 
   test('新建会话占位路由在 projectName 错误时仍优先使用 projectPath 选中项目', async ({ page }) => {

@@ -335,7 +335,8 @@ test('Node 测试入口区分快速 smoke、完整回归和发布构建', async 
 
   // 业务场景：维护者需要快速 smoke、完整 Node 回归和发布构建三个清楚入口，避免一次规格测试重复构建服务端。
   // 失败含义：入口重新混在一起会让本地验证变慢，且审阅者无法判断失败属于 smoke、完整回归还是发布构建。
-  assert.equal(scripts['build:server'], 'tsc -p tsconfig.build.json');
+  assert.match(scripts['build:server'] ?? '', /^tsc -p tsconfig\.build\.json\b/);
+  assert.match(scripts['build:server'] ?? '', /copy-build-runtime-js\.mjs/);
   assert.equal(scripts['test:server:smoke'], smokeCommand);
   assert.equal(scripts['test:server'], `tsx --test ${BACKEND_TEST_GLOB}`);
   assert.equal(scripts['test:node'], 'pnpm run test:server && pnpm run test:spec:node');

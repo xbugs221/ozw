@@ -82,7 +82,7 @@ test.describe('项目工作区导航壳层', () => {
 
     await expect(page.getByTestId('workflow-runner-processes')).toHaveCount(0);
 
-    await page.getByTestId('workflow-status-tree-row-execution').getByRole('button', { name: '执行阶段' }).click();
+    await page.getByTestId('workflow-stage-table-cell-execution-0').locator('button').first().click();
     await expect(page).toHaveURL(/\/workspace\/fixture-project\/runs\/run-fixture\/sessions\/execution$/);
   });
 

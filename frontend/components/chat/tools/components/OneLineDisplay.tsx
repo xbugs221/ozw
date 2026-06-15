@@ -139,9 +139,11 @@ export const OneLineDisplay: React.FC<OneLineDisplayProps> = ({
           <span className="text-gray-300 dark:text-gray-600 text-[10px]">/</span>
         )}
         <button
+          type="button"
           onClick={handleAction}
           className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-mono hover:underline transition-colors truncate"
           title={visibleValue}
+          aria-label={`Open ${visibleValue}`}
         >
           {visibleValue}
         </button>

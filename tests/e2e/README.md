@@ -22,3 +22,7 @@ pnpm exec playwright test tests/e2e/pi-provider-business-flow.spec.ts
 ## 新增测试
 
 新增测试应放在这里，当它需要真实浏览器页面、跨前后端通信、会话路由或持久化状态共同验证。只验证规格文字或纯 Node 合同的测试应放入 `tests/spec`；只验证后端 API 的测试应放入 `tests/backend`。
+
+## Provider 夹具边界
+
+当目标是验证完整用户流、真实 provider 进程、WebSocket 服务端和持久化结果时，测试放在 `tests/e2e` 并使用真实服务或 e2e fixture。若目标是浏览器 reducer、聊天渲染、route session 绑定或 provider 事件形状，可放在 `tests/spec` 并复用 `tests/spec/helpers/provider-runtime-harness.ts`，避免每个 browser spec 复制 FakeWebSocket。

@@ -1,0 +1,97 @@
+{
+  "summary": "活跃文档、源码和测试资产必须使用当前 Provider 口径，并完成 manual/browser-history 历史资产处置。",
+  "coverage": [
+    {
+      "spec": "需求：活跃文档不再传播旧 Provider 口径 / 场景：活跃文档使用当前 Provider 口径",
+      "tests": ["legacy-wording-boundary-contract"],
+      "evidence": ["legacy-wording-audit"],
+      "risk": "archive 目录保留历史事实，不纳入机械替换。"
+    },
+    {
+      "spec": "需求：测试资产命名与当前行为一致 / 场景：测试文件名和标题不误导维护者",
+      "tests": ["test-asset-naming-contract"],
+      "evidence": ["test-asset-audit"],
+      "risk": "否定断言中的旧字符串允许保留，但必须有说明。"
+    },
+    {
+      "spec": "需求：旧测试资产完成归类 / 场景：manual/browser-history 资产完成处置",
+      "tests": ["manual-history-asset-contract"],
+      "evidence": ["manual-history-inventory"],
+      "risk": "价值不明的资产需用户确认后再删除。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "legacy-wording-boundary-contract",
+      "source": "change_contract",
+      "path": "docs/changes/7-历史口径文档与测试资产收敛/tests/legacy-wording-assets.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/7-历史口径文档与测试资产收敛/tests/legacy-wording-assets.contract.test.ts",
+      "purpose": "证明 active docs 和生产源码不再传播旧 Provider 口径。",
+      "assertions": [
+        "active docs 不把 Codex 当前路径称为 Codex SDK",
+        "生产源码不包含 co 文件协议作为当前路径",
+        "archive 和否定断言被明确排除"
+      ],
+      "expected_initial_failure": "当前仍存在误导性测试命名或文档口径。"
+    },
+    {
+      "id": "test-asset-naming-contract",
+      "source": "change_contract",
+      "path": "docs/changes/7-历史口径文档与测试资产收敛/tests/legacy-wording-assets.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/7-历史口径文档与测试资产收敛/tests/legacy-wording-assets.contract.test.ts",
+      "purpose": "证明测试文件名、标题和 PURPOSE 反映当前行为。",
+      "assertions": [
+        "Codex app-server 测试不使用 native-sdk 文件名",
+        "测试标题不把 Codex app-server 称为 Codex SDK",
+        "否定断言中的旧依赖字符串有明确说明"
+      ],
+      "expected_initial_failure": "当前仍有 native-sdk 命名测试覆盖 app-server 行为。"
+    },
+    {
+      "id": "manual-history-asset-contract",
+      "source": "change_contract",
+      "path": "docs/changes/7-历史口径文档与测试资产收敛/tests/legacy-wording-assets.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/7-历史口径文档与测试资产收敛/tests/legacy-wording-assets.contract.test.ts",
+      "purpose": "证明 manual/browser-history 测试资产有处置清单。",
+      "assertions": [
+        "manual-history inventory 文件存在",
+        "每个 browser-history spec 有处置状态",
+        "tests README 说明 manual/browser-history 不作为默认门禁"
+      ],
+      "expected_initial_failure": "当前缺少 manual/browser-history 资产处置清单。"
+    },
+    {
+      "id": "spec-and-e2e-regression",
+      "source": "root_e2e",
+      "path": "docs/changes/7-历史口径文档与测试资产收敛/tests/legacy-wording-assets.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/7-历史口径文档与测试资产收敛/tests/legacy-wording-assets.contract.test.ts && pnpm run test:spec && pnpm run test:e2e:smoke",
+      "purpose": "证明文档和测试资产清理没有破坏当前主回归。",
+      "assertions": [
+        "spec node/browser 回归通过",
+        "e2e smoke 通过",
+        "迁移后的测试仍能执行"
+      ],
+      "expected_initial_failure": "若重命名后引用未更新，回归会失败。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "legacy-wording-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/legacy-wording/source-audit.json",
+      "purpose": "保存旧口径搜索与允许项分类；该文件不进入 git。"
+    },
+    {
+      "id": "test-asset-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/legacy-wording/test-asset-audit.json",
+      "purpose": "保存测试文件名、标题和 PURPOSE 审计结果；该文件不进入 git。"
+    },
+    {
+      "id": "manual-history-inventory",
+      "kind": "state_snapshot",
+      "path": "test-results/legacy-wording/manual-history-inventory.json",
+      "purpose": "保存 manual/browser-history 处置清单运行结果；该文件不进入 git。"
+    }
+  ]
+}

@@ -9,33 +9,29 @@ import { resolveFlowRunsRoot } from '../flow-runtime-paths.js';
 import { acceptedProviderFromSessionKey } from './session-refs.js';
 import { mapStageStatus } from './stage-taxonomy.js';
 
-type DagTarget = Record<string, any>;
-type DagNode = Record<string, any>;
+import { normalizeWorkflowGraphWithWarnings, type WorkflowGraphArtifact, type WorkflowGraphNode, type WorkflowGraphReviewTarget } from './workflow-graph-schema.js';
+import { pick, type WorkflowArtifactRef, type WorkflowJsonRecord, type WorkflowSessionRef, type WorkflowStageStatus, type WorkflowState } from './workflow-state-schema.js';
+
+type DagTarget = WorkflowGraphReviewTarget;
+type DagNode = WorkflowGraphNode;
 type CommandResult = {
   ok: boolean;
   error: string;
-  data: any;
+  data: unknown;
 };
 
 type BuildWorkflowDagArgs = {
   projectPath: string;
   runDirName: string;
-  state: Record<string, any>;
+  state: WorkflowState;
   changeName: string;
-  childSessions: Array<Record<string, any>>;
-  artifacts: Array<Record<string, any>>;
-  stageStatuses: Array<Record<string, any>>;
+  childSessions: WorkflowSessionRef[];
+  artifacts: WorkflowArtifactRef[];
+  stageStatuses: WorkflowStageStatus[];
   warnings: string[];
 };
 
 const execFileAsync = promisify(execFile);
-
-/**
- * Return a snake_case runner field value.
- */
-function pick(object: Record<string, any> | null | undefined, snakeKey: string): any {
-  return object?.[snakeKey];
-}
 
 /**
  * Convert unknown errors into stable diagnostic text.
@@ -59,7 +55,7 @@ async function pathExists(projectPath: string, relativePath: string): Promise<bo
 /**
  * Resolve a session provider by scanning state.sessions.
  */
-function resolveSessionProviderFromState(sessionId: unknown, sessions: Record<string, any>): string {
+function resolveSessionProviderFromState(sessionId: unknown, sessions: WorkflowJsonRecord): string {
   if (!sessionId) return 'codex';
   for (const [key, value] of Object.entries(sessions || {})) {
     if (String(value).trim() === String(sessionId).trim()) {
@@ -75,7 +71,7 @@ function resolveSessionProviderFromState(sessionId: unknown, sessions: Record<st
 /**
  * Group review targets from DAG nodes by their owning workflow stage.
  */
-export function collectDagTargetsByStage(workflowDag: Record<string, any> | null | undefined): Map<string, {
+export function collectDagTargetsByStage(workflowDag: WorkflowJsonRecord | null | undefined): Map<string, {
   sessions: Array<{ target: DagTarget; node: DagNode }>;
   artifacts: Array<{ target: DagTarget; node: DagNode }>;
 }> {
@@ -83,7 +79,8 @@ export function collectDagTargetsByStage(workflowDag: Record<string, any> | null
     sessions: Array<{ target: DagTarget; node: DagNode }>;
     artifacts: Array<{ target: DagTarget; node: DagNode }>;
   }>();
-  for (const node of workflowDag?.nodes || []) {
+  const nodes = Array.isArray(workflowDag?.nodes) ? workflowDag.nodes : [];
+  for (const node of nodes) {
     const nodeStage = String(node.stage || '').trim();
     for (const target of node.reviewTargets || []) {
       const stageKey = String(target.stageKey || nodeStage || '').trim();
@@ -111,10 +108,10 @@ export function collectDagTargetsByStage(workflowDag: Record<string, any> | null
  * Add graph-only session targets to a stage without duplicating runner process sessions.
  */
 export function mergeStageSessions(
-  stageSessions: Array<Record<string, any>>,
+  stageSessions: WorkflowJsonRecord[],
   dagSessions: Array<{ target: DagTarget; node: DagNode }>,
   stageKey: string,
-): Array<Record<string, any>> {
+): WorkflowJsonRecord[] {
   const merged = [...stageSessions];
   const seen = new Set(merged.map((session) => `${session.provider || 'codex'}:${session.id}`));
   for (const { target, node } of dagSessions) {
@@ -142,11 +139,11 @@ export function mergeStageSessions(
  * Add graph-only artifact targets to a stage without replacing scanned run artifacts.
  */
 export function mergeStageArtifacts(
-  stageArtifacts: Array<Record<string, any>>,
+  stageArtifacts: WorkflowJsonRecord[],
   dagArtifacts: Array<{ target: DagTarget; node: DagNode }>,
   stageKey: string,
   status: string,
-): Array<Record<string, any>> {
+): WorkflowJsonRecord[] {
   const merged = [...stageArtifacts];
   const seen = new Set(merged.map((artifact) => String(artifact.path || artifact.relativePath || artifact.label || '').trim()));
   for (const { target, node } of dagArtifacts) {
@@ -241,7 +238,7 @@ export async function buildWorkflowDag({
   artifacts,
   stageStatuses,
   warnings,
-}: BuildWorkflowDagArgs): Promise<Record<string, any>> {
+}: BuildWorkflowDagArgs): Promise<WorkflowJsonRecord> {
   const graphResult = await runWoGraph(projectPath, changeName);
   const inlineGraph = pick(state, 'workflow_dag');
   const hasInlineGraph = Boolean(inlineGraph && typeof inlineGraph === 'object');
@@ -264,11 +261,13 @@ export async function buildWorkflowDag({
     warnings.push(`oz flow graph unavailable; using state workflow_dag: ${graphResult.error}`);
   }
 
-  const raw = (hasInlineGraph ? inlineGraph : (graphResult.data || {})) as Record<string, any>;
-  const rawNodes = Array.isArray(raw.nodes) ? raw.nodes : [];
-  const rawEdges = Array.isArray(raw.edges) ? raw.edges : [];
-  const rawArtifacts = Array.isArray(raw.artifacts) ? raw.artifacts : [];
-  const rawGates = Array.isArray(raw.gates) ? raw.gates : [];
+  const normalizedGraph = normalizeWorkflowGraphWithWarnings(hasInlineGraph ? inlineGraph : graphResult.data);
+  warnings.push(...normalizedGraph.warnings);
+  const raw = normalizedGraph.value;
+  const rawNodes = raw.nodes;
+  const rawEdges = raw.edges;
+  const rawArtifacts = raw.artifacts;
+  const rawGates = raw.gates;
 
   const sessions = pick(state, 'sessions') || {};
   const runId = String(pick(state, 'run_id') || '').trim();
@@ -280,7 +279,7 @@ export async function buildWorkflowDag({
   const currentStage = String(pick(state, 'stage') || '').trim();
   const rawStatus = String(pick(state, 'status') || '').trim();
   const stageStatusMap = new Map((stageStatuses || []).map((stage) => [stage.key, stage.status]));
-  const rawNodeById = new Map<string, Record<string, any>>();
+  const rawNodeById = new Map<string, WorkflowJsonRecord>();
   for (const rawNode of rawNodes) {
     const nodeId = String(rawNode.id || '').trim();
     if (nodeId) {
@@ -291,7 +290,7 @@ export async function buildWorkflowDag({
   /**
    * Accept only graph artifact paths that stay inside the current run dir.
    */
-  function resolveGraphArtifactPath(graphArtifact: Record<string, any>): Record<string, string> | null {
+  function resolveGraphArtifactPath(graphArtifact: WorkflowJsonRecord): Record<string, string> | null {
     const artifactPath = String(graphArtifact?.path || '').trim();
     if (!artifactPath || path.isAbsolute(artifactPath)) {
       return null;
@@ -316,7 +315,7 @@ export async function buildWorkflowDag({
    * Treat a graph gate as runtime evidence only when it carries an explicit
    * non-pending runtime signal, not merely a template id from oz flow graph.
    */
-  function isRuntimeBackedGraphGate(gate: Record<string, any>): boolean {
+  function isRuntimeBackedGraphGate(gate: WorkflowJsonRecord): boolean {
     const status = String(gate?.status || gate?.state || '').toLowerCase();
     if (status && status !== 'pending') {
       return true;
@@ -337,7 +336,7 @@ export async function buildWorkflowDag({
    * Bind a subagent template node only when a real child session proves that
    * member actually ran for the same stage.
    */
-  function findSubagentSession(node: Record<string, any>): Record<string, any> | null {
+  function findSubagentSession(node: WorkflowJsonRecord): WorkflowJsonRecord | null {
     const stage = String(node.stage || '').trim();
     const member = String(node.member || '').trim();
     if (!stage || !member) {
@@ -352,11 +351,11 @@ export async function buildWorkflowDag({
   /**
    * Read session targets already embedded in a persisted workflow_dag node.
    */
-  function getInlineSessionTargets(node: Record<string, any>): Array<Record<string, any>> {
+  function getInlineSessionTargets(node: WorkflowJsonRecord): WorkflowJsonRecord[] {
     if (!Array.isArray(node?.reviewTargets)) {
       return [];
     }
-    return node.reviewTargets.filter((target: Record<string, any>) => (
+    return node.reviewTargets.filter((target: WorkflowGraphReviewTarget) => (
       target
       && target.kind === 'session'
       && String(target.sessionId || '').trim()
@@ -384,7 +383,7 @@ export async function buildWorkflowDag({
 
   const evidenceNodeIds = new Set<string>();
   for (const [nodeId, nodeData] of Object.entries(dagNodes || {})) {
-    const nodeStatus = String((nodeData as Record<string, any>)?.status || '').toLowerCase();
+    const nodeStatus = String((nodeData as WorkflowJsonRecord)?.status || '').toLowerCase();
     if (nodeStatus && nodeStatus !== 'pending') {
       evidenceNodeIds.add(nodeId);
     }
@@ -436,8 +435,22 @@ export async function buildWorkflowDag({
   }
 
   const keepNodeIds = new Set(rawNodes
-    .map((rawNode) => String(rawNode.id || '').trim())
-    .filter(Boolean));
+    .filter((rawNode) => {
+      const nodeId = String(rawNode.id || '').trim();
+      const nodeType = String(rawNode.type || '').trim();
+      const stage = String(rawNode.stage || '').trim();
+      if (!nodeId) {
+        return false;
+      }
+      if (evidenceNodeIds.has(nodeId)) {
+        return true;
+      }
+      if (nodeType !== 'subagent' && nodeType !== 'fanin' && stage && evidenceStageKeys.has(stage)) {
+        return true;
+      }
+      return false;
+    })
+    .map((rawNode) => String(rawNode.id || '').trim()));
 
   /**
    * Build a session review target from a session id.
@@ -447,7 +460,7 @@ export async function buildWorkflowDag({
     label: string,
     stageKey: string,
     providerHint?: string,
-  ): Record<string, any> | null {
+  ): WorkflowJsonRecord | null {
     if (!sessionId) return null;
     const provider = providerHint || resolveSessionProviderFromState(sessionId, sessions) || 'codex';
     const childSession = childSessions.find((session) => (
@@ -474,7 +487,7 @@ export async function buildWorkflowDag({
   /**
    * Build an artifact review target from a graph artifact path.
    */
-  async function buildArtifactTarget(graphArtifact: Record<string, any>): Promise<Record<string, any> | null> {
+  async function buildArtifactTarget(graphArtifact: WorkflowJsonRecord): Promise<WorkflowJsonRecord | null> {
     const artifactLocation = resolveGraphArtifactPath(graphArtifact);
     const nodeId = String(graphArtifact.node_id || '').trim();
     if (!artifactLocation) return null;
@@ -491,7 +504,7 @@ export async function buildWorkflowDag({
   /**
    * Map main_stage nodes to stage sessions.
    */
-  function findStageSession(node: Record<string, any>): Record<string, any> | null {
+  function findStageSession(node: WorkflowJsonRecord): WorkflowJsonRecord | null {
     const stage = String(node.stage || '').trim();
     if (!stage) return null;
     const session = childSessions.find((entry) => entry.stageKey === stage);
@@ -534,13 +547,13 @@ export async function buildWorkflowDag({
       if (stage === currentStage) {
         return mapStageStatus(rawStatus || mapped);
       }
-      return mapped;
+      return mapped || 'pending';
     }
 
     return mapStageStatus(String(rawStatusStr || 'pending'));
   }
 
-  const artifactsByStage = new Map<string, Array<Record<string, any>>>();
+  const artifactsByStage = new Map<string, WorkflowJsonRecord[]>();
   for (const artifact of artifacts) {
     if (artifact.stage) {
       if (!artifactsByStage.has(artifact.stage)) {
@@ -550,7 +563,7 @@ export async function buildWorkflowDag({
     }
   }
 
-  const artifactTargets = new Map<string, Array<Record<string, any>>>();
+  const artifactTargets = new Map<string, WorkflowJsonRecord[]>();
   const dagArtifacts = [];
   for (const rawArtifact of rawArtifacts) {
     const nodeId = String(rawArtifact.node_id || '').trim();
@@ -585,19 +598,26 @@ export async function buildWorkflowDag({
     if (nodeType === 'main_stage') {
       const session = findStageSession(rawNode);
       if (session) {
-        reviewTargets.push(buildSessionTarget(session.id, session.id, stage, session.provider));
+        const sessionId = String(session.id || '').trim();
+        reviewTargets.push(buildSessionTarget(sessionId, sessionId, stage, String(session.provider || '').trim() || undefined));
       }
     } else if (nodeType === 'subagent') {
       const session = findSubagentSession(rawNode);
       if (session) {
-        reviewTargets.push(buildSessionTarget(session.id, session.title || session.id, stage, session.provider));
+        const sessionId = String(session.id || '').trim();
+        reviewTargets.push(buildSessionTarget(
+          sessionId,
+          String(session.title || sessionId).trim(),
+          stage,
+          String(session.provider || '').trim() || undefined,
+        ));
       } else if (getInlineSessionTargets(rawNode).length > 0) {
         for (const target of getInlineSessionTargets(rawNode)) {
           reviewTargets.push(buildSessionTarget(
             String(target.sessionId || '').trim(),
             String(target.label || rawNode.member || rawNode.name || target.sessionId || '').trim(),
             String(target.stageKey || stage || '').trim(),
-            target.provider,
+            String(target.provider || '').trim() || undefined,
           ));
         }
       } else {

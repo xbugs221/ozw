@@ -1,0 +1,116 @@
+{
+  "summary": "测试类型基线、Codex JSONL fixture discovery 与 provider browser harness 必须收敛成可复用基础设施。",
+  "coverage": [
+    {
+      "spec": "需求：测试类型基线可作为合并门禁 / 场景：`typecheck:test` 成为可信基线",
+      "tests": ["test-typecheck-baseline-contract", "root-typecheck"],
+      "evidence": ["typecheck-test-log"],
+      "risk": "不要求所有测试文件完全 strict，只要求当前 typecheck:test 可作为门禁。"
+    },
+    {
+      "spec": "需求：Codex fixture discovery 稳定 / 场景：Codex JSONL fixture 可被真实项目 API 发现",
+      "tests": ["codex-fixture-discovery-contract", "codex-fixture-browser-regression"],
+      "evidence": ["codex-fixture-discovery-state", "codex-fixture-browser-trace"],
+      "risk": "不真实调用外部 Codex 服务，使用本地 JSONL 结构代表 provider 历史。"
+    },
+    {
+      "spec": "需求：Provider browser harness 统一 / 场景：browser spec 复用共享 provider WebSocket harness",
+      "tests": ["provider-harness-source-boundary"],
+      "evidence": ["provider-harness-source-audit"],
+      "risk": "完整真实 WebSocket 仍由 e2e 覆盖，本提案只统一 browser spec harness。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "test-typecheck-baseline-contract",
+      "source": "change_contract",
+      "path": "docs/changes/4-测试基线与Fixture真实化/tests/test-baseline-and-fixtures.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/4-测试基线与Fixture真实化/tests/test-baseline-and-fixtures.contract.test.ts",
+      "purpose": "证明测试类型基线和共享类型入口没有被绕过。",
+      "assertions": [
+        "package.json 的 typecheck 仍包含 typecheck:test",
+        "tsconfig.test.json 仍检查测试源码",
+        "共享 provider/browser harness 类型文件存在"
+      ],
+      "expected_initial_failure": "当前缺少共享测试 harness 和 fixture 类型入口。"
+    },
+    {
+      "id": "codex-fixture-discovery-contract",
+      "source": "change_contract",
+      "path": "docs/changes/4-测试基线与Fixture真实化/tests/test-baseline-and-fixtures.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/4-测试基线与Fixture真实化/tests/test-baseline-and-fixtures.contract.test.ts",
+      "purpose": "证明 Codex JSONL fixture 和 session discovery helper 已成为共享入口。",
+      "assertions": [
+        "codex-jsonl-fixture helper 暴露写入和 append 能力",
+        "fixture-session-discovery helper 暴露等待和诊断能力",
+        "历史失败 specs 不再硬编码 fixture not found throw"
+      ],
+      "expected_initial_failure": "当前相关 browser specs 仍有局部 discovery 逻辑或诊断不足。"
+    },
+    {
+      "id": "provider-harness-source-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/4-测试基线与Fixture真实化/tests/test-baseline-and-fixtures.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/4-测试基线与Fixture真实化/tests/test-baseline-and-fixtures.contract.test.ts",
+      "purpose": "证明 browser spec 复用共享 provider runtime harness。",
+      "assertions": [
+        "provider-runtime-harness helper 暴露 accepted/status/response/complete/error builder",
+        "关键 browser specs 导入共享 harness",
+        "重复 FakeWebSocket 定义数量明显收敛"
+      ],
+      "expected_initial_failure": "当前多个 browser specs 仍各自定义 FakeWebSocket。"
+    },
+    {
+      "id": "root-typecheck",
+      "source": "root_e2e",
+      "path": "docs/changes/4-测试基线与Fixture真实化/tests/test-baseline-and-fixtures.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/4-测试基线与Fixture真实化/tests/test-baseline-and-fixtures.contract.test.ts && pnpm run typecheck",
+      "purpose": "证明 web、node、test 三段 typecheck 都可作为合并门禁。",
+      "assertions": [
+        "typecheck:web 通过",
+        "typecheck:node 通过",
+        "typecheck:test 通过"
+      ],
+      "expected_initial_failure": "当前 typecheck:test 存在历史类型债。"
+    },
+    {
+      "id": "codex-fixture-browser-regression",
+      "source": "new_regression",
+      "path": "tests/spec/codex-first-turn-rendering.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/codex-first-turn-rendering.spec.ts tests/spec/proposal-92-provider-non-streaming-render.spec.ts",
+      "purpose": "证明历史 fixture discovery 失败的 browser specs 能进入真实断言阶段。",
+      "assertions": [
+        "Codex fixture session 被项目 API 发现",
+        "routeIndex 可用于进入消息页",
+        "测试不再因 fixture not found 在断言前失败"
+      ],
+      "expected_initial_failure": "当前至少一个历史 browser spec 会在 fixture discovery 阶段失败。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "typecheck-test-log",
+      "kind": "runtime_log",
+      "path": "test-results/typecheck-test/typecheck.log",
+      "purpose": "保存 typecheck:test 通过日志；该文件不进入 git。"
+    },
+    {
+      "id": "codex-fixture-discovery-state",
+      "kind": "state_snapshot",
+      "path": "test-results/codex-fixture-discovery/state.json",
+      "purpose": "保存被发现的 session、routeIndex、providerSessionId 和候选列表摘要；该文件不进入 git。"
+    },
+    {
+      "id": "codex-fixture-browser-trace",
+      "kind": "trace",
+      "path": "test-results/codex-fixture-discovery/browser-trace.zip",
+      "purpose": "保存关键 browser specs 的 trace；该文件不进入 git。"
+    },
+    {
+      "id": "provider-harness-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/provider-runtime-harness/source-audit.json",
+      "purpose": "保存重复 FakeWebSocket 定义和共享 harness 导入审计；该文件不进入 git。"
+    }
+  ]
+}

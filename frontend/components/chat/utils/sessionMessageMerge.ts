@@ -6,6 +6,12 @@ import type { ChatMessage } from '../types/types';
 import { dedupeAdjacentChatMessages } from './messageDedup';
 import { getIntrinsicMessageKey } from './messageKeys';
 import { convertSessionMessages } from './messageTransforms';
+import {
+  canRenderLiveRowForAcceptedTurn,
+  shouldPreserveAcceptedOptimisticUser,
+  shouldPreserveLiveTurnDuringEmptyReload,
+} from './liveTurnMergePolicy';
+import { isProviderFileUpdatePayload } from './providerPayloadParsers';
 
 const USER_UPLOAD_NOTE_MARKER = '[User uploaded files for this message]';
 const LIVE_ASSISTANT_SOURCES = new Set([
@@ -13,18 +19,6 @@ const LIVE_ASSISTANT_SOURCES = new Set([
   'pi-live',
   'codex-realtime',
   'claude-realtime',
-]);
-const PROVIDER_FILE_UPDATE_KINDS = new Set([
-  'add',
-  'added',
-  'create',
-  'created',
-  'delete',
-  'deleted',
-  'modify',
-  'modified',
-  'update',
-  'updated',
 ]);
 
 type MergeSessionMessageDeltaArgs = {
@@ -212,13 +206,6 @@ function getLiveTurnIdentityKeys(message: ChatMessage): string[] {
  * Detect local user rows that have been accepted by the send path but have not
  * yet been replaced by the authoritative transcript row.
  */
-function isAcceptedOptimisticUser(message: ChatMessage): boolean {
-  return message.type === 'user'
-    && message.deliveryStatus === 'persisted'
-    && typeof message.messageKey === 'string'
-    && message.messageKey.startsWith('optimistic:');
-}
-
 function getAnchoredTurnInsertIndex(messages: ChatMessage[], anchorIndex: number): number {
   /**
    * Insert a follow-up after the whole anchored turn.  If the anchor resolves
@@ -233,65 +220,6 @@ function getAnchoredTurnInsertIndex(messages: ChatMessage[], anchorIndex: number
 }
 
 /**
- * Parse provider JSON strings when possible without changing other values.
- */
-function parseJsonMaybe(value: unknown): unknown {
-  if (typeof value !== 'string') {
-    return value;
-  }
-  const trimmed = value.trim();
-  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) {
-    return value;
-  }
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return value;
-  }
-}
-
-/**
- * Resolve file-update bookkeeping payloads from live rows that may already be
- * in memory before the native runtime reducer filters new events.
- */
-function resolveProviderFileUpdatePayload(value: unknown, depth = 0): Record<string, unknown> | null {
-  if (depth > 5 || value === null || value === undefined) {
-    return null;
-  }
-
-  const parsed = parseJsonMaybe(value);
-  if (parsed !== value) {
-    return resolveProviderFileUpdatePayload(parsed, depth + 1);
-  }
-
-  if (Array.isArray(value)) {
-    for (const part of value) {
-      const payload = resolveProviderFileUpdatePayload(part, depth + 1);
-      if (payload) {
-        return payload;
-      }
-    }
-    return null;
-  }
-
-  if (typeof value !== 'object') {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  if (typeof record.path === 'string' && (typeof record.kind === 'string' || typeof record.type === 'string')) {
-    return record;
-  }
-
-  const nested = record.message ?? record.content ?? record.text ?? record.output ?? record.result ?? record.displayText;
-  if (nested !== undefined && nested !== value) {
-    return resolveProviderFileUpdatePayload(nested, depth + 1);
-  }
-
-  return null;
-}
-
-/**
  * Drop provider bookkeeping rows that slipped into live state before persisted
  * history catches up; JSONL intentionally has no matching visible row.
  */
@@ -303,11 +231,7 @@ function isProviderFileUpdateLiveMessage(message: ChatMessage): boolean {
     return false;
   }
 
-  const payload = resolveProviderFileUpdatePayload(message.content ?? message.displayText);
-  const kind = typeof payload?.kind === 'string'
-    ? payload.kind
-    : (typeof payload?.type === 'string' ? payload.type : '');
-  return typeof payload?.path === 'string' && PROVIDER_FILE_UPDATE_KINDS.has(kind);
+  return isProviderFileUpdatePayload(message.content ?? message.displayText);
 }
 
 /**
@@ -449,17 +373,10 @@ function shouldPreserveLocalMessage(message: ChatMessage): boolean {
     if (isUploadNoteOnlyUserMessage(message)) {
       return false;
     }
-    return Boolean(message.deliveryStatus);
+    return shouldPreserveLiveTurnDuringEmptyReload(message);
   }
 
-  return Boolean(
-    message.isStreaming ||
-    message.isInteractivePrompt ||
-    message.source === 'codex-live' ||
-    message.source === 'pi-live' ||
-    message.source === 'codex-realtime' ||
-    message.source === 'claude-realtime'
-  );
+  return shouldPreserveLiveTurnDuringEmptyReload(message);
 }
 
 /**
@@ -472,7 +389,7 @@ function isCodexLiveAssistantAwaitingPersistedUser(
   mergedMessages: ChatMessage[],
 ): boolean {
   if (
-    message.type !== 'assistant' ||
+    !canRenderLiveRowForAcceptedTurn(message) ||
     (message.source !== 'codex-live' && message.source !== 'codex-realtime')
   ) {
     return false;
@@ -1140,7 +1057,7 @@ export function mergePersistedAndOptimisticMessages(
 
     const isPersistedHistoricalUser = message.type === 'user'
       && message.deliveryStatus === 'persisted'
-      && !isAcceptedOptimisticUser(message);
+      && !shouldPreserveAcceptedOptimisticUser(message);
     const nextUserIndex = isPersistedHistoricalUser
       ? previousMessages.findIndex((candidate, index) => index > previousIndex && candidate.type === 'user')
       : -1;

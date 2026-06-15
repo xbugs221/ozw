@@ -15,6 +15,11 @@ import {
 import { filterMentionableFiles, type MentionableFile } from '../../../frontend/components/chat/utils/fileMentionSearch.ts';
 import { buildFileTree } from '../../../frontend/components/chat/utils/fileMentionTree.ts';
 
+type ProjectDiscoveryRow = {
+  fullPath?: string;
+  isManuallyAdded?: boolean;
+};
+
 /**
  * Run a regression case with isolated HOME and state so no real user sessions are scanned.
  */
@@ -76,7 +81,7 @@ test('home discovery returns manual projects when a Codex index is slower than t
       const projects = await getProjects();
       const durationMs = Date.now() - startedAt;
 
-      assert.equal(projects.some((project) => project.fullPath === projectPath), true);
+      assert.equal(projects.some((project: ProjectDiscoveryRow) => project.fullPath === projectPath), true);
       assert.ok(durationMs < 3500, `expected budgeted home fallback, got ${durationMs}ms`);
     } finally {
       (fs as unknown as { readdir: typeof fs.readdir }).readdir = originalReaddir;
@@ -99,7 +104,7 @@ test('provider-only discovery keeps Codex and Pi sessions on one project', async
     );
 
     const projects = await getProjects();
-    const sharedProject = projects.find((project) => project.fullPath === sharedProjectPath);
+    const sharedProject = projects.find((project: ProjectDiscoveryRow) => project.fullPath === sharedProjectPath);
 
     assert.ok(sharedProject, 'shared provider-only project should be discovered');
     assert.equal(sharedProject.codexSessions.some((session: { provider?: string }) => session.provider === 'codex'), true);

@@ -8,6 +8,12 @@ import { mergePersistedAndOptimisticMessages, mergeSessionMessageDelta } from '.
 import { reduceNativeRuntimeEvent } from '../utils/nativeRuntimeTranscript';
 import { appendUniqueErrorMessage } from '../utils/errorDedup';
 import type { ChatMessageAction, ChatMessageState } from './chatMessageStateTypes';
+import {
+  markAcceptedDeliveryPersisted,
+  markDeliveredByPersistedEcho,
+  markPendingDeliveryFailed,
+  markPendingDeliverySent,
+} from './deliveryStatusMachine';
 
 /**
  * Mark optimistic user sends as persisted once provider history confirms them.
@@ -15,7 +21,7 @@ import type { ChatMessageAction, ChatMessageState } from './chatMessageStateType
 export function markUserMessagesPersisted(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((message) =>
     message.type === 'user' && (message.deliveryStatus === 'pending' || message.deliveryStatus === 'sent')
-      ? { ...message, deliveryStatus: 'persisted' as const }
+      ? { ...message, deliveryStatus: markDeliveredByPersistedEcho(message.deliveryStatus) }
       : message,
   );
 }
@@ -26,7 +32,7 @@ export function markUserMessagesPersisted(messages: ChatMessage[]): ChatMessage[
 export function markPendingUserMessagesDelivered(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((message) =>
     message.type === 'user' && message.deliveryStatus === 'pending' && !message.clientRequestId
-      ? { ...message, deliveryStatus: 'sent' as const }
+      ? { ...message, deliveryStatus: markPendingDeliverySent(message.deliveryStatus) }
       : message,
   );
 }
@@ -54,7 +60,7 @@ export function markAcceptedUserMessageSent(messages: ChatMessage[], clientReque
     })();
   if (acceptedIndex < 0) return messages;
   return messages.map((message, index) =>
-    index === acceptedIndex ? { ...message, deliveryStatus: 'persisted' as const } : message);
+    index === acceptedIndex ? { ...message, deliveryStatus: markAcceptedDeliveryPersisted(message.deliveryStatus) } : message);
 }
 
 /**
@@ -168,7 +174,7 @@ export function rejectPendingUserMessage(
   const withFailed = messages.map((message) =>
     message.type === 'user' && message.deliveryStatus === 'pending'
       && (!clientRequestId || message.clientRequestId === clientRequestId)
-      ? { ...message, deliveryStatus: 'failed' as const }
+      ? { ...message, deliveryStatus: markPendingDeliveryFailed(message.deliveryStatus) }
       : message);
   return appendAssistantMessage(withFailed, {
     type: 'error',

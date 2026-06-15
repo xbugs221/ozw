@@ -72,22 +72,29 @@ test('Provider 会话列表隐藏已绑定 cN 的原始 session 并过滤 workfl
 
 test('projects.ts 调用 Provider 会话列表 read model 而不是内联核心过滤规则', async () => {
   /**
-   * 业务场景：后续修复项目首页会话展示时，开发者能先改小模块和小测试。
+   * 业务场景：后续修复项目首页会话展示时，开发者能先改项目域小模块和小测试，
+   * backend/projects.ts 只保留兼容导出。
    */
   const projectsSource = await fs.readFile(path.join(process.cwd(), 'backend/projects.ts'), 'utf8');
+  const domainServiceSource = await fs.readFile(
+    path.join(process.cwd(), 'backend/domains/projects/project-domain-service.ts'),
+    'utf8',
+  );
   const readModelSource = await fs.readFile(
     path.join(process.cwd(), 'backend/domains/projects/provider-session-list-read-model.ts'),
     'utf8',
   );
 
   const audit = {
-    projectsImportsReadModel: /buildProviderSessionListReadModel/.test(projectsSource),
+    projectsIsFacade: /export \* from '.\/domains\/projects\/project-domain-service\.js'/.test(projectsSource),
+    domainServiceImportsReadModel: /buildProviderSessionListReadModel/.test(domainServiceSource),
     readModelHandlesBoundProviderSessionIds: /boundProviderSessionIds|providerSessionId/.test(readModelSource),
     readModelHandlesWorkflowOwnedSessionIds: /workflowOwnedSessionIds/.test(readModelSource),
     projectsKeepsInlineBoundProviderSet: /const boundProviderSessionIds = new Set/.test(projectsSource),
   };
 
-  assert.equal(audit.projectsImportsReadModel, true);
+  assert.equal(audit.projectsIsFacade, true);
+  assert.equal(audit.domainServiceImportsReadModel, true);
   assert.equal(audit.readModelHandlesBoundProviderSessionIds, true);
   assert.equal(audit.readModelHandlesWorkflowOwnedSessionIds, true);
   assert.equal(audit.projectsKeepsInlineBoundProviderSet, false);

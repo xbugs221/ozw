@@ -1,0 +1,53 @@
+{
+  "summary": "项目域核心实现进入 TypeScript 编译边界，公共项目 facade 和业务行为保持稳定。",
+  "coverage": [
+    {
+      "spec": "需求：项目域实现必须纳入 TypeScript 编译 / 场景：项目域不再依赖手写 JS 核心",
+      "tests": ["project-domain-ts-boundary"],
+      "evidence": ["project-domain-source-audit"],
+      "risk": "静态审计不能覆盖全部历史 home 目录数据形态，需要配合后端回归测试。"
+    },
+    {
+      "spec": "需求：公共项目 facade 保持业务入口稳定 / 场景：公共项目 facade 保持业务入口稳定",
+      "tests": ["project-domain-ts-boundary", "existing-project-regressions"],
+      "evidence": ["project-domain-source-audit"],
+      "risk": "真实 Provider 历史数据规模差异需要执行阶段补充性能采样。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "project-domain-ts-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/13-项目域JS核心迁移为TS边界/tests/project-domain-ts-boundary.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/13-项目域JS核心迁移为TS边界/tests/project-domain-ts-boundary.contract.test.ts",
+      "purpose": "证明项目域不再依赖手写 JS 核心，公共 facade 仍导出关键业务入口。",
+      "assertions": [
+        "项目域核心 `.js` 与 `.d.ts` 配对已经消失",
+        "服务端构建不再调用 copy-build-runtime-js.mjs 复制项目域 JS",
+        "公共 facade 仍暴露项目、会话、手动会话、Provider 和搜索入口"
+      ],
+      "expected_initial_failure": "当前仓库仍存在 project-domain-core.js/.d.ts 和 build runtime JS 复制路径。"
+    },
+    {
+      "id": "existing-project-regressions",
+      "source": "existing_regression",
+      "path": "tests/backend/projects.rename.test.ts",
+      "command": "pnpm exec tsx --test tests/backend/projects.rename.test.ts tests/backend/pi-sessions-read-model.test.ts tests/backend/project-overview-session-performance.test.ts",
+      "purpose": "证明项目列表、Provider 会话、项目重命名和概览性能行为保持稳定。",
+      "assertions": [
+        "项目重命名仍以路径维度持久化",
+        "Pi/Codex Provider 会话仍能归属到项目",
+        "项目 overview 不因迁移退化为全量慢扫描"
+      ],
+      "expected_initial_failure": "迁移前应通过；执行阶段若失败表示行为回归。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "project-domain-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/13-project-domain-ts-boundary/source-audit.json",
+      "purpose": "记录项目域源码、构建脚本和 facade 导出审计结果；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

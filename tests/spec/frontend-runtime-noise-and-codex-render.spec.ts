@@ -19,9 +19,11 @@ import {
   openFixtureProject,
   resetWorkspaceProject,
 } from './helpers/spec-test-helpers.ts';
+import { installProviderRuntimeHarness } from './helpers/provider-runtime-harness.ts';
 
 const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results/frontend-runtime-noise-and-codex-render');
 const SESSION_DAY = ['2026', '06', '05'];
+const JSON_RESPONSE_TITLE = /JSON (Response|响应)|JSON 响应/;
 
 /**
  * Resolve the fixture Codex JSONL path for the acceptance session.
@@ -84,47 +86,17 @@ async function writeCodexSession(sessionId: string): Promise<void> {
  */
 async function installCodexRuntimeSocket(page): Promise<void> {
   /** docstring：只替换 WebSocket 传输层，保留真实 React 页面和消息 reducer 渲染。 */
+  await installProviderRuntimeHarness(page, {
+    sentKey: '__proposal75SharedSentMessages',
+    eventsKey: '__proposal75SharedEvents',
+    socketKey: '__proposal75SharedSocket',
+    emitKey: '__proposal75SharedEmit',
+  });
   await page.addInitScript(() => {
-    class FakeWebSocket extends EventTarget {
-      constructor() {
-        super();
-        window.__proposal75Socket = this;
-        setTimeout(() => {
-          this.readyState = WebSocket.OPEN;
-          this.onopen?.();
-          this.dispatchEvent(new Event('open'));
-        }, 0);
-      }
-
-      send(payload) {
-        window.__proposal75SentMessages = window.__proposal75SentMessages || [];
-        try {
-          window.__proposal75SentMessages.push(JSON.parse(payload));
-        } catch {
-          window.__proposal75SentMessages.push(payload);
-        }
-      }
-
-      close() {
-        this.readyState = WebSocket.CLOSED;
-        this.onclose?.();
-        this.dispatchEvent(new Event('close'));
-      }
-    }
-
-    FakeWebSocket.CONNECTING = 0;
-    FakeWebSocket.OPEN = 1;
-    FakeWebSocket.CLOSING = 2;
-    FakeWebSocket.CLOSED = 3;
-    window.WebSocket = FakeWebSocket;
+    window.__proposal75SentMessages = window.__proposal75SharedSentMessages || [];
     window.__proposal75EmitWs = (message) => {
-      const socket = window.__proposal75Socket;
       const sessionId = window.location.pathname.split('/').filter(Boolean).pop();
-      const event = new MessageEvent('message', {
-        data: JSON.stringify({ sessionId, provider: 'codex', ...message }),
-      });
-      socket?.onmessage?.(event);
-      socket?.dispatchEvent?.(event);
+      window.__proposal75SharedEmit?.({ sessionId, provider: 'codex', ...message });
     };
   });
 }
@@ -256,7 +228,7 @@ test('Codex WS add/update 文件变更 JSON 字符串不会作为 assistant raw 
   });
   await page.goto(`/session/${sessionId}?${params.toString()}`, { waitUntil: 'networkidle' });
   await expect(page.locator('[data-testid="chat-scroll-container"]').last()).toContainText('75 提案 Codex 真实正文必须保留。');
-  await expect(page.locator('[data-testid="chat-scroll-container"]').last()).toContainText('JSON Response');
+  await expect(page.locator('[data-testid="chat-scroll-container"]').last()).toContainText(JSON_RESPONSE_TITLE);
   await expect(page.locator('[data-testid="chat-scroll-container"]').last()).toContainText('业务 JSON 输出必须保留');
 
   await page.evaluate(() => {
@@ -295,7 +267,7 @@ test('Codex WS add/update 文件变更 JSON 字符串不会作为 assistant raw 
 
   const chat = page.locator('[data-testid="chat-scroll-container"]').last();
   await expect(chat).toContainText('75 提案 Codex 真实正文必须保留。');
-  await expect(chat).toContainText('JSON Response');
+  await expect(chat).toContainText(JSON_RESPONSE_TITLE);
   await expect(chat).toContainText('业务 JSON 输出必须保留');
   await expect(page.getByTestId('codex-tool-card').filter({ hasText: 'frontend/proposal75-created-file.ts' }).first()).toBeVisible();
   await expect(page.getByTestId('codex-tool-card').filter({ hasText: 'frontend/proposal75-updated-file.ts' }).first()).toBeVisible();

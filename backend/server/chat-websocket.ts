@@ -3,6 +3,11 @@
  * 业务意义：聊天协议和 provider runtime 交互应独立于 HTTP route 组装入口。
  */
 import type { WebSocket } from 'ws';
+import {
+    readProviderSessionBinding,
+    writeProviderSessionBinding,
+} from '../domains/provider-runtime/provider-session-binding.js';
+import { createRuntimeWriterAdapter as defaultCreateRuntimeWriterAdapter } from './realtime/runtime-writer-adapter.js';
 
 type LooseRecord = Record<string, any>;
 
@@ -122,7 +127,10 @@ export function unregisterChatClient(runtime: any, ws: WebSocket): void {
  * 处理聊天 WebSocket 连接和 native provider 消息分发。
  */
 export function handleChatConnection(deps: any, ws: WebSocket, request: any): void {
-    const { connectedClients, chatClientUsers, broadcastChatEvent, bindManualSessionProvider, finalizeManualSessionRoute, getManualSessionRouteRuntime, initManualSessionRoute, acceptChatRequestId, resolveChatProjectOptions, extractProjectDirectory, resolveCbwSessionStartContext, resolveCbwRouteSessionIdFromProviderSession, getSessionModelState, sendNativeMessage, sendMessageAccepted, abortNativeSession, broadcastSessionModelStateUpdated, isCbwRouteSessionId, normalizeManualProvider, getNativeSessionStatus, getActiveNativeSessions } = deps;
+    const { connectedClients, chatClientUsers, broadcastChatEvent, finalizeManualSessionRoute, initManualSessionRoute, acceptChatRequestId, resolveChatProjectOptions, extractProjectDirectory, resolveCbwSessionStartContext, resolveCbwRouteSessionIdFromProviderSession, getSessionModelState, sendNativeMessage, sendMessageAccepted, abortNativeSession, broadcastSessionModelStateUpdated, isCbwRouteSessionId, normalizeManualProvider, getNativeSessionStatus, getActiveNativeSessions, createRuntimeWriterAdapter, sessionSubscriptionRegistry } = deps;
+    const adaptRuntimeWriter = typeof createRuntimeWriterAdapter === 'function'
+        ? createRuntimeWriterAdapter
+        : defaultCreateRuntimeWriterAdapter;
     /**
      * WebSocket Writer - Wrapper for WebSocket to match SSEStreamWriter interface
      */
@@ -245,12 +253,13 @@ export function handleChatConnection(deps: any, ws: WebSocket, request: any): vo
             return false;
         }
 
-        await bindManualSessionProvider(
-            projectName || '',
-            projectPath || '',
-            ozwSessionId,
+        await writeProviderSessionBinding({
+            projectName: projectName || '',
+            projectPath: projectPath || '',
+            routeSessionId: ozwSessionId,
+            provider: provider === 'pi' ? 'pi' : 'codex',
             providerSessionId,
-        );
+        });
 
         let finalized = false;
         try {
@@ -326,13 +335,14 @@ export function handleChatConnection(deps: any, ws: WebSocket, request: any): vo
             const lifecycleProviderSessionId = resolveLifecycleProviderSessionId(payloadRecord, indexContext?.ozwSessionId || '');
             if (indexContext?.ozwSessionId && lifecycleProviderSessionId) {
                 void (async () => {
-                    await bindManualSessionProvider(
-                        indexContext.projectName || '',
-                        indexContext.projectPath || '',
-                        indexContext.ozwSessionId,
-                        lifecycleProviderSessionId,
-                    );
-                    const runtime = await getManualSessionRouteRuntime(
+                    await writeProviderSessionBinding({
+                        projectName: indexContext.projectName || '',
+                        projectPath: indexContext.projectPath || '',
+                        routeSessionId: indexContext.ozwSessionId,
+                        provider: indexContext.provider === 'pi' ? 'pi' : 'codex',
+                        providerSessionId: lifecycleProviderSessionId,
+                    });
+                    const runtime = await readProviderSessionBinding(
                         indexContext.projectName || '',
                         indexContext.projectPath || '',
                         indexContext.ozwSessionId,
@@ -366,7 +376,10 @@ export function handleChatConnection(deps: any, ws: WebSocket, request: any): vo
                 }
 
                 const targetScopes = chatClientScopes.get(client) || [];
-                if (targetScopes.some((targetScope) => chatClientScopeMatches(privateScope, targetScope))) {
+                if (
+                    sessionSubscriptionRegistry?.clientMatchesSession(client, privateScope)
+                    || targetScopes.some((targetScope) => chatClientScopeMatches(privateScope, targetScope))
+                ) {
                     client.send(serializedPayload);
                 }
             });
@@ -397,7 +410,7 @@ export function handleChatConnection(deps: any, ws: WebSocket, request: any): vo
                         ozwSessionId = await resolveCbwRouteSessionIdFromProviderSession('codex', data, resolvedOptions);
                     }
                     const codexManualRuntime = ozwSessionId
-                        ? await getManualSessionRouteRuntime(
+                        ? await readProviderSessionBinding(
                             resolvedOptions?.projectName || data.options?.projectName || '',
                             resolvedOptions?.projectPath || resolvedOptions?.cwd || '',
                             ozwSessionId,
@@ -426,9 +439,9 @@ export function handleChatConnection(deps: any, ws: WebSocket, request: any): vo
                             providerSessionId: codexManualRuntime?.providerSessionId || '',
                         }, chatClientUsers.get(ws) || null);
                     }
-                    const codexRuntimeWriter = codexSessionIndexContext
+                    const codexRuntimeWriter = adaptRuntimeWriter(codexSessionIndexContext
                         ? writer.withSessionIndexContext(codexSessionIndexContext)
-                        : writer;
+                        : writer);
                     if (shouldStartCbwDraft) {
                         const startResult = await initManualSessionRoute(
                             codexProviderOptions?.projectName || data.options?.projectName || '',
@@ -506,7 +519,7 @@ export function handleChatConnection(deps: any, ws: WebSocket, request: any): vo
                         ozwSessionId = await resolveCbwRouteSessionIdFromProviderSession('pi', data, resolvedOptions);
                     }
                     const piManualRuntime = ozwSessionId
-                        ? await getManualSessionRouteRuntime(
+                        ? await readProviderSessionBinding(
                             resolvedOptions?.projectName || data.options?.projectName || '',
                             resolvedOptions?.projectPath || resolvedOptions?.cwd || '',
                             ozwSessionId,
@@ -538,9 +551,9 @@ export function handleChatConnection(deps: any, ws: WebSocket, request: any): vo
                             providerSessionId: piManualRuntime?.providerSessionId || '',
                         }, chatClientUsers.get(ws) || null);
                     }
-                    const piRuntimeWriter = piSessionIndexContext
+                    const piRuntimeWriter = adaptRuntimeWriter(piSessionIndexContext
                         ? writer.withSessionIndexContext(piSessionIndexContext)
-                        : writer;
+                        : writer);
                     if (shouldStartCbwDraft) {
                         const startResult = await initManualSessionRoute(
                             piProviderOptions?.projectName || data.options?.projectName || '',
@@ -621,6 +634,14 @@ export function handleChatConnection(deps: any, ws: WebSocket, request: any): vo
                         projectName: data.projectName || data.options?.projectName || '',
                         projectPath: data.projectPath || data.options?.projectPath || data.options?.cwd || '',
                     }, chatClientUsers.get(ws) || null);
+                    sessionSubscriptionRegistry?.setClientScope(ws, {
+                        userId: chatClientUsers.get(ws) || null,
+                        provider,
+                        projectName: data.projectName || data.options?.projectName || '',
+                        projectPath: data.projectPath || data.options?.projectPath || data.options?.cwd || '',
+                        sessionId: data.sessionId || data.ozwSessionId || data.ozw_session_id || '',
+                        ozwSessionId: data.ozwSessionId || data.ozw_session_id || data.sessionId || '',
+                    });
                     writer.send({
                         type: 'session-subscribed',
                         provider,

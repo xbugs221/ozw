@@ -77,6 +77,29 @@ Codex event 到 chat message 的映射不得在多个后端文件中重复维护
 
 对应规格测试：`tests/specs/backend-type-module-boundary.spec.ts`。
 
+## 需求：项目域核心必须进入 TypeScript 编译边界
+
+项目列表、会话路由、Provider 会话、搜索和项目重命名依赖的项目域核心实现不得退回手写 JS 与 d.ts 配对；公共 facade 必须保持业务入口稳定。
+
+### 场景：项目域不再依赖手写 JS 核心
+
+- **给定** 项目域源码、Node TypeScript 配置和服务端构建脚本
+- **当** 维护者修改 `backend/domains/projects/` 或 `backend/projects.ts`
+- **则** `project-domain-core.js` 与 `project-domain-core.d.ts` 不得重新出现
+- **且** `project-domain-core.ts` 必须作为 TypeScript 源码入口存在
+- **且** `build:server` 不得复制项目域手写 JS
+- **且** Node TypeScript 配置必须继续禁用 `allowJs`
+- **且** `project-domain-service.ts` 不得使用会触发构建错误的 `.ts` 扩展导入
+
+### 场景：公共项目 facade 保持业务入口稳定
+
+- **给定** `backend/projects.ts` 兼容 facade 和项目 domain service
+- **当** 项目域核心实现迁移或继续拆分
+- **则** `getProjects`、`getSessionMessages`、`createManualSessionDraft`、`finalizeManualSessionRoute`、`renameProject`、`renameSession`、`searchChatHistory`、`indexProviderSessionFile` 等入口必须继续可见
+- **且** TypeScript ESM 的 `.js` import specifier 只有在没有物理手写 JS core 时才允许存在
+
+对应规格测试：`tests/specs/backend-type-module-boundary.spec.ts`，并生成 `test-results/13-project-domain-ts-boundary/source-audit.json`。
+
 ## 需求：Codex app-server runtime 必须保持可注入边界
 
 Codex app-server 实时路径不得重新退化为单个巨型 runtime 文件；transport、session manager、notification reducer 和 facade 必须保持独立 typed 模块，方便用 test double 覆盖 steer、streaming 和失败恢复。
@@ -92,3 +115,30 @@ Codex app-server 实时路径不得重新退化为单个巨型 runtime 文件；
 - **且** `runtime-facade.ts` 不得通过空 catch 吞掉 runtime 错误
 
 对应规格测试：`tests/specs/backend-type-module-boundary.spec.ts`，并生成 `test-results/oz-113-codex-app-server-runtime/boundary-snapshot.json`。
+
+## 需求：后端 HTTP 入口和 realtime 投递必须保持契约化边界
+
+`backend/server/http-routes.ts` 和 `backend/server/server-bootstrap.ts` 只负责启动装配、依赖注入和生命周期协调；system update、项目、workflow、session、附件、usage、diagnostics 等业务 HTTP URL 必须由 `backend/server/http/*-routes.ts` 模块注册。Codex/Pi 会话私有 realtime 投递、WebSocket path 分派、公共 project invalidation 和 runtime writer 包装必须由独立 typed 模块承载，避免入口重新退化为路由和广播巨型实现。
+
+### 场景：业务 HTTP route 注册位于 HTTP 边界模块
+
+- **给定** 维护者调整后端 HTTP API
+- **当** 项目、workflow、session、附件、usage 或 diagnostics URL 需要注册
+- **则** 对应 URL 必须位于 `backend/server/http/*-routes.ts`
+- **且** `server-bootstrap.ts` 必须通过 `register*Routes(...)` 装配这些模块
+- **且** `/api/system/update` 必须位于 `backend/server/http/system-routes.ts`
+- **且** `server-bootstrap.ts` 不得直接注册 Express route
+- **且** `http-routes.ts` 不得重新直接拥有大量业务 URL 或 route handler
+
+### 场景：会话私有和公共 realtime 投递位于 realtime 边界模块
+
+- **给定** Provider runtime、chat WebSocket 和 project watcher 需要推送实时事件
+- **当** 事件属于会话私有 delta、明确会话订阅、公共 workflow changed 或 project invalidation
+- **则** 私有会话匹配必须通过 session subscription registry
+- **且** WebSocket path 分派必须位于 `backend/server/websocket-gateway.ts`
+- **且** chat/shell handler 和 WebSocket 认证边界必须在 gateway 中显式可审查
+- **且** 公共 project invalidation 必须通过独立 bus 保持 debounce/cache clear 语义
+- **且** runtime writer 必须经过 adapter 注入归属字段后再投递
+- **且** 用户身份不得作为会话私有消息的完整投递边界
+
+对应规格测试：`tests/specs/backend-type-module-boundary.spec.ts`、`tests/specs/codex-ws-turn-ownership.spec.ts`，并生成 `test-results/9-server-entry/source-audit.json`、`test-results/9-server-entry/api-routes.json`、`test-results/9-server-entry/websocket-delivery.log`、`test-results/9-server-entry/project-invalidation.log`、`test-results/9-server-entry/security-runtime.log`、`test-results/9-server-entry/server-startup.log`。

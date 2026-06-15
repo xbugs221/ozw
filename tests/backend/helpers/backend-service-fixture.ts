@@ -55,6 +55,7 @@ export async function startIsolatedBackendServer(options = {}) {
     HOST: '127.0.0.1',
     DATABASE_PATH: options.databasePath,
     JWT_SECRET: TEST_JWT_SECRET,
+    CBW_FAKE_PI_RUNTIME: '1',
     SESSION_PATH_SCAN_INTERVAL_MS: '0',
   };
   if (!env.DATABASE_PATH) {

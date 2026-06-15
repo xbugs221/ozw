@@ -18,7 +18,7 @@
 - `tests/unit`：由 Vitest 运行的快速业务逻辑测试，覆盖共享纯函数、展示前数据归一化和不依赖后端运行态的模块行为。
 - `tests/spec`：规格来源的回归测试。顶层非 `.spec.ts` 文件由 Node 运行，`*.spec.ts` 由 Playwright 运行。
 - `tests/e2e`：跨前后端、真实页面导航、WebSocket 或持久化链路的端到端业务流。
-- `tests/manual`：需要人工环境、长链路确认、不适合默认 CI，或与当前默认入口业务边界冲突但仍需留档的历史回归。
+- `tests/manual`：需要人工环境、长链路确认、不适合默认 CI，或与当前默认入口业务边界冲突但仍需留档的历史回归；`tests/manual/browser-history` 不作为默认门禁。
 
 ## 运行命令
 
@@ -29,7 +29,7 @@
 - `pnpm run test:e2e`：运行 `tests/e2e/**/*.spec.ts`。
 - `pnpm run test:manual:codex-resume`：运行手动 Codex resume 回归。
 - `pnpm exec tsx --test tests/manual/node-history/*.test.ts`：按需审计旧 Node 历史回归，不进入默认测试入口。
-- `pnpm exec playwright test tests/manual/browser-history/*.spec.ts`：按需审计旧浏览器历史回归，不进入默认测试入口。
+- `pnpm exec playwright test tests/manual/browser-history/*.spec.ts`：按需审计旧浏览器历史回归，不进入默认测试入口，也不作为默认门禁。
 
 ## 新增规则
 

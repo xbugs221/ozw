@@ -48,7 +48,7 @@ test('ProjectOverviewPanel renders Pi provider button with correct test id', asy
 
 test('useChatComposerState sends pi-command with Pi model controls for pi provider', async () => {
   const source = await readRepoFile(
-    'frontend/components/chat/hooks/useChatComposerState.ts',
+    'frontend/components/chat/composer/useChatComposerStateImpl.ts',
   );
   assert.match(
     source,
@@ -97,8 +97,8 @@ test('ChatInterface shows Pi label and placeholder for pi provider', async () =>
 // Server pi-command WebSocket handler
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('backend/index.ts handles pi-command WebSocket messages', async () => {
-  const source = await readRepoFile('backend/index.ts');
+test('chat websocket handles pi-command WebSocket messages', async () => {
+  const source = await readRepoFile('backend/server/chat-websocket.ts');
   assert.match(
     source,
     /data\.type === 'pi-command'/,
@@ -116,8 +116,8 @@ test('backend/index.ts handles pi-command WebSocket messages', async () => {
   );
   assert.match(
     source,
-    /sendMessageAccepted\(writer,\s*\{[\s\S]*?provider:\s*'pi'/,
-    'must send message-accepted with provider=pi',
+    /preflightResult callback[\s\S]*message-accepted/,
+    'Pi acceptance must be emitted by the runtime preflight callback',
   );
 });
 
@@ -125,8 +125,8 @@ test('backend/index.ts handles pi-command WebSocket messages', async () => {
 // Server pi-command in error catch block
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('backend/index.ts maps pi-command errors to pi-error type', async () => {
-  const source = await readRepoFile('backend/index.ts');
+test('chat websocket maps pi-command errors to pi-error type', async () => {
+  const source = await readRepoFile('backend/server/chat-websocket.ts');
   assert.match(
     source,
     /data\?\.type === 'pi-command'/,
@@ -166,9 +166,9 @@ test('i18n settings.json includes pi agent account description', async () => {
 // WorkflowDetailView Pi recognition
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('WorkflowDetailView recognizes pi sessions from piSessions', async () => {
+test('workflow detail view model recognizes pi sessions from piSessions', async () => {
   const source = await readRepoFile(
-    'frontend/components/main-content/view/subcomponents/WorkflowDetailView.tsx',
+    'frontend/components/main-content/workflow-detail/workflowDetailViewModel.ts',
   );
   assert.match(
     source,
@@ -221,8 +221,8 @@ test('AccountContent shows Pi CLI availability without login or quota', async ()
 // useProjectsState Pi session change detection
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('useProjectsState projectsHaveChanges compares piSessions', async () => {
-  const source = await readRepoFile('frontend/hooks/useProjectsState.ts');
+test('projectRefreshReducer projectsHaveChanges compares piSessions', async () => {
+  const source = await readRepoFile('frontend/hooks/projects/projectRefreshReducer.ts');
   assert.match(
     source,
     /serialize\(nextProject\.piSessions\)\s*!==\s*serialize\(prevProject\.piSessions\)/,
@@ -230,8 +230,8 @@ test('useProjectsState projectsHaveChanges compares piSessions', async () => {
   );
 });
 
-test('useProjectsState getProjectSessions includes piSessions spread', async () => {
-  const source = await readRepoFile('frontend/hooks/useProjectsState.ts');
+test('projectSessionCollections getProjectSessions includes piSessions spread', async () => {
+  const source = await readRepoFile('frontend/hooks/projects/projectSessionCollections.ts');
   assert.match(
     source,
     /\.\.\.\(project\.piSessions\s*\?\?\s*\[\]\)/,

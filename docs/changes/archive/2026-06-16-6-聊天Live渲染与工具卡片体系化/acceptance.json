@@ -1,0 +1,110 @@
+{
+  "summary": "聊天 live 渲染、deliveryStatus 状态机和文件型工具卡片打开行为必须体系化并有真实页面回归。",
+  "coverage": [
+    {
+      "spec": "需求：deliveryStatus 成为明确状态机 / 场景：accepted 用户气泡立即进入绿色 persisted 状态",
+      "tests": ["delivery-status-machine-contract", "chat-live-browser-regression"],
+      "evidence": ["delivery-status-state", "live-before-jsonl-screenshot"],
+      "risk": "旧历史消息缺少 deliveryStatus 时继续按 persisted 显示。"
+    },
+    {
+      "spec": "需求：live transcript 不被 JSONL 延迟阻塞 / 场景：live 内容先于 JSONL 可见且 reload 不清空",
+      "tests": ["live-before-jsonl-contract", "chat-live-browser-regression"],
+      "evidence": ["live-before-jsonl-screenshot"],
+      "risk": "外部 provider 写盘延迟不可控，但前端事件契约可验证。"
+    },
+    {
+      "spec": "需求：工具卡片文件打开契约统一 / 场景：文件型工具路径统一可点击打开",
+      "tests": ["tool-open-file-contract", "tool-open-file-browser-regression"],
+      "evidence": ["tool-open-file-screenshot"],
+      "risk": "文件不存在时由现有 editor error UI 处理。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "delivery-status-machine-contract",
+      "source": "change_contract",
+      "path": "docs/changes/6-聊天Live渲染与工具卡片体系化/tests/chat-live-tooling.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/6-聊天Live渲染与工具卡片体系化/tests/chat-live-tooling.contract.test.ts",
+      "purpose": "证明 deliveryStatus 状态机已从 reducer 细节中抽出。",
+      "assertions": [
+        "deliveryStatusMachine 模块存在",
+        "accepted 状态迁移返回 persisted",
+        "reducer 使用状态机而不是内联字符串迁移"
+      ],
+      "expected_initial_failure": "当前状态迁移仍主要在 reducer 内联。"
+    },
+    {
+      "id": "live-before-jsonl-contract",
+      "source": "change_contract",
+      "path": "docs/changes/6-聊天Live渲染与工具卡片体系化/tests/chat-live-tooling.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/6-聊天Live渲染与工具卡片体系化/tests/chat-live-tooling.contract.test.ts",
+      "purpose": "证明 live before JSONL 的 merge policy 有独立边界。",
+      "assertions": [
+        "liveTurnMergePolicy 模块存在",
+        "session merge 和 session state 均调用 policy",
+        "empty persisted refresh preserve 行为有测试"
+      ],
+      "expected_initial_failure": "当前 live merge policy 尚未抽成独立模块。"
+    },
+    {
+      "id": "tool-open-file-contract",
+      "source": "change_contract",
+      "path": "docs/changes/6-聊天Live渲染与工具卡片体系化/tests/chat-live-tooling.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/6-聊天Live渲染与工具卡片体系化/tests/chat-live-tooling.contract.test.ts",
+      "purpose": "证明文件型工具卡片复用 open-file 配置。",
+      "assertions": [
+        "openFileToolConfig helper 存在",
+        "view_image 和 functions.view_image 复用同一配置",
+        "工具路径以 button/link 形式触发 onFileOpen"
+      ],
+      "expected_initial_failure": "当前 view_image 配置存在重复对象，open-file helper 尚未抽出。"
+    },
+    {
+      "id": "chat-live-browser-regression",
+      "source": "existing_regression",
+      "path": "tests/spec/chat-composer-runtime.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/chat-composer-runtime.spec.ts -g \"running cN follow-up turns green\"",
+      "purpose": "证明真实页面中用户气泡变绿且 live 内容先于 JSONL 出现。",
+      "assertions": [
+        "用户气泡 data-delivery-status 为 persisted",
+        "用户气泡 CSS 背景为绿色",
+        "live assistant 文本在空 JSONL refresh 前可见"
+      ],
+      "expected_initial_failure": "若状态机或 merge 重构破坏行为，该测试会失败。"
+    },
+    {
+      "id": "tool-open-file-browser-regression",
+      "source": "existing_regression",
+      "path": "tests/spec/chat-composer-runtime.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/chat-composer-runtime.spec.ts -g \"view_image tool card path opens\"",
+      "purpose": "证明 view_image 图片路径点击后打开 workspace 图片预览。",
+      "assertions": [
+        "工具卡片路径是可点击控件",
+        "点击后右侧图片预览可见",
+        "预览使用真实 file content API"
+      ],
+      "expected_initial_failure": "若 open-file 配置重构破坏点击行为，该测试会失败。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "delivery-status-state",
+      "kind": "state_snapshot",
+      "path": "test-results/chat-live-tooling/delivery-status-state.json",
+      "purpose": "保存状态机迁移样例；该文件不进入 git。"
+    },
+    {
+      "id": "live-before-jsonl-screenshot",
+      "kind": "screenshot",
+      "path": "test-results/chat-live-tooling/live-before-jsonl.png",
+      "purpose": "证明绿色用户气泡与 live 回复同时可见；该文件不进入 git。"
+    },
+    {
+      "id": "tool-open-file-screenshot",
+      "kind": "screenshot",
+      "path": "test-results/chat-live-tooling/tool-open-file.png",
+      "purpose": "证明工具路径点击后打开 workspace 文件/图片；该文件不进入 git。"
+    }
+  ]
+}

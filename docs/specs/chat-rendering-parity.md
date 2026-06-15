@@ -7,6 +7,7 @@
 | Codex live assistant 不显示冗余元信息 | WebSocket assistant 只显示响应正文 | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `MessageComponent` SSR 渲染 | `MessageComponent` assistant 分支 | 正文可见，provider 标题 `Codex` 和行时间戳不可见 | Node SSR 不验证最终浏览器排版 |
 | Codex 响应必须晚于绿色用户气泡 | 用户气泡仍为 sent 时隐藏同 turn live response | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `mergePersistedAndOptimisticMessages` 和 `reduceNativeRuntimeEvent` | session message merge、native runtime reducer | sent 阶段不显示 live assistant；persisted echo 到达后 user 为 persisted 且 assistant 排在其后 | 多窗口 late duplicate 继续由聊天归并内核规格覆盖 |
 | Pi 与 Codex 命令工具卡结构一致 | 相同命令工具共享卡片结构 | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `MessageComponent` 和 `ToolRenderer` SSR 渲染 | MessageComponent 工具分支、ToolRenderer | 两者都渲染为 `data-testid="codex-tool-card"`，命令、输出 anchor 和结构指纹一致 | 其它工具族需按风险补充专门规格 |
+| 文件型工具卡片路径统一可打开 | view_image/Read/Edit/FileChanges 路径复用 open-file 配置 | `tests/specs/chat-rendering-parity.spec.tsx`、`tests/spec/chat-composer-runtime.spec.ts` | 真实 `ToolRenderer`、tool config 和浏览器文件预览 | `openFileToolConfig`、`ToolRenderer`、workspace file open | 路径渲染为可点击控件，点击后调用 workspace 文件打开；图片路径打开图片预览 | 文件不存在时沿用现有 editor error UI |
 
 ### 需求：Codex live assistant 不显示冗余元信息
 
@@ -40,11 +41,21 @@
 - 并且命令文本、`tool-result-*` 输出 anchor、折叠结果和核心结构必须一致
 - 并且 Pi 不得走 provider 专属的另一套命令工具卡样式
 
+### 需求：文件型工具卡片路径统一可打开
+
+#### 场景：view_image/Read/Edit/FileChanges 路径复用 open-file 配置
+
+- 给定 Codex/Pi 输出 view_image、Read、Edit 或 FileChanges 工具卡片
+- 当工具参数或结果中包含 workspace 文件路径
+- 那么路径必须通过共享 open-file 配置渲染为可点击控件
+- 并且点击时必须把原始路径交给 workspace `onFileOpen`
+- 并且图片路径必须打开右侧图片预览，而不是退化成普通文本或 JSON 展示
+
 ## 契约测试
 
 ### `tests/specs/chat-rendering-parity.spec.tsx`
 
-- 覆盖核心业务契约：Codex live assistant 隐藏冗余 provider/时间戳、Codex live response 等待 persisted 用户气泡、clientRequestId-only 首轮也受 gating 保护、Pi/Codex 命令工具卡结构一致。
+- 覆盖核心业务契约：Codex live assistant 隐藏冗余 provider/时间戳、Codex live response 等待 persisted 用户气泡、clientRequestId-only 首轮也受 gating 保护、Pi/Codex 命令工具卡结构一致、view_image 文件路径渲染为直接可点击 open-file 控件。
 - 真实数据来源：通过 Vite SSR 加载生产 `MessageComponent`、`ThemeProvider`、生产 `sessionMessageMerge` 和 `nativeRuntimeTranscript`，输入使用真实 `ChatMessage` 字段组合与真实 Codex runtime event shape。
 - 入口路径：`pnpm exec tsx --test tests/specs/chat-rendering-parity.spec.tsx`
 - 用户可见断言：以 SSR HTML 和 transcript 顺序检查用户能看到的正文、元信息、气泡顺序、工具卡 anchor 与卡片结构。

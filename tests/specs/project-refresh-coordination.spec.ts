@@ -1,15 +1,28 @@
-// Sources: 2026-06-12-103-多窗口刷新协同和重任务限流
+// Sources: 2026-06-12-103-多窗口刷新协同和重任务限流, 2026-06-16-15-前端项目状态Hook拆分
 // @ts-nocheck -- Spec fixture uses focused in-memory transports for browser-window coordination contracts.
 /**
  * PURPOSE: Verify ozw coordinates project refreshes across browser windows and
  * coalesces duplicate backend heavy reads by business scope.
  */
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
+const REPO_ROOT = process.cwd();
 const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results', 'project-refresh-coordination');
+
+/**
+ * Read repository source text for structural business-boundary assertions.
+ */
+async function readRepoSource(relativePath) {
+  /**
+   * PURPOSE: Keep frontend project-state ownership checks close to the refresh
+   * coordination specs that depend on these modules staying separated.
+   */
+  return fs.readFile(path.join(REPO_ROOT, relativePath), 'utf8');
+}
 
 /**
  * Create an in-memory cross-window transport for the frontend coordinator.
@@ -328,4 +341,53 @@ test('后端相同 scope 的重任务并发合并，失败后可重试', async (
     }, null, 2)}\n`,
     'utf8',
   );
+});
+
+test('project state hook delegates route, session collection, and refresh rules', async () => {
+  const hookPath = 'frontend/hooks/useProjectsState.ts';
+  const hookSource = await readRepoSource(hookPath);
+  const requiredModules = [
+    'frontend/hooks/projects/projectRouteSelection.ts',
+    'frontend/hooks/projects/projectSessionCollections.ts',
+    'frontend/hooks/projects/projectRefreshReducer.ts',
+  ];
+  const snapshot = {
+    hookLineCount: hookSource.split(/\r?\n/).length,
+    modules: requiredModules.map((modulePath) => ({
+      path: modulePath,
+      exists: existsSync(path.join(REPO_ROOT, modulePath)),
+      importedByHook: hookSource.includes(`./projects/${path.basename(modulePath, '.ts')}`),
+    })),
+    legacyRouteRegexCount: (hookSource.match(/\/session\/\(\[\^\/\]\+\)|\/session\/\(\[\^\/\]\+\)|\^\\\/session\\\//g) || []).length,
+  };
+
+  await fs.mkdir(EVIDENCE_DIR, { recursive: true });
+  await fs.writeFile(
+    path.join(EVIDENCE_DIR, 'project-state-hook-split-audit.json'),
+    `${JSON.stringify(snapshot, null, 2)}\n`,
+    'utf8',
+  );
+
+  assert.ok(snapshot.hookLineCount <= 950, `useProjectsState.ts 应收敛为组合 hook，当前 ${snapshot.hookLineCount} 行`);
+  for (const module of snapshot.modules) {
+    assert.equal(module.exists, true, `${module.path} 必须存在`);
+    assert.equal(module.importedByHook, true, `useProjectsState.ts 必须导入 ${module.path}`);
+  }
+});
+
+test('project state split modules expose the business entry points used by navigation', async () => {
+  const expectedExports = [
+    ['frontend/hooks/projects/projectRouteSelection.ts', ['resolveRouteSelection', 'findWorkflowChildSessionForRoute']],
+    ['frontend/hooks/projects/projectSessionCollections.ts', ['getProjectSessions', 'insertSessionIntoProject']],
+    ['frontend/hooks/projects/projectRefreshReducer.ts', ['mergeProjectOverview', 'mergeProjectSummaries']],
+  ];
+
+  for (const [modulePath, exports] of expectedExports) {
+    assert.equal(existsSync(path.join(REPO_ROOT, modulePath)), true, `${modulePath} 必须存在`);
+    const source = await readRepoSource(modulePath);
+    assert.match(source, /PURPOSE|目的|project|session|route|refresh/i, `${modulePath} 必须说明业务目的`);
+    for (const exportName of exports) {
+      assert.match(source, new RegExp(`export\\s+(function|const)\\s+${exportName}\\b`), `${modulePath} 必须导出 ${exportName}`);
+    }
+  }
 });

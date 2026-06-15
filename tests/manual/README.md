@@ -12,7 +12,7 @@ pnpm exec tsx --test tests/manual/node-history/*.test.ts
 pnpm exec playwright test tests/manual/browser-history/*.spec.ts
 ```
 
-这些命令按需运行，不进入默认 `pnpm run test`。运行前应确认当前环境满足对应历史回归的前置条件。
+这些命令按需运行，不进入默认 `pnpm run test`。其中 `tests/manual/browser-history` 是历史浏览器资产，不作为默认门禁；运行前应确认当前环境满足对应历史回归的前置条件。
 
 ## 失败含义
 

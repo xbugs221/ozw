@@ -3,7 +3,8 @@
  * 2026-06-11-97-修复Codex-WS气泡顺序和归属,
  * 2026-06-11-98-稳定Codex流式和ToolCall渲染,
  * 2026-06-11-102-长会话消息增量瘦身,
- * 2026-06-14-111-聊天消息归并内核可测化
+ * 2026-06-14-111-聊天消息归并内核可测化,
+ * 2026-06-16-6-聊天Live渲染与工具卡片体系化
  *
  * PURPOSE: Verify the chat message merge core keeps persisted, live and
  * optimistic Codex messages attached to their original turns.
@@ -333,6 +334,39 @@ test('accepted Codex live turn renders before JSONL history catches up', () => {
     visibleTexts(messages),
     ['explain why live status matters', 'live answer before persisted history'],
     'empty JSONL refresh must not hide accepted live output',
+  );
+});
+
+test('accepted Pi live turn renders before JSONL history catches up', () => {
+  /**
+   * Business case: Pi streams assistant text before its persisted session file
+   * has replayed the turn. The accepted local user row and Pi live row must
+   * remain visible through an empty reload.
+   */
+  const messages = mergePersistedAndOptimisticMessages(
+    [],
+    [
+      row({
+        type: 'user',
+        content: 'explain pi live status',
+        deliveryStatus: 'persisted',
+        clientRequestId: 'pi-live-before-jsonl',
+        messageKey: 'optimistic:pi-live-before-jsonl',
+      }),
+      row({
+        type: 'assistant',
+        content: 'pi live answer before persisted history',
+        source: 'pi-live',
+        messageKey: 'pi-live-before-jsonl-agent',
+      }),
+    ],
+    { preservePreviousMessages: true, sessionId: 'pi-live-before-jsonl-session' },
+  );
+
+  assert.deepEqual(
+    visibleTexts(messages),
+    ['explain pi live status', 'pi live answer before persisted history'],
+    'empty JSONL refresh must not hide accepted Pi live output',
   );
 });
 

@@ -16,6 +16,7 @@ import type { Provider } from '../types/types';
 import type { SessionProvider } from '../../../types/app';
 import { buildPiQueueState, isPiQueueForActiveSession, type PiQueueState } from '../utils/piQueueState';
 import { api } from '../../../utils/api';
+import { hasSessionControlChanged } from '../composer/sessionControlState';
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -464,10 +465,31 @@ function ChatInterface({
         return;
       }
 
+      const nextProvider = patch.provider || effectiveProvider;
+      const currentSelection = {
+        provider: selectedSession.__provider || effectiveProvider,
+        model: typeof selectedSession.model === 'string' ? selectedSession.model : '',
+        reasoningEffort: typeof selectedSession.reasoningEffort === 'string'
+          ? selectedSession.reasoningEffort
+          : undefined,
+        thinkingLevel: typeof selectedSession.thinkingLevel === 'string'
+          ? selectedSession.thinkingLevel
+          : undefined,
+      };
+      const nextSelection = {
+        provider: nextProvider,
+        model: patch.model ?? currentSelection.model,
+        reasoningEffort: patch.reasoningEffort ?? currentSelection.reasoningEffort,
+        thinkingLevel: patch.thinkingLevel ?? currentSelection.thinkingLevel,
+      };
+      if (!hasSessionControlChanged(currentSelection, nextSelection)) {
+        return;
+      }
+
       try {
         const response = await api.updateSessionModelState(projectName, selectedSession.id, {
           projectPath,
-          provider: patch.provider || effectiveProvider,
+          provider: nextProvider,
           ...patch,
         });
         if (!response.ok) {

@@ -294,7 +294,7 @@ test('oz flow graph JSON becomes workflowDag with session and artifact review ta
     assert.ok(workflow, 'workflow must be discovered from real oz flow state path');
     assert.equal(workflow.workflowDag?.source?.format, 'oz flow graph json');
     assert.equal(workflow.workflowDag?.source?.available, true);
-    assert.ok(workflow.workflowDag.nodes.length >= 10, 'DAG nodes must be preserved');
+    assert.ok(workflow.workflowDag.nodes.length >= 9, 'DAG nodes must be preserved after evidence-based pruning');
     assert.ok(
       workflow.workflowDag.edges.some((edge) => edge.from === 'gate_qa_1' && edge.to === 'fix_1' && edge.label === 'QA needs_fix'),
       'conditional edge labels must be preserved',
@@ -345,12 +345,18 @@ test('oz flow graph with null artifacts still binds gate/fix/archive artifacts f
     assertReviewTarget(getDagNode(workflow, 'fix_1'), 'artifact', /fix-1-summary\.md/);
     assertReviewTarget(getDagNode(workflow, 'archive'), 'artifact', /delivery-summary\.md/);
 
-    // Fanin artifacts are missing because graph artifacts=null and run-dir scan only covers fixed patterns
-    // That's expected; node-metadata fallback preserves inspectability
-    const planningFanin = getDagNode(workflow, 'planning_context_fanin');
-    assert.ok(
-      planningFanin.reviewTargets.some((t) => t.kind === 'node-metadata'),
-      'fanin without artifact should retain node-metadata target',
+    // Fanin/subagent nodes without matching child sessions or graph artifacts
+    // are legitimately pruned by evidence-based DAG filtering. With null
+    // graph artifacts, the fanin nodes lose their artifact evidence and are removed.
+    assert.equal(
+      workflow.workflowDag.nodes.some((n) => n.id === 'planning_context_fanin'),
+      false,
+      'fanin node must be pruned without graph artifact evidence',
+    );
+    assert.equal(
+      workflow.workflowDag.nodes.some((n) => n.id === 'before_review_1_fanin'),
+      false,
+      'before_review_1_fanin must be pruned without graph artifact evidence',
     );
   });
 });

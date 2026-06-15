@@ -1,5 +1,64 @@
 # 规格：oz flow 工作流 read model
 
+### 需求：Workflow 外部输入必须有 schema 边界
+
+#### 场景：Workflow 外部 JSON 先归一化再进入读模型
+
+- **给定** workflow 详情页依赖 sealed `state.json`、`oz flow graph` JSON、artifact 和 child session 数据
+- **当** 后端构建 workflow read model
+- **那么** 外部 JSON 必须先经过 `workflow-state-schema.ts` 和 `workflow-graph-schema.ts` 归一化
+- **并且** schema 模块必须导出业务 normalizer 与 normalized 类型
+- **并且** `status-summary.ts` 和 `dag-read-model.ts` 必须导入 schema/normalizer，不得直接把外部 JSON 作为宽泛 `any` 传入核心业务函数
+- **并且** 字段缺失、类型错误和旧状态 fallback 必须形成可诊断 warning
+- **并且** schema 源码审计必须在 `test-results/17-workflow-read-model-schema/source-audit.json` 产出可复核证据
+
+#### 场景：DAG、artifact 和 child session 用户路径保持稳定
+
+- **给定** workflow state/graph 已经被 schema normalizer 归一化
+- **当** ozw 构建 workflow DAG、阶段检查、artifact 链接、runner process、role summary 和 child session route
+- **那么** 归一化不得破坏 stage、artifact 链接、runner process、child session 和 diagnostics 输出
+- **并且** 旧状态 fallback 必须继续由 workflow DAG/read model 回归测试覆盖
+
+### 需求：Workflow 读模型 projection 必须按 artifact、session、process 和 diagnostics 拆分
+
+#### 场景：后端 projection 可以独立审查
+
+- **给定** 后端读取 oz flow run 目录
+- **当** 构建 workflow read model
+- **那么** artifact、child session、runner process 和 diagnostics projection 必须分别由独立模块承载
+- **并且** 每个 projection 模块必须说明自身职责并导出业务入口
+- **并且** read model 规格测试必须继续覆盖七阶段、artifact、child session 和 runner process 输出
+
+### 需求：Workflow 详情页必须把状态推断委托给 view model
+
+#### 场景：详情页组合层不承载核心推断
+
+- **给定** 用户打开 workflow 详情页
+- **当** 页面渲染阶段表格、阶段树、runner process、diagnostics 和 workflow action
+- **那么** `WorkflowDetailView.tsx` 必须只组合 view model 与子组件
+- **并且** continue、resume、abort 状态必须由 workflow detail view model 统一生成
+- **并且** artifact 路径选择和 provider-aware child session route 选项不得重新堆回详情页组件
+- **并且** 阶段表格和阶段树必须同时保留当前轮次 artifact 与 session 跳转能力
+
+### 需求：Workflow 详情页必须区分 runner process 与 child session
+
+#### 场景：sessions-only 数据不伪造 process
+
+- **给定** workflow read model 只有 child session 或存在真实 runner process metadata
+- **当** 前端渲染 runner process 区域
+- **那么** 没有 pid 的 sessions-only 数据不得伪造成 process
+- **并且** session 编号和 process 编号在 UI 上必须语义分离
+- **并且** unsupported explicit provider 必须进入 diagnostics，而不是被降级成其他 provider
+
+### 需求：Workflow 边界重构必须保留可复核运行证据
+
+#### 场景：规格测试产出 read model、view model 和浏览器路径证据
+
+- **给定** 执行 workflow 边界、read model、presentation 和 control-plane 规格测试
+- **当** 测试覆盖 projection、详情页 view model、阶段展示和 child session 路由
+- **那么** 测试必须在 `test-results/10-workflow-boundary/` 下产出 read model snapshot、view model audit、process snapshot、action log、详情截图或 route trace 中对应的运行证据
+- **并且** 这些运行证据不得要求 git 跟踪
+
 ### 需求：oz flow 工作流 read model 必须按业务概念分层
 
 #### 场景：stage、session、artifact、DAG 和 summary 迁出巨型文件

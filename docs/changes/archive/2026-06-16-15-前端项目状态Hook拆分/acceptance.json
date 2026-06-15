@@ -1,0 +1,53 @@
+{
+  "summary": "前端项目状态 hook 拆成可测试的 route selection、session collection 和 refresh reducer，用户导航行为保持稳定。",
+  "coverage": [
+    {
+      "spec": "需求：项目路由选择规则必须可独立测试 / 场景：项目路由选择规则从 hook 中移出并可测试",
+      "tests": ["project-state-hook-split"],
+      "evidence": ["project-state-source-audit"],
+      "risk": "静态源码测试不能覆盖全部浏览器历史栈行为。"
+    },
+    {
+      "spec": "需求：项目刷新和会话集合规则保持用户路径稳定 / 场景：项目刷新和会话集合规则保持用户路径稳定",
+      "tests": ["project-state-hook-split", "project-navigation-regressions"],
+      "evidence": ["project-state-source-audit"],
+      "risk": "用户本地 localStorage 历史组合需要执行阶段手工抽样。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "project-state-hook-split",
+      "source": "change_contract",
+      "path": "docs/changes/15-前端项目状态Hook拆分/tests/project-state-hook-split.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/15-前端项目状态Hook拆分/tests/project-state-hook-split.contract.test.ts",
+      "purpose": "证明 useProjectsState 不再承载主要项目路由、会话集合和刷新 merge 规则。",
+      "assertions": [
+        "route selection、session collection、refresh reducer 模块存在并有业务导出",
+        "useProjectsState 导入这些模块且文件体量下降",
+        "关键路由和会话解析标识不再集中在 hook 主体"
+      ],
+      "expected_initial_failure": "当前 useProjectsState.ts 仍承载主要业务规则，拆分模块不存在。"
+    },
+    {
+      "id": "project-navigation-regressions",
+      "source": "existing_regression",
+      "path": "tests/spec/project-workspace-navigation.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/project-workspace-navigation.spec.ts && pnpm exec tsx --test tests/spec/pi-provider-integration.spec.ts",
+      "purpose": "证明项目工作区导航和 Pi/Codex 会话集合行为保持稳定。",
+      "assertions": [
+        "项目工作区导航仍能选中正确 session",
+        "Pi session change 检测仍参与项目刷新",
+        "浏览器规格测试覆盖真实页面导航"
+      ],
+      "expected_initial_failure": "迁移前应通过；执行阶段若失败表示导航行为回归。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "project-state-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/15-project-state-hook-split/source-audit.json",
+      "purpose": "记录 hook 行数、拆分模块存在性和关键职责迁移情况。"
+    }
+  ]
+}

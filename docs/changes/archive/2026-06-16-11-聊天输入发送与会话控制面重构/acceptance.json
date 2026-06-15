@@ -1,0 +1,147 @@
+{
+  "summary": "验证聊天输入、发送、附件、会话加载、滚动恢复和模型控制从大型 hooks 中拆出，同时保持真实发送、运行中补充、历史加载和文件提及行为稳定。",
+  "coverage": [
+    {
+      "spec": "需求：Hook 变薄 / 场景：输入/加载业务规则进入小模块",
+      "tests": ["chat-control-boundary"],
+      "evidence": ["chat-control-source-audit"],
+      "risk": "复杂副作用仍需代码审查。"
+    },
+    {
+      "spec": "需求：发送行为稳定 / 场景：新会话、cN route、运行中补充不回退",
+      "tests": ["chat-composer-runtime", "codex-ws-turn-ownership"],
+      "evidence": ["chat-submit-trace"],
+      "risk": "Pi SDK 真实运行需 QA。"
+    },
+    {
+      "spec": "需求：附件队列稳定 / 场景：上传限制和失败提示可测试",
+      "tests": ["chat-control-boundary"],
+      "evidence": ["attachment-upload-network"],
+      "risk": "大文件浏览器上传需要 network evidence。"
+    },
+    {
+      "spec": "需求：会话加载稳定 / 场景：reload、delta append、上滑加载不重排",
+      "tests": ["chat-message-merge-core", "chat-control-boundary"],
+      "evidence": ["session-load-snapshot"],
+      "risk": "长会话 DOM 性能需浏览器证据。"
+    },
+    {
+      "spec": "需求：模型控制稳定 / 场景：选择不覆盖用户值且不冗余 PUT",
+      "tests": ["chat-control-boundary", "chat-composer-runtime"],
+      "evidence": ["session-control-log"],
+      "risk": "provider catalog 新字段需新增测试。"
+    },
+    {
+      "spec": "需求：文件提及稳定 / 场景：@文件搜索和 slash command 不回退",
+      "tests": ["file-mention-search"],
+      "evidence": ["file-mention-trace"],
+      "risk": "完整键盘交互需 e2e trace。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "chat-control-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/11-聊天输入发送与会话控制面重构/tests/chat-control-boundary.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/11-聊天输入发送与会话控制面重构/tests/chat-control-boundary.contract.test.ts",
+      "purpose": "证明聊天 composer/session 控制面模块存在，hooks 已收敛为组合层。",
+      "assertions": [
+        "composerDraftState、attachmentQueue、submitDedupPolicy、chatSubmitController、sessionControlState 存在",
+        "sessionMessageLoader、sessionScrollAnchor、sessionRecoveryStore、terminalReconcileController 存在",
+        "useChatComposerState.ts 和 useChatSessionState.ts 行数及 direct fetch 逻辑显著收敛",
+        "执行阶段需产出 chat-control-source-audit 到 test-results/11-chat-control/source-audit.json",
+        "执行阶段需产出 attachment-upload-network 到 test-results/11-chat-control/attachment-network.json",
+        "执行阶段需产出 session-load-snapshot 到 test-results/11-chat-control/session-load.json",
+        "执行阶段需产出 session-control-log 到 test-results/11-chat-control/session-control.log"
+      ],
+      "expected_initial_failure": "当前实现尚未拆出目标模块时，应失败于模块缺失或聊天 hooks 仍过厚。"
+    },
+    {
+      "id": "chat-composer-runtime",
+      "source": "existing_regression",
+      "path": "tests/spec/chat-composer-runtime.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/chat-composer-runtime.spec.ts",
+      "purpose": "证明聊天发送与模型控制运行契约保持稳定。",
+      "assertions": [
+        "新会话发送和运行中补充保持现有语义",
+        "模型/深度状态不被异步 catalog 覆盖",
+        "执行阶段需产出 chat-submit-trace 到 test-results/11-chat-control/chat-submit-trace.zip"
+      ],
+      "expected_initial_failure": "如果发送控制迁移破坏 command payload 或模型状态，应失败。"
+    },
+    {
+      "id": "chat-message-merge-core",
+      "source": "existing_regression",
+      "path": "tests/specs/chat-message-merge-core.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/chat-message-merge-core.spec.ts",
+      "purpose": "证明会话加载拆分不绕过消息 reducer 和 merge 核心。",
+      "assertions": [
+        "persisted/live/optimistic 消息顺序稳定",
+        "delta append 保持已加载消息引用"
+      ],
+      "expected_initial_failure": "如果 loader 直接拼接 transcript 并破坏顺序，应失败。"
+    },
+    {
+      "id": "codex-ws-turn-ownership",
+      "source": "existing_regression",
+      "path": "tests/specs/codex-ws-turn-ownership.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/codex-ws-turn-ownership.spec.ts",
+      "purpose": "证明运行中 Codex turn 归属和 steer 行为稳定。",
+      "assertions": [
+        "accepted/response/complete 绑定同一 turn",
+        "重复 WS item 幂等"
+      ],
+      "expected_initial_failure": "如果发送控制迁移破坏 turn identity，应失败。"
+    },
+    {
+      "id": "file-mention-search",
+      "source": "existing_regression",
+      "path": "tests/spec/chat_file_mention_search.ts",
+      "command": "pnpm exec tsx --test tests/spec/chat_file_mention_search.ts",
+      "purpose": "证明文件提及搜索行为不受 composer 拆分影响。",
+      "assertions": [
+        "多 token 模糊搜索命中文件",
+        "执行阶段需产出 file-mention-trace 到 test-results/11-chat-control/file-mention-trace.zip"
+      ],
+      "expected_initial_failure": "如果输入控制迁移破坏 @ 文件搜索，应失败。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "chat-control-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/11-chat-control/source-audit.json",
+      "purpose": "记录聊天控制面模块、hook 行数和 direct fetch 收敛情况。"
+    },
+    {
+      "id": "chat-submit-trace",
+      "kind": "trace",
+      "path": "test-results/11-chat-control/chat-submit-trace.zip",
+      "purpose": "证明新会话、cN route 和运行中补充发送行为稳定。"
+    },
+    {
+      "id": "attachment-upload-network",
+      "kind": "network",
+      "path": "test-results/11-chat-control/attachment-network.json",
+      "purpose": "记录附件上传请求、失败提示和清理行为。"
+    },
+    {
+      "id": "session-load-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/11-chat-control/session-load.json",
+      "purpose": "记录 reload、delta append 和上滑加载后的消息 key 顺序。"
+    },
+    {
+      "id": "session-control-log",
+      "kind": "runtime_log",
+      "path": "test-results/11-chat-control/session-control.log",
+      "purpose": "记录模型/深度选择、同值短路和 catalog 加载结果。"
+    },
+    {
+      "id": "file-mention-trace",
+      "kind": "trace",
+      "path": "test-results/11-chat-control/file-mention-trace.zip",
+      "purpose": "证明 @ 文件搜索和 slash command 键盘交互稳定。"
+    }
+  ]
+}

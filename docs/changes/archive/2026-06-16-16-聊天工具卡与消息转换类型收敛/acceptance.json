@@ -1,0 +1,53 @@
+{
+  "summary": "聊天工具卡配置和 provider 消息转换使用统一 typed parser，并按工具 family 拆分配置。",
+  "coverage": [
+    {
+      "spec": "需求：Provider payload 解析必须统一 / 场景：Provider payload 解析只有一个 typed 来源",
+      "tests": ["chat-tool-message-types"],
+      "evidence": ["chat-tool-source-audit"],
+      "risk": "第三方 provider 新事件形态需要后续添加样例。"
+    },
+    {
+      "spec": "需求：工具卡配置必须按业务 family 可审查 / 场景：工具卡配置按 family 拆分且保留渲染行为",
+      "tests": ["chat-tool-message-types", "chat-rendering-regressions"],
+      "evidence": ["chat-tool-source-audit"],
+      "risk": "视觉细节仍需现有 Playwright 或人工检查补充。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "chat-tool-message-types",
+      "source": "change_contract",
+      "path": "docs/changes/16-聊天工具卡与消息转换类型收敛/tests/chat-tool-message-types.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/16-聊天工具卡与消息转换类型收敛/tests/chat-tool-message-types.contract.test.ts",
+      "purpose": "证明 provider payload parser 和工具卡配置已经从巨型文件中收敛。",
+      "assertions": [
+        "providerPayloadParsers.ts 导出 file update 和 tool update parser",
+        "messageTransforms/sessionMessageMerge 复用统一 parser",
+        "工具配置按 family 拆分且 toolConfigs.ts 不再是主要实现"
+      ],
+      "expected_initial_failure": "当前 parser 重复分布，toolConfigs.ts 仍是巨型配置文件。"
+    },
+    {
+      "id": "chat-rendering-regressions",
+      "source": "existing_regression",
+      "path": "tests/specs/chat-message-merge-core.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/chat-message-merge-core.spec.ts tests/specs/chat-rendering-parity.spec.tsx && pnpm run test:spec:browser",
+      "purpose": "证明聊天消息归并、工具卡渲染和浏览器真实路径保持稳定。",
+      "assertions": [
+        "persisted/live/optimistic 消息顺序稳定",
+        "工具卡结构化渲染仍显示真实业务内容",
+        "浏览器规格测试覆盖用户可见路径"
+      ],
+      "expected_initial_failure": "迁移前应通过；执行阶段若失败表示聊天行为回归。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "chat-tool-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/16-chat-tool-message-types/source-audit.json",
+      "purpose": "记录工具配置拆分、parser 复用和 TODO/any 收敛情况。"
+    }
+  ]
+}

@@ -14,6 +14,8 @@
 | 空 persisted assistant 不得覆盖 live draft | REST refresh 落后于 WS live draft | `tests/specs/chat-message-merge-core.spec.ts` | previous live draft、stale persisted refresh、final persisted refresh | `mergePersistedAndOptimisticMessages` | 空 persisted assistant 保留同 turn 非空 live draft，非空 final 到达后替换 draft 且只显示一次 | 依赖同 turn identity 推断 |
 | 前端消息增量合并 | 长会话 append 只转换新增 raw rows | `tests/specs/chat-message-merge-core.spec.ts` | 真实 `ChatMessage` 字段和 provider raw message delta | `mergeSessionMessageDelta` | 已有 UI message 对象引用保持稳定，只追加新增 messageKey，重复 delta 不重复追加 | hook 控制流由提案归档测试验证；稳定规格只锁定纯合并能力 |
 | 聊天消息合并由纯 reducer 承担 | Hook 不承载主要消息数组拼接规则 | `tests/specs/chat-message-merge-core.spec.ts` | 前端 chat 源码和生产 reducer | `chatMessageReducer`、`useChatRealtimeHandlersImpl.ts`、`useChatSessionState.ts` | reducer/state/realtime 模块存在且无 suppression，hook 不传任意 updater，13 个 `ChatMessageAction` 分支能产生稳定 transcript | 外部 Provider 新消息形态需要新增 action 与测试样例 |
+| accepted 用户气泡状态机化 | accepted 事件立即转 persisted | `tests/specs/chat-message-merge-core.spec.ts` | 真实 reducer、delivery status 状态机 | `deliveryStatusMachine`、`chatMessageReducer` | accepted optimistic 用户行立即成为 persisted，pending 失败和 persisted echo 迁移不散落在 reducer 字符串逻辑中 | 旧历史消息缺少 deliveryStatus 时仍按 persisted 显示 |
+| live transcript 不被 JSONL 延迟阻塞 | accepted 后 live 先于 JSONL 可见且空刷新不清空 | `tests/specs/chat-message-merge-core.spec.ts` | 真实 reducer、session merge、session state hook | `liveTurnMergePolicy`、`mergePersistedAndOptimisticMessages`、`useChatSessionState` | Codex/Pi live 内容在 persisted JSONL 到达前可见，空 persisted reload 保留 accepted 用户行和 live 内容 | 外部 provider 写盘延迟不可控，但前端事件契约可验证 |
 
 ### 需求：消息归并必须保持 turn 顺序
 
@@ -155,12 +157,36 @@ Hook 只能负责订阅、事件归一化、参数组装和副作用，主要 tr
 - 那么 reducer 必须覆盖全部当前 action 分支
 - 并且输出 transcript 顺序稳定、错误去重、工具结果回填、pending 用户失败和 live assistant 追加行为正确
 
+### 需求：accepted 用户气泡状态机化
+
+delivery status 迁移必须由明确状态机承担，reducer 只能调用状态机函数，不能在多个分支内散落字符串迁移。
+
+#### 场景：accepted 事件立即转 persisted
+
+- 给定用户发送 Codex/Pi 手动会话消息并生成 optimistic 用户行
+- 当 provider 返回 `message-accepted`
+- 那么该用户行必须立即进入 `deliveryStatus: "persisted"`
+- 并且 pending 失败、accepted 成功、persisted echo 覆盖都必须通过 `deliveryStatusMachine` 统一迁移
+
+### 需求：live transcript 不被 JSONL 延迟阻塞
+
+provider live event 先于 JSONL/read model 写盘到达时，前端必须优先保留当前 turn 的 live 可见内容。
+
+#### 场景：accepted 后 live 先于 JSONL 可见且空刷新不清空
+
+- 给定用户消息已 accepted，但 `/messages` 或 JSONL read model 暂未返回该 turn
+- 当 live assistant、tool 或 thinking event 到达
+- 那么 live 内容必须出现在 accepted 用户气泡之后
+- 当随后收到空 persisted reload
+- 那么前端不得清空 accepted 用户行和同 turn live 内容
+
 ## 契约测试
 
 ### `tests/specs/chat-message-merge-core.spec.ts`
 
 - 覆盖核心业务契约：persisted user echo 原位归并、optimistic/persisted user 去重、相同 timestamp 下按 turn anchor 分组、真实 assistant shape 缺少 turn anchor 时保持 user turn、乱序 persisted assistant rows 使用 provider line order 归位、滞后 REST refresh 不追加历史用户、三轮 Codex turn 中 late duplicate live row 不移动历史用户、空 persisted assistant 不覆盖同 turn 非空 live draft、非空 persisted final 替换 live draft、长会话 delta append 保持已有 UI row 引用稳定且不重复追加。
 - 覆盖 reducer 可测化契约：hook 不保留任意 transcript updater 入口，`chatMessageReducer` 覆盖全部当前 `ChatMessageAction` 分支，并验证流式、工具、错误、pending user、persisted reload/delta 和 live runtime event 的 transcript 状态。
+- 覆盖聊天 live 体系化契约：accepted 用户行通过 delivery status 状态机进入 persisted；Codex/Pi live 内容可先于 JSONL/read model 可见；空 persisted reload 不清空 accepted 用户行和 live 内容。
 - 真实数据来源：直接导入生产归并入口 `frontend/components/chat/utils/sessionMessageMerge.ts`，输入使用真实 `ChatMessage` 字段组合。
 - 入口路径：`pnpm exec tsx --test tests/specs/chat-message-merge-core.spec.ts`
 - 用户可见断言：以 visible text 顺序检查 transcript，确保旧用户气泡不追加到底部、live assistant 被 persisted final 覆盖、user/assistant turn 顺序稳定，append refresh 只在底部追加新增可见消息。

@@ -1,0 +1,137 @@
+{
+  "summary": "验证项目域从 backend/projects.ts 中拆出稳定 read model 和 service 边界，同时保持项目列表、overview、manual route、provider session、删除归档和搜索行为稳定。",
+  "coverage": [
+    {
+      "spec": "需求：项目域边界可审查 / 场景：项目 facade 不再承载核心规则",
+      "tests": ["project-domain-boundary"],
+      "evidence": ["project-domain-source-audit"],
+      "risk": "历史兼容分支是否仍必要需要执行阶段代码审查确认。"
+    },
+    {
+      "spec": "需求：项目列表保持轻量 / 场景：默认项目清单不回流重集合",
+      "tests": ["project-domain-boundary", "project-list-summary-api"],
+      "evidence": ["project-list-network-log"],
+      "risk": "真实大历史性能需要 QA 运行时证据补充。"
+    },
+    {
+      "spec": "需求：会话路由集中 / 场景：manual route 绑定由单模块负责",
+      "tests": ["project-domain-boundary"],
+      "evidence": ["route-state-snapshot"],
+      "risk": "旧 config key 迁移需要保留回归样例。"
+    },
+    {
+      "spec": "需求：Provider 会话列表稳定 / 场景：provider/workflow child 过滤仍由 read model 承载",
+      "tests": ["provider-session-list-read-model"],
+      "evidence": ["provider-list-state-snapshot"],
+      "risk": "新增 provider 字段差异需要后续样例覆盖。"
+    },
+    {
+      "spec": "需求：删除归档副作用清晰 / 场景：删除路径通过 service 协调",
+      "tests": ["project-domain-boundary", "projects-delete-regression"],
+      "evidence": ["delete-runtime-log"],
+      "risk": "文件系统权限异常恢复需要人工审查日志。"
+    },
+    {
+      "spec": "需求：搜索和消息读取按需 / 场景：搜索不污染项目发现主路径",
+      "tests": ["project-domain-boundary"],
+      "evidence": ["search-runtime-log"],
+      "risk": "全文搜索性能优化不在本提案范围。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "project-domain-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/8-项目域与会话路由ReadModel分层/tests/project-domain-boundary.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/8-项目域与会话路由ReadModel分层/tests/project-domain-boundary.contract.test.ts",
+      "purpose": "证明项目域核心规则已经从 backend/projects.ts 收敛到可审查的小模块。",
+      "assertions": [
+        "项目发现、配置 read model、manual route、overview、删除和搜索模块存在",
+        "backend/projects.ts 不再承载大量 route/provider/search/delete 核心规则",
+        "项目列表轻量规格仍明确禁止重集合回流",
+        "执行阶段需产出 project-domain-source-audit 到 test-results/8-project-domain/source-audit.json",
+        "执行阶段需产出 route-state-snapshot 到 test-results/8-project-domain/manual-route-state.json",
+        "执行阶段需产出 delete-runtime-log 到 test-results/8-project-domain/delete-runtime.log",
+        "执行阶段需产出 search-runtime-log 到 test-results/8-project-domain/search-runtime.log"
+      ],
+      "expected_initial_failure": "当前实现尚未拆出目标模块时，应失败于模块缺失或 facade 仍过厚。"
+    },
+    {
+      "id": "project-list-summary-api",
+      "source": "existing_regression",
+      "path": "tests/spec/project-list-summary-api.spec.ts",
+      "command": "JWT_SECRET=ozw-test-secret pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/project-list-summary-api.spec.ts --grep \"默认项目清单只返回轻量项目摘要|单项目 overview 按需返回最近会话和 workflow 概览\"",
+      "purpose": "证明项目清单和 overview 职责继续分离。",
+      "assertions": [
+        "默认项目清单不携带 sessions/workflows/batches 重集合",
+        "单项目 overview 仍能返回最近 provider 会话和 workflow 概览",
+        "执行阶段需产出 project-list-network-log 到 test-results/8-project-domain/project-list-network.json"
+      ],
+      "expected_initial_failure": "如果迁移破坏轻量 API 或 overview 按需加载，应失败。"
+    },
+    {
+      "id": "provider-session-list-read-model",
+      "source": "existing_regression",
+      "path": "tests/specs/provider-session-list-read-model.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/provider-session-list-read-model.spec.ts",
+      "purpose": "证明 provider session 列表过滤规则仍由 read model 承载。",
+      "assertions": [
+        "已绑定 cN route 的底层 provider session 不重复显示",
+        "workflow-owned session 不进入普通手动会话列表",
+        "执行阶段需产出 provider-list-state-snapshot 到 test-results/8-project-domain/provider-list-state.json"
+      ],
+      "expected_initial_failure": "如果迁移绕过 provider session read model，应失败。"
+    },
+    {
+      "id": "projects-delete-regression",
+      "source": "existing_regression",
+      "path": "tests/backend/projects.delete.test.ts",
+      "command": "pnpm exec tsx --test tests/backend/projects.delete.test.ts",
+      "purpose": "证明删除会话和项目的副作用保持稳定。",
+      "assertions": [
+        "删除后不可见会话不会继续出现在项目列表",
+        "项目删除和归档判断仍按真实配置执行",
+        "执行阶段需产出 delete-runtime-log 到 test-results/8-project-domain/delete-runtime.log"
+      ],
+      "expected_initial_failure": "如果删除 service 迁移遗漏配置或索引清理，应失败。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "project-domain-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/8-project-domain/source-audit.json",
+      "purpose": "记录拆分后项目域模块列表、projects.ts 行数和 facade 导出清单。"
+    },
+    {
+      "id": "project-list-network-log",
+      "kind": "network",
+      "path": "test-results/8-project-domain/project-list-network.json",
+      "purpose": "证明首页项目列表请求不回流 sessions/workflows/batches 重集合。"
+    },
+    {
+      "id": "route-state-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/8-project-domain/manual-route-state.json",
+      "purpose": "记录 manual cN route 创建、绑定、finalize 后的配置状态。"
+    },
+    {
+      "id": "provider-list-state-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/8-project-domain/provider-list-state.json",
+      "purpose": "记录 provider session list 对 cN route 和 workflow child session 的过滤结果。"
+    },
+    {
+      "id": "delete-runtime-log",
+      "kind": "runtime_log",
+      "path": "test-results/8-project-domain/delete-runtime.log",
+      "purpose": "记录删除 session/project 时 JSONL、索引和 config 清理顺序。"
+    },
+    {
+      "id": "search-runtime-log",
+      "kind": "runtime_log",
+      "path": "test-results/8-project-domain/search-runtime.log",
+      "purpose": "证明项目列表主路径不触发聊天全文搜索深读。"
+    }
+  ]
+}

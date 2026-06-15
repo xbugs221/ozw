@@ -135,9 +135,11 @@ test('running Codex command execution stays visible and duplicate WS items are i
 
 test('同一用户多窗口只向 owner 投递 Codex 会话私有 delta', { concurrency: false }, async () => {
   const { handleChatConnection } = await import(pathToFileURL(`${process.cwd()}/backend/server/chat-websocket.ts`).href);
+  const { createSessionSubscriptionRegistry } = await import(pathToFileURL(`${process.cwd()}/backend/server/realtime/session-subscription-registry.ts`).href);
   const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-change-115-project-'));
   const connectedClients = new Set();
   const chatClientUsers = new WeakMap();
+  const sessionSubscriptionRegistry = createSessionSubscriptionRegistry();
   const windowA = createFakeChatWebSocket();
   const windowB = createFakeChatWebSocket();
 
@@ -212,10 +214,25 @@ test('同一用户多窗口只向 owner 投递 Codex 会话私有 delta', { conc
     normalizeManualProvider: (provider) => provider === 'pi' ? 'pi' : 'codex',
     getNativeSessionStatus: () => ({ isProcessing: false }),
     getActiveNativeSessions: () => [],
+    sessionSubscriptionRegistry,
   };
 
   handleChatConnection(deps, windowA, { user: { id: 'same-user' } });
   handleChatConnection(deps, windowB, { user: { id: 'same-user' } });
+
+  await windowB.emitMessage({
+    type: 'subscribe-session',
+    provider: 'codex',
+    projectName: 'window-owned-project',
+    projectPath,
+    sessionId: 'c2',
+    ozwSessionId: 'c2',
+    options: {
+      projectName: 'window-owned-project',
+      projectPath,
+      cwd: projectPath,
+    },
+  });
 
   await windowA.emitMessage({
     type: 'codex-command',
@@ -247,5 +264,13 @@ test('同一用户多窗口只向 owner 投递 Codex 会话私有 delta', { conc
   assert.equal(privateDeltaForA?.ozw_session_id, 'c1', '窗口 A 的 delta 必须带 snake_case ozw_session_id');
   assert.equal(privateDeltaForA?.provider, 'codex', '窗口 A 的 delta 必须保留 provider 归属');
   assert.equal(privateDeltaForA?.projectPath, projectPath, '窗口 A 的 delta 必须保留 projectPath 归属');
-  assert.equal(messagesForB.length, 0, '窗口 B 未订阅 c1，不能收到窗口 A 的会话私有消息');
+  assert.ok(
+    messagesForB.some((message) => message.type === 'session-subscribed' && message.ozwSessionId === 'c2'),
+    '窗口 B 必须真实订阅另一个会话 c2，才能覆盖 registry 匹配路径',
+  );
+  assert.equal(
+    messagesForB.some((message) => message.type === 'codex-delta'),
+    false,
+    '窗口 B 订阅 c2 时不能收到窗口 A 的 c1 会话私有消息',
+  );
 });

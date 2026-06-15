@@ -9,6 +9,7 @@ import { resolveFlowRunDir } from '../domains/workflows/flow-runtime-paths.js';
 type LooseRecord = Record<string, any>;
 
 const WATCHER_DEBOUNCE_MS = 300;
+const GO_RUNNER_WATCH_DEPTH = 1;
 let projectsWatchers: Array<{ close(): Promise<void> | void }> = [];
 let projectsWatcherDebounceTimer: NodeJS.Timeout | null = null;
 const goRunnerWatchers = new Map<string, { close(): Promise<void> | void }>();
@@ -103,7 +104,9 @@ export function createProviderWatcherController(deps: any) {
             persistent: true,
             ignoreInitial: true,
             followSymlinks: false,
-            depth: 6,
+            // Go read models are rebuilt from state.json and top-level run artifacts.
+            // Deep parallel-member artifact trees can exhaust inotify watches.
+            depth: GO_RUNNER_WATCH_DEPTH,
             awaitWriteFinish: {
                 stabilityThreshold: 100,
                 pollInterval: 50

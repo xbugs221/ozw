@@ -12,6 +12,7 @@ import {
   inferSubagentRoleStage,
   isKnownProvider,
 } from './session-refs.js';
+import { pick, type WorkflowArtifactRef, type WorkflowJsonRecord, type WorkflowRunnerProcess, type WorkflowSessionRef, type WorkflowStageStatus, type WorkflowState } from './workflow-state-schema.js';
 import {
   LEGACY_STAGE_ORDER,
   mapStageStatus,
@@ -20,10 +21,10 @@ import {
   stageLabel,
 } from './stage-taxonomy.js';
 
-type StageStatus = Record<string, any>;
-type SessionRef = Record<string, any>;
-type RunnerProcess = Record<string, any>;
-type ArtifactRef = Record<string, any>;
+type StageStatus = WorkflowStageStatus;
+type SessionRef = WorkflowSessionRef;
+type RunnerProcess = WorkflowRunnerProcess;
+type ArtifactRef = WorkflowArtifactRef;
 
 const TERMINAL_METADATA_STAGES = new Set(['done']);
 const SUBSTAGE_TITLES: Record<string, string> = {
@@ -48,13 +49,6 @@ const SUBSTAGE_TITLES: Record<string, string> = {
 export const COMPLETED_STATUSES = ['completed', 'done', 'success', 'succeeded', 'archived'];
 export const ACTIVE_STATUSES = ['running', 'active', 'in_progress'];
 export const FAILED_STATUSES = ['failed', 'error', 'aborted'];
-
-/**
- * Return a snake_case runner field value.
- */
-function pick(object: Record<string, any> | null | undefined, snakeKey: string): any {
-  return object?.[snakeKey];
-}
 
 /**
  * Return the explicit stage from an oz flow process row, accepting current and
@@ -118,11 +112,11 @@ function parseRunnerStage(stage: unknown): { known: boolean; displayable: boolea
  * contract with legacy fallback for older runs.
  */
 function resolvePlannerSessionRef(
-  sessions: Record<string, any>,
-  workflowConfig: Record<string, any> | undefined,
+  sessions: WorkflowJsonRecord,
+  workflowConfig: WorkflowJsonRecord | undefined,
   childSessions: SessionRef[],
   runId: unknown,
-): Record<string, any> | null {
+): WorkflowJsonRecord | null {
   if (!sessions || typeof sessions !== 'object') {
     return null;
   }
@@ -186,7 +180,7 @@ function resolvePlannerSessionRef(
 /**
  * Resolve a session provider by scanning state.sessions.
  */
-function resolveSessionProviderFromState(sessionId: unknown, sessions: Record<string, any>): string {
+function resolveSessionProviderFromState(sessionId: unknown, sessions: WorkflowJsonRecord): string {
   if (!sessionId) return 'codex';
   for (const [key, value] of Object.entries(sessions || {})) {
     if (String(value).trim() === String(sessionId).trim()) {
@@ -244,7 +238,7 @@ export function markerForStageStatus(stageKey: string, currentStage: string, sta
  * Build normalized stage statuses from runner state and current stage fallback.
  */
 export function buildStageStatuses(
-  state: Record<string, any>,
+  state: WorkflowState,
   currentStage: string,
   rawStatus: string,
   warnings: string[],
@@ -350,7 +344,7 @@ function findSessionRefForStage(
   runnerProcesses: RunnerProcess[],
   warnings: string[],
   jsonlName: string,
-): Record<string, any> | null {
+): WorkflowJsonRecord | null {
   const hasJsonlName = Boolean(String(jsonlName || '').trim());
   if (!hasJsonlName && !parseRunnerStage(stageKey).known) {
     return null;
@@ -389,7 +383,7 @@ function findSessionRefForStage(
       sessionId: process.sessionId,
       provider: process.provider || 'codex',
       stageKey,
-      routePath: `/runs/${encodeURIComponent(childSessions[0]?.workflowId || '')}/sessions/by-id/${encodeURIComponent(process.sessionId)}`,
+      routePath: `/runs/${encodeURIComponent(childSessions[0]?.workflowId || '')}/sessions/by-id/${encodeURIComponent(String(process.sessionId || ''))}`,
     };
   }
   if (hasJsonlName) {
@@ -405,7 +399,7 @@ function findSessionRefForStage(
 /**
  * Remove standalone repair rows once oz flow has emitted the following review row.
  */
-function collapseSupersededRepairLines(lines: Array<Record<string, any>>): Array<Record<string, any>> {
+function collapseSupersededRepairLines(lines: WorkflowJsonRecord[]): WorkflowJsonRecord[] {
   const reviewedFixNumbers = new Set(lines
     .map((line) => String(line.text || '').trim().match(/^(\d+)\s+fix\s+review$/)?.[1])
     .filter(Boolean));
@@ -422,19 +416,19 @@ function collapseSupersededRepairLines(lines: Array<Record<string, any>>): Array
  * Build workflow checklist display lines.
  */
 export function buildWorkflowDisplayLines(
-  state: Record<string, any>,
+  state: WorkflowState,
   stageStatuses: StageStatus[],
   childSessions: SessionRef[],
   runnerProcesses: RunnerProcess[],
   warnings: string[],
-): Array<Record<string, any>> {
+): WorkflowJsonRecord[] {
   const displayLines = Array.isArray(state?.workflow_display?.lines) ? state.workflow_display.lines : [];
   if (displayLines.length > 0) {
-    return collapseSupersededRepairLines(displayLines.map((line: Record<string, any>, index: number) => {
+    return collapseSupersededRepairLines(displayLines.map((line: WorkflowJsonRecord, index: number) => {
       const rawLine = String(line?.raw_line || line?.rawLine || '').trim();
       const marker = String(line?.marker || rawLine.match(/^[✓→ ]/)?.[0] || '').trim() || ' ';
       const text = String(line?.text || rawLine.replace(/^[✓→ ]\s*/, '').replace(/\s+\S+\.jsonl$/, '') || '').trim();
-      const jsonlName = rawLine.match(/(\S+\.jsonl)\s*$/)?.[1] || String(line?.session_ref?.label || '').trim();
+      const jsonlName = rawLine.match(/(\S+\.jsonl)\s*$/)?.[1] || String(pick(pick(line, 'session_ref'), 'label') || '').trim();
       const stageKey = String(line?.stage_key || stageStatuses[index]?.key || '').trim();
       return {
         id: String(line?.id || `${index}:${text}`),
@@ -469,9 +463,9 @@ export function buildWorkflowDisplayLines(
  * Build fixed-role workflow summary rows.
  */
 export function buildWorkflowRoleSummary(
-  state: Record<string, any>,
+  state: WorkflowState,
   childSessions: SessionRef[],
-): Record<string, any> {
+): WorkflowJsonRecord {
   const stages = pick(state, 'stages') || {};
   const sessions = pick(state, 'sessions') || {};
   const stageEntries = Object.entries(stages && typeof stages === 'object' ? stages : {});
@@ -521,7 +515,7 @@ export function buildWorkflowRoleSummary(
     return null;
   }
 
-  function resolveSessionRef(role: string, label: string): Record<string, any> | null {
+  function resolveSessionRef(role: string, label: string): WorkflowJsonRecord | null {
     let sessionId = '';
     let sessionProvider = 'codex';
 
@@ -551,7 +545,7 @@ export function buildWorkflowRoleSummary(
     if (!sessionId) {
       const childMatch = childSessions.find((session) => session.role === role || session.stageKey === role);
       if (childMatch) {
-        sessionId = childMatch.id;
+        sessionId = String(childMatch.id || '').trim();
         sessionProvider = childMatch.provider || 'codex';
       }
     }
@@ -601,7 +595,7 @@ export function buildWorkflowRoleSummary(
   ));
   const showAcceptanceRow = hasAcceptanceStage || hasAcceptanceSession || hasAcceptanceArtifact;
 
-  const rows: Array<Record<string, any>> = [
+  const rows: WorkflowJsonRecord[] = [
     {
       key: 'planning',
       label: '规',
@@ -667,12 +661,12 @@ export function buildWorkflowRoleSummary(
  * Build oz flow status/watch structured summary.
  */
 export function buildWorkflowStatusSummary(
-  state: Record<string, any>,
+  state: WorkflowState,
   childSessions: SessionRef[],
   artifacts: ArtifactRef[],
-  dagNodes: Record<string, any>,
+  dagNodes: WorkflowJsonRecord,
   hasPlanningArtifacts: boolean,
-): Record<string, any> {
+): WorkflowJsonRecord {
   const stages = pick(state, 'stages') || {};
   const sessions = pick(state, 'sessions') || {};
   const engine = String(pick(state, 'engine') || pick(state, 'workflow_config')?.engine || '').trim() || undefined;
@@ -696,7 +690,7 @@ export function buildWorkflowStatusSummary(
     if (artifact.stage && artifact.exists !== false) evidenceStageKeys.add(artifact.stage);
   }
   for (const [nodeId, nodeData] of Object.entries(dagNodes || {})) {
-    const nodeStatus = String(nodeData?.status || '').toLowerCase();
+    const nodeStatus = String((nodeData as WorkflowJsonRecord)?.status || '').toLowerCase();
     if (!nodeStatus || nodeStatus === 'pending') {
       continue;
     }
@@ -714,7 +708,7 @@ export function buildWorkflowStatusSummary(
     if (stageStatus && stageStatus !== 'pending') {
       return stageStatus;
     }
-    const dagStatus = String(dagNodes?.[stageKey]?.status || '').toLowerCase();
+    const dagStatus = String((dagNodes?.[stageKey] as WorkflowJsonRecord | undefined)?.status || '').toLowerCase();
     if (dagStatus && dagStatus !== 'pending') {
       return dagStatus;
     }
@@ -798,14 +792,14 @@ export function buildWorkflowStatusSummary(
         return { sessionId, provider: resolveSessionProviderFromState(sessionId, sessions) || 'codex' };
       }
     }
-    const childMatch = (childSessions || []).find((session) => stageKeys.includes(session.stageKey));
+    const childMatch = (childSessions || []).find((session) => Boolean(session.stageKey && stageKeys.includes(session.stageKey)));
     if (childMatch?.id) {
       return { sessionId: childMatch.id, provider: childMatch.provider || 'codex' };
     }
     return null;
   }
 
-  function buildRow(key: string, label: string, role: string, stageKeys: string[]): Record<string, any> | null {
+  function buildRow(key: string, label: string, role: string, stageKeys: string[]): WorkflowJsonRecord | null {
     if (!stageKeys || stageKeys.length === 0) {
       return null;
     }
@@ -878,7 +872,7 @@ export function buildWorkflowStatusSummary(
 /**
  * Read oz flow status duration values without forcing one runner schema.
  */
-function getStageDurationText(state: Record<string, any>, stageKey: string): string {
+function getStageDurationText(state: WorkflowState, stageKey: string): string {
   const durationMaps = [
     pick(state, 'stage_durations'),
     pick(state, 'stageDurations'),
@@ -900,14 +894,14 @@ function getStageDurationText(state: Record<string, any>, stageKey: string): str
  * Build stage inspection read models.
  */
 export function buildStageInspections(
-  state: Record<string, any>,
+  state: WorkflowState,
   stageStatuses: StageStatus[],
   childSessions: SessionRef[],
   artifacts: ArtifactRef[],
   runnerError: string,
-  diagnostics: Record<string, any>,
-  workflowDag: Record<string, any>,
-): Array<Record<string, any>> {
+  diagnostics: WorkflowJsonRecord,
+  workflowDag: WorkflowJsonRecord,
+): WorkflowJsonRecord[] {
   const dagTargetsByStage = collectDagTargetsByStage(workflowDag);
   return stageStatuses.map((stage) => {
     const stageSessions = childSessions.filter((session) => session.stageKey === stage.key);
@@ -933,7 +927,7 @@ export function buildStageInspections(
       durationText: getStageDurationText(state, stage.key),
       provider: 'codex',
       note: stage.status === 'blocked' ? runnerError || undefined : undefined,
-      warnings: (diagnostics.warnings || []).map((message: string) => ({
+      warnings: (Array.isArray(diagnostics.warnings) ? diagnostics.warnings : []).map((message: string) => ({
         type: 'runner_diagnostic',
         stageKey: stage.key,
         provider: 'codex',

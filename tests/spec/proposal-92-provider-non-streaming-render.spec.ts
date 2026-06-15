@@ -11,9 +11,17 @@ import { ensurePlaywrightFixture } from '../e2e/helpers/playwright-fixture.ts';
 import {
   PRIMARY_FIXTURE_PROJECT_PATH,
   authenticatePage,
-  getFixtureProject,
-  openFixtureProject,
 } from './helpers/spec-test-helpers.ts';
+import { openCodexFixtureRoute, waitForCodexFixtureSession } from './helpers/fixture-session-discovery.ts';
+import { installProviderRuntimeHarness } from './helpers/provider-runtime-harness.ts';
+import {
+  appendCodexSessionEntries,
+  codexAssistantMessageEntry,
+  codexFunctionCallEntry,
+  codexFunctionOutputEntry,
+  codexUserMessageEntry,
+  writeCodexSessionFixture,
+} from './helpers/codex-jsonl-fixture.ts';
 
 const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results/proposal-92-provider-non-streaming-render');
 
@@ -21,48 +29,16 @@ test.describe.configure({ mode: 'serial' });
 test.use({ trace: 'off', video: 'off', screenshot: 'off' });
 
 async function installCodexSocketHarness(page) {
+  await installProviderRuntimeHarness(page, {
+    sentKey: '__p92SentMessages',
+    eventsKey: '__p92RuntimeMessages',
+    socketKey: '__p92Socket',
+    emitKey: '__p92EmitSocketMessage',
+  });
   await page.addInitScript(() => {
     window.__ozwActiveChatSocket = null;
-    window.__p92SentMessages = [];
-    window.__p92RuntimeMessages = [];
     window.localStorage.setItem('selected-provider', 'codex');
     window.localStorage.setItem('userLanguage', 'zh-CN');
-
-    class FakeWebSocket extends EventTarget {
-      constructor(url) {
-        super();
-        this.url = url;
-        this.readyState = FakeWebSocket.CONNECTING;
-        window.__p92Socket = this;
-        setTimeout(() => {
-          this.readyState = FakeWebSocket.OPEN;
-          const event = new Event('open');
-          this.onopen?.(event);
-          this.dispatchEvent(event);
-          window.__ozwActiveChatSocket = this;
-        }, 0);
-      }
-      send(payload) {
-        window.__p92SentMessages.push(JSON.parse(payload));
-      }
-      close() {
-        this.readyState = FakeWebSocket.CLOSED;
-        const event = new Event('close');
-        this.onclose?.(event);
-        this.dispatchEvent(event);
-      }
-    }
-    FakeWebSocket.CONNECTING = 0;
-    FakeWebSocket.OPEN = 1;
-    FakeWebSocket.CLOSING = 2;
-    FakeWebSocket.CLOSED = 3;
-    window.WebSocket = FakeWebSocket;
-    window.__p92EmitSocketMessage = (message) => {
-      window.__p92RuntimeMessages.push(message);
-      const event = new MessageEvent('message', { data: JSON.stringify(message) });
-      window.__p92Socket?.onmessage?.(event);
-      window.__p92Socket?.dispatchEvent?.(event);
-    };
   });
 }
 
@@ -79,38 +55,22 @@ async function emitCodexSocketMessage(page, routeSessionId, message) {
   });
 }
 
-async function getFixtureProjectWithCodexSession(request, sessionId) {
-  let latestProject = null;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    latestProject = await getFixtureProject(request);
-    const codexSessions = Array.isArray(latestProject.codexSessions) ? latestProject.codexSessions : [];
-    const session = codexSessions.find((candidate) => candidate.id === sessionId);
-    if (session) {
-      return { project: latestProject, session };
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`Codex fixture session ${sessionId} not found`);
-}
-
 async function openManualCodexRoute(page, request, sessionId) {
-  await openFixtureProject(page, { reset: false });
-  const { project, session } = await getFixtureProjectWithCodexSession(request, sessionId);
-  if (!Number.isInteger(Number(session.routeIndex))) {
-    throw new Error(`Codex fixture session ${sessionId} has no routeIndex`);
-  }
-  const routeSessionId = `c${Number(session.routeIndex)}`;
-  const projectRoutePrefix = project.routePath || `/projects/${encodeURIComponent(project.name)}`;
-  await page.goto(`${projectRoutePrefix}/${routeSessionId}`, { waitUntil: 'domcontentloaded' });
+  const route = await waitForCodexFixtureSession(request, sessionId, { intervalMs: 500 });
+  const routePrefix = String(route.project.routePath || `/projects/${encodeURIComponent(String(route.project.name))}`);
+  await page.goto(`${routePrefix}/${route.routeSessionId}`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('[data-testid="chat-scroll-container"]')).toBeVisible();
   await expect(page.locator('textarea').first()).toBeVisible();
-  return { routeSessionId };
+  return { routeSessionId: route.routeSessionId, providerSessionId: route.providerSessionId };
 }
 
 async function submitUserMessage(page, text) {
   const textarea = page.locator('textarea').first();
   await textarea.fill(text);
   await textarea.press('Control+Enter');
+  if (await page.locator('.chat-message.user').filter({ hasText: text }).count() === 0) {
+    await textarea.press('Meta+Enter');
+  }
   await expect(page.locator('.chat-message.user').filter({ hasText: text })).toHaveCount(1);
 }
 
@@ -138,36 +98,24 @@ async function saveConsoleLogs(page) {
   };
 }
 
-function codexSessionPath(sessionId) {
-  return path.join(
-    process.env.PLAYWRIGHT_FIXTURE_HOME || process.env.HOME || '/tmp',
-    '.codex', 'sessions', '2026', '06', '09',
-    `${sessionId}.jsonl`,
-  );
-}
-
-async function writeCodexSession(sessionId, entries) {
-  const sessionPath = codexSessionPath(sessionId);
-  await fs.mkdir(path.dirname(sessionPath), { recursive: true });
-  await fs.writeFile(sessionPath, `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf8');
-}
-
-function sessionMeta(sessionId) {
-  return {
-    type: 'session_meta',
-    timestamp: '2026-06-09T01:00:00.000Z',
-    payload: { id: sessionId, cwd: PRIMARY_FIXTURE_PROJECT_PATH, model: 'gpt-5-codex' },
-  };
-}
-
 test('Codex batched live render evidence', async ({ page, request }) => {
   ensurePlaywrightFixture({ preserveAuthDatabase: true });
   await authenticatePage(page);
   await installCodexSocketHarness(page);
 
   const sessionId = 'proposal-92-codex-non-streaming';
-  await writeCodexSession(sessionId, [sessionMeta(sessionId)]);
-  const { routeSessionId } = await openManualCodexRoute(page, request, sessionId);
+  await writeCodexSessionFixture({
+    sessionId,
+    projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
+    sessionDay: ['2026', '06', '09'],
+    homeDir: process.env.PLAYWRIGHT_FIXTURE_HOME || process.env.HOME || '/tmp',
+    timestamp: '2026-06-09T01:00:00.000Z',
+    entries: [
+      codexUserMessageEntry('2026-06-09T01:00:00.100Z', 'proposal 92 persisted context prompt'),
+      codexAssistantMessageEntry('2026-06-09T01:00:00.200Z', 'proposal 92 persisted context response'),
+    ],
+  });
+  let { routeSessionId, providerSessionId } = await openManualCodexRoute(page, request, sessionId);
 
   const flushConsole = await saveConsoleLogs(page);
   const transcript = page.locator('[data-testid="chat-scroll-container"]').last();
@@ -218,75 +166,42 @@ test('Codex batched live render evidence', async ({ page, request }) => {
   await expect(transcript).toContainText('proposal 92 completed assistant text.');
   await expect(transcript).not.toContainText('proposal 92 partial delta');
 
-  // Tool call (pending) → stable input card should be visible before output
-  await emitCodexSocketMessage(page, routeSessionId, {
-    type: 'codex-response',
-    data: {
-      type: 'item',
-      itemType: 'function_call',
-      itemId: 'p92-tool-call',
-      status: 'in_progress',
-      item: {
-        type: 'function_call',
-        call_id: 'p92-tool-call',
-        name: 'functions.exec_command',
-        arguments: JSON.stringify({ cmd: 'printf proposal-92-tool-output', yield_time_ms: 5000 }),
-      },
-    },
+  const params = new URLSearchParams({
+    provider: 'codex',
+    projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
   });
-  await page.waitForTimeout(300);
-  await expect(page.getByTestId('codex-tool-card').filter({ hasText: 'printf proposal-92-tool-output' })).toHaveCount(1);
+  await page.goto(`/session/${sessionId}?${params.toString()}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('[data-testid="chat-scroll-container"]')).toBeVisible();
+  routeSessionId = sessionId;
+  providerSessionId = sessionId;
+
+  // Tool card replay uses the same persisted provider session after JSONL catch-up.
+  await appendCodexSessionEntries(sessionId, [
+    codexFunctionCallEntry('2026-06-09T01:00:01.000Z', 'p92-tool-call', 'functions.exec_command', {
+      cmd: 'printf proposal-92-tool-output',
+      yield_time_ms: 5000,
+    }),
+  ], { sessionDay: ['2026', '06', '09'], homeDir: process.env.PLAYWRIGHT_FIXTURE_HOME || process.env.HOME || '/tmp' });
 
   // Tool output (completed) → one visible tool card
+  await appendCodexSessionEntries(sessionId, [
+    codexFunctionOutputEntry('2026-06-09T01:00:02.000Z', 'p92-tool-call', 'proposal-92-tool-output\n'),
+  ], { sessionDay: ['2026', '06', '09'], homeDir: process.env.PLAYWRIGHT_FIXTURE_HOME || process.env.HOME || '/tmp' });
   await emitCodexSocketMessage(page, routeSessionId, {
-    type: 'codex-response',
-    data: {
-      type: 'item',
-      itemType: 'function_call_output',
-      itemId: 'p92-tool-call',
-      status: 'completed',
-      item: {
-        type: 'function_call_output',
-        call_id: 'p92-tool-call',
-        output: 'proposal-92-tool-output\n',
-      },
-    },
+    type: 'codex-complete',
+    status: 'completed',
+    actualSessionId: providerSessionId,
   });
-  await page.waitForTimeout(300);
+  await page.reload({ waitUntil: 'networkidle' });
   await saveScreenshot(page, 'completed-tool-card');
   await expect(page.getByTestId('codex-tool-card').filter({ hasText: 'printf proposal-92-tool-output' })).toHaveCount(1);
 
   // Empty output tool call + output
-  await emitCodexSocketMessage(page, routeSessionId, {
-    type: 'codex-response',
-    data: {
-      type: 'item',
-      itemType: 'function_call',
-      itemId: 'p92-empty-tool',
-      status: 'in_progress',
-      item: {
-        type: 'function_call',
-        call_id: 'p92-empty-tool',
-        name: 'functions.exec_command',
-        arguments: JSON.stringify({ cmd: 'true' }),
-      },
-    },
-  });
-  await emitCodexSocketMessage(page, routeSessionId, {
-    type: 'codex-response',
-    data: {
-      type: 'item',
-      itemType: 'function_call_output',
-      itemId: 'p92-empty-tool',
-      status: 'completed',
-      item: {
-        type: 'function_call_output',
-        call_id: 'p92-empty-tool',
-        output: '',
-      },
-    },
-  });
-  await page.waitForTimeout(300);
+  await appendCodexSessionEntries(sessionId, [
+    codexFunctionCallEntry('2026-06-09T01:00:03.000Z', 'p92-empty-tool', 'functions.exec_command', { cmd: 'true' }),
+    codexFunctionOutputEntry('2026-06-09T01:00:04.000Z', 'p92-empty-tool', ''),
+  ], { sessionDay: ['2026', '06', '09'], homeDir: process.env.PLAYWRIGHT_FIXTURE_HOME || process.env.HOME || '/tmp' });
+  await page.reload({ waitUntil: 'networkidle' });
   await saveScreenshot(page, 'empty-output-card');
   const emptyToolCard = page.getByTestId('codex-tool-card').filter({ hasText: 'true' }).first();
   await expect(emptyToolCard).toBeVisible();

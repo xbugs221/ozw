@@ -1,0 +1,126 @@
+{
+  "summary": "验证 docs/specs 建立索引、拆分超长规格、清理重复和旧术语，并同步 README 与测试分类入口。",
+  "coverage": [
+    {
+      "spec": "需求：规格索引可用 / 场景：index 列出领域、入口测试和 owner",
+      "tests": ["spec-docs-boundary"],
+      "evidence": ["specs-index-audit"],
+      "risk": "owner 精度需要人工审查。"
+    },
+    {
+      "spec": "需求：超长规格拆分 / 场景：active spec 单篇长度有上限",
+      "tests": ["spec-docs-boundary"],
+      "evidence": ["specs-linecount-report"],
+      "risk": "部分复杂规格仍可能接近上限。"
+    },
+    {
+      "spec": "需求：依赖工具文档拆分 / 场景：dependencies-and-tooling 不再混杂多主题",
+      "tests": ["spec-docs-boundary"],
+      "evidence": ["dependencies-split-map"],
+      "risk": "旧需求迁移完整性需人工 diff 核对。"
+    },
+    {
+      "spec": "需求：Pi 输入规格拆分 / 场景：控件、恢复和工具卡片分离",
+      "tests": ["spec-docs-boundary"],
+      "evidence": ["pi-spec-split-map"],
+      "risk": "Pi UI 细节后续可能继续增长。"
+    },
+    {
+      "spec": "需求：旧术语边界清晰 / 场景：活跃当前口径不再混用旧称呼",
+      "tests": ["historical-provider-wording-assets", "spec-docs-boundary"],
+      "evidence": ["legacy-wording-report"],
+      "risk": "历史兼容说明需要明确例外列表。"
+    },
+    {
+      "spec": "需求：测试入口同步 / 场景：README/taxonomy/spec 引用一致",
+      "tests": ["test-suite-taxonomy", "spec-docs-boundary"],
+      "evidence": ["docs-test-entry-report"],
+      "risk": "新增测试后仍需维护索引。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "spec-docs-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/12-规格文档拆分去冗余与索引更新/tests/spec-docs-boundary.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/12-规格文档拆分去冗余与索引更新/tests/spec-docs-boundary.contract.test.ts",
+      "purpose": "证明规格索引、拆分目标、长度上限、旧术语边界和测试入口同步已经落实。",
+      "assertions": [
+        "docs/specs/index.md 存在并列出领域、测试入口和源码 owner",
+        "active docs/specs 单篇不超过 450 行",
+        "dependencies-and-tooling 与 Pi 输入长文档已拆出目标规格",
+        "当前口径文档不继续传播旧 Codex SDK/native-sdk 主路径",
+        "执行阶段需产出 specs-index-audit 到 test-results/12-spec-docs/index-audit.json",
+        "执行阶段需产出 specs-linecount-report 到 test-results/12-spec-docs/linecount.json",
+        "执行阶段需产出 dependencies-split-map 到 test-results/12-spec-docs/dependencies-split-map.json",
+        "执行阶段需产出 pi-spec-split-map 到 test-results/12-spec-docs/pi-spec-split-map.json",
+        "执行阶段需产出 legacy-wording-report 到 test-results/12-spec-docs/legacy-wording.json",
+        "执行阶段需产出 docs-test-entry-report 到 test-results/12-spec-docs/test-entry-report.json"
+      ],
+      "expected_initial_failure": "当前实现尚未建立索引且存在超长规格时，应失败于索引缺失、长文档或拆分目标缺失。"
+    },
+    {
+      "id": "test-suite-taxonomy",
+      "source": "existing_regression",
+      "path": "tests/spec/test_suite_taxonomy.ts",
+      "command": "pnpm exec tsx --test tests/spec/test_suite_taxonomy.ts",
+      "purpose": "证明测试分类说明和运行入口保持一致。",
+      "assertions": [
+        "README 中测试分类说明包含当前入口",
+        "可执行测试不回到根目录",
+        "文档说明不继续引用旧测试入口"
+      ],
+      "expected_initial_failure": "如果文档拆分后 README 或 taxonomy 未同步，应失败。"
+    },
+    {
+      "id": "historical-provider-wording-assets",
+      "source": "existing_regression",
+      "path": "tests/specs/historical-provider-wording-assets.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/historical-provider-wording-assets.spec.ts",
+      "purpose": "证明文档清理不重新引入过期 provider 口径。",
+      "assertions": [
+        "active docs 不把 Codex 当前主路径描述为 SDK Thread/runStreamed",
+        "旧称呼只出现在明确 legacy/history 边界内"
+      ],
+      "expected_initial_failure": "如果拆分文档继续传播旧口径，应失败。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "specs-index-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/12-spec-docs/index-audit.json",
+      "purpose": "记录 index 覆盖的领域、测试入口和源码 owner。"
+    },
+    {
+      "id": "specs-linecount-report",
+      "kind": "state_snapshot",
+      "path": "test-results/12-spec-docs/linecount.json",
+      "purpose": "记录 docs/specs 清理后的行数和标题数。"
+    },
+    {
+      "id": "dependencies-split-map",
+      "kind": "state_snapshot",
+      "path": "test-results/12-spec-docs/dependencies-split-map.json",
+      "purpose": "记录 dependencies-and-tooling 拆分到新文档的映射。"
+    },
+    {
+      "id": "pi-spec-split-map",
+      "kind": "state_snapshot",
+      "path": "test-results/12-spec-docs/pi-spec-split-map.json",
+      "purpose": "记录 Pi 输入规格拆分到 controls/recovery/toolcards 的映射。"
+    },
+    {
+      "id": "legacy-wording-report",
+      "kind": "state_snapshot",
+      "path": "test-results/12-spec-docs/legacy-wording.json",
+      "purpose": "记录旧术语扫描结果和允许例外。"
+    },
+    {
+      "id": "docs-test-entry-report",
+      "kind": "state_snapshot",
+      "path": "test-results/12-spec-docs/test-entry-report.json",
+      "purpose": "记录 specs/README/taxonomy 中测试命令和路径的一致性。"
+    }
+  ]
+}

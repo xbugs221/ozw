@@ -1,3 +1,4 @@
+// @ts-nocheck -- Historical steer-runtime acceptance uses loose mock transports; proposal 4 keeps behavior coverage while the shared app-server mock type is extracted separately.
 /**
  * PURPOSE: Verify Codex manual chat uses the app-server steer protocol for
  * running user input instead of queueing it behind the active turn.

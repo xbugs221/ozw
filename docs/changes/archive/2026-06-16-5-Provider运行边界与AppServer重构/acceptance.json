@@ -1,0 +1,110 @@
+{
+  "summary": "Provider runtime 必须形成 Codex app-server、Pi SDK、route binding、active-turn 与 live snapshot 的清晰边界。",
+  "coverage": [
+    {
+      "spec": "需求：Provider runtime 主路径边界清晰 / 场景：Codex 只能通过 app-server runtime",
+      "tests": ["provider-runtime-boundary-contract", "codex-app-server-regression"],
+      "evidence": ["provider-runtime-source-audit"],
+      "risk": "不真实调用外部 Codex 账号。"
+    },
+    {
+      "spec": "需求：Route session 与 provider session 绑定单一职责 / 场景：cN route 与 provider session 绑定集中管理",
+      "tests": ["provider-session-binding-contract"],
+      "evidence": ["provider-binding-state"],
+      "risk": "底层持久化格式保持兼容，不作为本提案迁移目标。"
+    },
+    {
+      "spec": "需求：运行态恢复和完成清理可推理 / 场景：active-turn overlay 与 live snapshot 生命周期分离",
+      "tests": ["active-turn-live-store-contract", "provider-runtime-recovery-regression"],
+      "evidence": ["active-turn-runtime-log"],
+      "risk": "provider 写盘延迟仍通过 live-before-JSONL 策略处理。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "provider-runtime-boundary-contract",
+      "source": "change_contract",
+      "path": "docs/changes/5-Provider运行边界与AppServer重构/tests/provider-runtime-boundary.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/5-Provider运行边界与AppServer重构/tests/provider-runtime-boundary.contract.test.ts",
+      "purpose": "证明 provider runtime 边界模块存在且 Codex 不回退旧 SDK。",
+      "assertions": [
+        "runtime-router 和 provider-runtime-events 模块存在",
+        "Codex 分支调用 app-server facade",
+        "生产源码没有 @openai/codex-sdk"
+      ],
+      "expected_initial_failure": "当前 provider runtime 边界模块尚未抽出。"
+    },
+    {
+      "id": "provider-session-binding-contract",
+      "source": "change_contract",
+      "path": "docs/changes/5-Provider运行边界与AppServer重构/tests/provider-runtime-boundary.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/5-Provider运行边界与AppServer重构/tests/provider-runtime-boundary.contract.test.ts",
+      "purpose": "证明 cN route 与 provider session 绑定由单一模块管理。",
+      "assertions": [
+        "provider-session-binding 模块暴露读写函数",
+        "chat websocket 使用绑定模块",
+        "session messages handler 使用绑定模块"
+      ],
+      "expected_initial_failure": "当前绑定逻辑分散在多个模块。"
+    },
+    {
+      "id": "active-turn-live-store-contract",
+      "source": "change_contract",
+      "path": "docs/changes/5-Provider运行边界与AppServer重构/tests/provider-runtime-boundary.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/5-Provider运行边界与AppServer重构/tests/provider-runtime-boundary.contract.test.ts",
+      "purpose": "证明 active-turn overlay 与 live transcript snapshot 生命周期分离。",
+      "assertions": [
+        "active-turn-store 模块存在",
+        "live-transcript-store 模块存在",
+        "complete/abort/error 清理路径可审计"
+      ],
+      "expected_initial_failure": "当前相关逻辑尚未收敛到独立 store。"
+    },
+    {
+      "id": "codex-app-server-regression",
+      "source": "existing_regression",
+      "path": "tests/specs/codex-app-server-protocol-mapping.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/codex-app-server-steer-runtime.spec.ts tests/specs/codex-app-server-protocol-mapping.spec.ts",
+      "purpose": "证明 app-server protocol mapping 和 steer runtime 行为未被重构破坏。",
+      "assertions": [
+        "app-server thread/start 映射保持",
+        "running follow-up/steer 规则保持",
+        "transport close 错误清理保持"
+      ],
+      "expected_initial_failure": "若重构破坏 app-server 映射，现有回归会失败。"
+    },
+    {
+      "id": "provider-runtime-recovery-regression",
+      "source": "new_regression",
+      "path": "docs/changes/5-Provider运行边界与AppServer重构/tests/provider-runtime-boundary.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/5-Provider运行边界与AppServer重构/tests/provider-runtime-boundary.contract.test.ts",
+      "purpose": "证明 running、complete、abort、error 的 active-turn 与 live snapshot 生命周期。",
+      "assertions": [
+        "running refresh 可恢复 active turn",
+        "complete 后 JSONL 优先于 live snapshot",
+        "abort/error 清理 active turn 且保留用户可见失败"
+      ],
+      "expected_initial_failure": "当前缺少集中 store 后无法统一断言生命周期。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "provider-runtime-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/provider-runtime/source-audit.json",
+      "purpose": "保存 runtime 模块边界与旧 SDK 引用审计；该文件不进入 git。"
+    },
+    {
+      "id": "provider-binding-state",
+      "kind": "state_snapshot",
+      "path": "test-results/provider-runtime/binding-state.json",
+      "purpose": "保存 cN route/provider session 绑定读写样例；该文件不进入 git。"
+    },
+    {
+      "id": "active-turn-runtime-log",
+      "kind": "runtime_log",
+      "path": "test-results/provider-runtime/active-turn-runtime.log",
+      "purpose": "保存 running/complete/abort/error 生命周期日志；该文件不进入 git。"
+    }
+  ]
+}

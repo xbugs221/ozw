@@ -15,6 +15,7 @@ import {
 } from '../../e2e/helpers/playwright-fixture.ts';
 
 process.env.DATABASE_PATH = PLAYWRIGHT_FIXTURE_AUTH_DB;
+process.env.JWT_SECRET ||= 'spec-test-helpers-jwt-secret';
 
 const [{ generateToken }, { userDb }] = await Promise.all([
   import('../../../backend/middleware/auth.ts'),

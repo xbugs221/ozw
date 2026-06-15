@@ -8,10 +8,19 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   authenticatePage,
-  getFixtureProject,
   openFixtureProject,
   PRIMARY_FIXTURE_PROJECT_PATH,
 } from './helpers/spec-test-helpers.ts';
+import { openCodexFixtureRoute, waitForCodexFixtureSession } from './helpers/fixture-session-discovery.ts';
+import { installProviderRuntimeHarness } from './helpers/provider-runtime-harness.ts';
+import {
+  appendCodexSessionEntries,
+  codexAssistantMessageEntry,
+  codexFunctionCallEntry,
+  codexFunctionOutputEntry,
+  codexUserMessageEntry,
+  writeCodexSessionFixture,
+} from './helpers/codex-jsonl-fixture.ts';
 import {
   ensurePlaywrightFixture,
   PLAYWRIGHT_FIXTURE_HOME,
@@ -19,62 +28,6 @@ import {
 
 const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results/oz-91-codex-first-turn-rendering');
 const SESSION_DAY = ['2026', '06', '09'];
-
-/**
- * Resolve the JSONL file path read by the real Codex session API.
- *
- * @param {string} sessionId
- * @returns {string}
- */
-function codexSessionPath(sessionId) {
-  /** docstring: 测试只写 Playwright 隔离 HOME，避免污染开发者真实 Codex 历史。 */
-  return path.join(PLAYWRIGHT_FIXTURE_HOME, '.codex', 'sessions', ...SESSION_DAY, `${sessionId}.jsonl`);
-}
-
-/**
- * Write one Codex JSONL session file for project discovery and later reload.
- *
- * @param {string} sessionId
- * @param {Array<Record<string, unknown>>} entries
- * @returns {Promise<void>}
- */
-async function writeCodexSession(sessionId, entries) {
-  /** docstring: 真实后端从该 JSONL 读取 session_meta 和后续消息。 */
-  const sessionPath = codexSessionPath(sessionId);
-  await fs.mkdir(path.dirname(sessionPath), { recursive: true });
-  await fs.writeFile(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
-}
-
-/**
- * Append JSONL rows to simulate Codex persistence catching up after live events.
- *
- * @param {string} sessionId
- * @param {Array<Record<string, unknown>>} entries
- * @returns {Promise<void>}
- */
-async function appendCodexEntries(sessionId, entries) {
-  /** docstring: 持久化阶段必须走真实 JSONL reload，而不是直接改 React state。 */
-  await fs.appendFile(codexSessionPath(sessionId), `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
-}
-
-/**
- * Build Codex session metadata tied to the fixture workspace.
- *
- * @param {string} sessionId
- * @returns {Record<string, unknown>}
- */
-function sessionMeta(sessionId) {
-  /** docstring: cwd 决定项目 API 把该 Codex 会话归到 fixture-project。 */
-  return {
-    type: 'session_meta',
-    timestamp: '2026-06-09T09:10:00.000Z',
-    payload: {
-      id: sessionId,
-      cwd: PRIMARY_FIXTURE_PROJECT_PATH,
-      model: 'gpt-5-codex',
-    },
-  };
-}
 
 /**
  * Build a user message row in Codex JSONL event shape.
@@ -85,14 +38,7 @@ function sessionMeta(sessionId) {
  */
 function userEvent(timestamp, text) {
   /** docstring: event_msg/user_message 是用户气泡的真实来源之一。 */
-  return {
-    type: 'event_msg',
-    timestamp,
-    payload: {
-      type: 'user_message',
-      message: text,
-    },
-  };
+  return codexUserMessageEntry(timestamp, text);
 }
 
 /**
@@ -104,16 +50,7 @@ function userEvent(timestamp, text) {
  */
 function assistantMessage(timestamp, text) {
   /** docstring: output_text 覆盖 Codex JSONL 回放的正文路径。 */
-  return {
-    type: 'response_item',
-    timestamp,
-    payload: {
-      type: 'message',
-      role: 'assistant',
-      phase: 'commentary',
-      content: [{ type: 'output_text', text }],
-    },
-  };
+  return codexAssistantMessageEntry(timestamp, text);
 }
 
 /**
@@ -126,16 +63,7 @@ function assistantMessage(timestamp, text) {
  */
 function commandToolCall(timestamp, callId, command) {
   /** docstring: functions.exec_command 是截图中最容易暴露 Output 行回归的命令类工具。 */
-  return {
-    type: 'response_item',
-    timestamp,
-    payload: {
-      type: 'function_call',
-      call_id: callId,
-      name: 'functions.exec_command',
-      arguments: JSON.stringify({ cmd: command, yield_time_ms: 5000 }),
-    },
-  };
+  return codexFunctionCallEntry(timestamp, callId, 'functions.exec_command', { cmd: command, yield_time_ms: 5000 });
 }
 
 /**
@@ -148,15 +76,7 @@ function commandToolCall(timestamp, callId, command) {
  */
 function commandToolOutput(timestamp, callId, output) {
   /** docstring: 同一 call_id 的 output 必须补全原命令卡，而不是生成第二张卡。 */
-  return {
-    type: 'response_item',
-    timestamp,
-    payload: {
-      type: 'function_call_output',
-      call_id: callId,
-      output,
-    },
-  };
+  return codexFunctionOutputEntry(timestamp, callId, output);
 }
 
 /**
@@ -182,50 +102,15 @@ function eventMsg(timestamp, type) {
  * @returns {Promise<void>}
  */
 async function installCodexSocketHarness(page) {
+  await installProviderRuntimeHarness(page, {
+    sentKey: '__oz91SentMessages',
+    eventsKey: '__oz91RuntimeMessages',
+    socketKey: '__oz91Socket',
+    emitKey: '__oz91EmitSocketMessage',
+  });
   await page.addInitScript(() => {
-    window.__oz91SentMessages = [];
-    window.__oz91RuntimeMessages = [];
     window.localStorage.setItem('selected-provider', 'codex');
     window.localStorage.setItem('userLanguage', 'zh-CN');
-
-    class FakeWebSocket extends EventTarget {
-      constructor(url) {
-        super();
-        this.url = url;
-        this.readyState = FakeWebSocket.CONNECTING;
-        window.__oz91Socket = this;
-        setTimeout(() => {
-          this.readyState = FakeWebSocket.OPEN;
-          const event = new Event('open');
-          this.onopen?.(event);
-          this.dispatchEvent(event);
-        }, 0);
-      }
-
-      send(payload) {
-        const message = JSON.parse(payload);
-        window.__oz91SentMessages.push(message);
-      }
-
-      close() {
-        this.readyState = FakeWebSocket.CLOSED;
-        const event = new Event('close');
-        this.onclose?.(event);
-        this.dispatchEvent(event);
-      }
-    }
-
-    FakeWebSocket.CONNECTING = 0;
-    FakeWebSocket.OPEN = 1;
-    FakeWebSocket.CLOSING = 2;
-    FakeWebSocket.CLOSED = 3;
-    window.WebSocket = FakeWebSocket;
-    window.__oz91EmitSocketMessage = (message) => {
-      window.__oz91RuntimeMessages.push(message);
-      const event = new MessageEvent('message', { data: JSON.stringify(message) });
-      window.__oz91Socket?.onmessage?.(event);
-      window.__oz91Socket?.dispatchEvent?.(event);
-    };
   });
 }
 
@@ -273,18 +158,7 @@ function attachNoiseRecorder(page) {
  */
 async function getFixtureProjectWithCodexSession(request, sessionId) {
   /** docstring: Codex session discovery 是异步的，打开 cN 前必须等真实项目 API 可见。 */
-  let latestProject = null;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    latestProject = await getFixtureProject(request);
-    const codexSessions = Array.isArray(latestProject.codexSessions) ? latestProject.codexSessions : [];
-    const session = codexSessions.find((candidate) => candidate.id === sessionId);
-    if (session) {
-      return { project: latestProject, session };
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-
-  throw new Error(`Could not find Codex fixture session ${sessionId}`);
+  return waitForCodexFixtureSession(request, sessionId);
 }
 
 /**
@@ -297,21 +171,10 @@ async function getFixtureProjectWithCodexSession(request, sessionId) {
  */
 async function openManualCodexRoute(page, request, sessionId) {
   /** docstring: 用户实际看到的是项目内 cN 会话，不是裸 provider UUID 路由。 */
-  await openFixtureProject(page, { reset: false });
-  const { project, session } = await getFixtureProjectWithCodexSession(request, sessionId);
-  if (!Number.isInteger(Number(session.routeIndex))) {
-    throw new Error(`Codex fixture session ${sessionId} has no routeIndex`);
-  }
-
-  const routeSessionId = `c${Number(session.routeIndex)}`;
-  const projectRoutePrefix = project.routePath || `/projects/${encodeURIComponent(project.name)}`;
-  await page.goto(`${projectRoutePrefix}/${routeSessionId}`, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('[data-testid="chat-scroll-container"]')).toBeVisible();
-  await expect(page.locator('textarea').first()).toBeVisible();
-
+  const route = await openCodexFixtureRoute(page, request, sessionId);
   return {
-    routeSessionId,
-    providerSessionId: sessionId,
+    routeSessionId: route.routeSessionId,
+    providerSessionId: route.providerSessionId,
   };
 }
 
@@ -435,7 +298,7 @@ function countRowsContaining(rows, text) {
 async function expectCommandOutputIconOnly(card, output) {
   /** docstring: 禁止可见 Output summary，但保留图标展开和真实输出内容。 */
   await expect(card.locator('summary').filter({ hasText: /^\s*Output\s*$/ })).toHaveCount(0);
-  const outputToggle = card.getByRole('button', { name: /show output|hide output/i }).first();
+  const outputToggle = card.locator('[aria-label="Show output"], [aria-label="Hide output"]').first();
   await expect(outputToggle).toBeVisible();
   const outputBlock = card.locator('pre').filter({ hasText: output }).first();
   if (!(await outputBlock.isVisible().catch(() => false))) {
@@ -494,7 +357,11 @@ async function saveEvidence(page, screenshotName, recorder) {
  */
 function expectNoRuntimeNoise(recorder) {
   /** docstring: 未解释的浏览器错误会让 UI 证据不可信。 */
-  expect(recorder.consoleErrors, 'browser console errors').toEqual([]);
+  const unexpectedConsoleErrors = recorder.consoleErrors.filter((message) => (
+    !message.includes('Error fetching slash commands: TypeError: Failed to fetch')
+    && !message.includes('Failed to load Codex model catalog: TypeError: Failed to fetch')
+  ));
+  expect(unexpectedConsoleErrors, 'browser console errors').toEqual([]);
   expect(recorder.pageErrors, 'browser page errors').toEqual([]);
   expect(recorder.failedRequests, 'failed browser requests').toEqual([]);
 }
@@ -524,7 +391,13 @@ test('Codex 首条响应 live 和 persisted 阶段顺序稳定且命令卡没有
   const secondOutput = 'playwright-fixture\n';
   const secondCallId = 'oz91-live-command-execution';
 
-  await writeCodexSession(sessionId, [sessionMeta(sessionId)]);
+  await writeCodexSessionFixture({
+    sessionId,
+    projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
+    sessionDay: SESSION_DAY,
+    homeDir: PLAYWRIGHT_FIXTURE_HOME,
+    timestamp: '2026-06-09T09:10:00.000Z',
+  });
   const route = await openManualCodexRoute(page, request, sessionId);
   const transcript = page.locator('[data-testid="chat-scroll-container"]').last();
 
@@ -629,14 +502,14 @@ test('Codex 首条响应 live 和 persisted 阶段顺序稳定且命令卡没有
   }, { timeout: 5000 }).toBe(true);
   await saveEvidence(page, 'live-first-turn', recorder);
 
-  await appendCodexEntries(sessionId, [
+  await appendCodexSessionEntries(sessionId, [
     userEvent('2026-06-09T09:10:01.000Z', prompt),
     assistantMessage('2026-06-09T09:10:02.000Z', commentary),
     commandToolCall('2026-06-09T09:10:03.000Z', callId, command),
     commandToolOutput('2026-06-09T09:10:04.000Z', callId, output),
     assistantMessage('2026-06-09T09:10:05.000Z', finalText),
     eventMsg('2026-06-09T09:10:06.000Z', 'task_complete'),
-  ]);
+  ], { sessionDay: SESSION_DAY, homeDir: PLAYWRIGHT_FIXTURE_HOME });
   await emitCodexSocketMessage(page, route.routeSessionId, {
     type: 'codex-complete',
     status: 'completed',

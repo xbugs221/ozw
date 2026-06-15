@@ -144,10 +144,11 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
   if (displayConfig.type === 'one-line') {
     const value = displayConfig.getValue?.(safeData) || '';
     const secondary = displayConfig.getSecondary?.(safeData);
+    const shouldFormatPathText = displayConfig.style !== 'terminal';
     const displayValue = displayConfig.action === 'open-file'
       ? formatProjectPath(value)
-      : formatPathTextRelativeToProject(value, projectRoot);
-    const displaySecondary = secondary
+      : (shouldFormatPathText ? formatPathTextRelativeToProject(value, projectRoot) : value);
+    const displaySecondary = secondary && shouldFormatPathText
       ? formatPathTextRelativeToProject(secondary, projectRoot)
       : secondary;
 
@@ -354,23 +355,15 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
       }
     }
 
+    const configuredTitleFilePath = displayConfig.getOpenFilePath?.(safeData, contentProps);
     const contextCommandFilePath = contentProps.variant === 'execute-file'
       ? contentProps.payload?.path
       : undefined;
-    const toolCategory = getToolCategory(toolName);
-    const editTitleFilePath = toolCategory === 'edit'
-      ? contentProps.filePath
-      : undefined;
-    const titleFilePath = editTitleFilePath || contextCommandFilePath;
+    const titleFilePath = configuredTitleFilePath || contextCommandFilePath;
 
-    // For file-backed tools, make the title clickable to open the file.
+    // For file-backed tools, let the tool config decide which title opens a file.
     const handleTitleClick = titleFilePath && onFileOpen
-      ? () => onFileOpen(titleFilePath, editTitleFilePath
-        ? {
-            old_string: contentProps.oldContent,
-            new_string: contentProps.newContent
-          }
-        : undefined)
+      ? () => onFileOpen(titleFilePath, displayConfig.getOpenFileDiffInfo?.(safeData, contentProps))
       : undefined;
 
     return (

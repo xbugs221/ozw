@@ -165,6 +165,7 @@ export const ContextCodeCard: React.FC<ContextCodeCardProps> = ({
           onToggle={(event) => setOutputOpen(event.currentTarget.open)}
         >
           <summary
+            role="button"
             className="absolute left-1.5 top-1 z-20 inline-flex h-5 w-5 cursor-pointer list-none items-center justify-center font-mono text-[13px] leading-none text-gray-500 transition-colors select-none hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 [&::-webkit-details-marker]:hidden"
             title={outputOpen ? 'Hide output' : 'Show output'}
             aria-label={outputOpen ? 'Hide output' : 'Show output'}

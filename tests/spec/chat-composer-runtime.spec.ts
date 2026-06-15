@@ -14,6 +14,7 @@ import {
   openFixtureProject,
   PRIMARY_FIXTURE_PROJECT_PATH,
 } from './helpers/spec-test-helpers.ts';
+import { installProviderRuntimeHarness } from './helpers/provider-runtime-harness.ts';
 import { PLAYWRIGHT_FIXTURE_PROJECT_PATHS } from '../e2e/helpers/playwright-fixture.ts';
 
 const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results', 'spec-chat-composer-runtime');
@@ -23,6 +24,10 @@ const MATX_PROJECT_PATH = PLAYWRIGHT_FIXTURE_PROJECT_PATHS.find((projectPath) =>
 ) || path.join(path.dirname(PRIMARY_FIXTURE_PROJECT_PATH), 'matx');
 const VIEW_IMAGE_SESSION_ID = 'codex-view-image-tool-link';
 const VIEW_IMAGE_RELATIVE_PATH = 'images/view-image-tool-link.png';
+const READ_TOOL_SESSION_ID = 'codex-read-tool-link';
+const READ_TOOL_RELATIVE_PATH = 'src/read-tool-link.ts';
+const EDIT_TOOL_SESSION_ID = 'codex-edit-tool-link';
+const EDIT_TOOL_RELATIVE_PATH = 'src/edit-tool-link.ts';
 const TINY_PNG_BYTES = Uint8Array.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
   0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -65,9 +70,17 @@ function buildProjectRoutePrefix(projectPath) {
  * @returns {Promise<void>}
  */
 async function installChatRuntimeFixture(page) {
+  await installProviderRuntimeHarness(page, {
+    sentKey: '__chatRuntimeSharedSentMessages',
+    eventsKey: '__chatRuntimeSharedEvents',
+    socketKey: '__chatRuntimeSharedSocket',
+    emitKey: '__chatRuntimeSharedEmit',
+    onSendKey: '__chatRuntimeOnSend',
+  });
   await page.addInitScript(() => {
-    window.__chatRuntimeSentMessages = [];
-    window.__chatRuntimeEvents = [];
+    window.__chatRuntimeSentMessages = window.__chatRuntimeSharedSentMessages || [];
+    window.__chatRuntimeEvents = window.__chatRuntimeSharedEvents || [];
+    window.__chatRuntimeEmit = window.__chatRuntimeSharedEmit;
     window.localStorage.setItem('selected-provider', 'codex');
     window.localStorage.setItem('userLanguage', 'zh-CN');
     window.localStorage.removeItem('uiPreferences');
@@ -104,138 +117,98 @@ async function installChatRuntimeFixture(page) {
       });
     };
 
-    class FakeWebSocket extends EventTarget {
-      constructor(url) {
-        super();
-        this.url = url;
-        this.readyState = FakeWebSocket.CONNECTING;
-        window.__chatRuntimeSocket = this;
-
-        setTimeout(() => {
-          this.readyState = FakeWebSocket.OPEN;
-          const event = new Event('open');
-          this.onopen?.(event);
-          this.dispatchEvent(event);
-        }, 0);
+    window.__chatRuntimeOnSend = (message) => {
+      if (message.type === 'codex-command' || message.type === 'pi-command') {
+        const commandSessionId = message.ozwSessionId || message.ozw_session_id || message.sessionId;
+        if (!commandSessionId) {
+          return;
+        }
+        if (message.clientRequestId) {
+          window.__chatRuntimeEmit?.({
+            type: 'message-accepted',
+            provider: message.provider || 'codex',
+            sessionId: commandSessionId,
+            ozwSessionId: commandSessionId,
+            ozw_session_id: commandSessionId,
+            clientRequestId: message.clientRequestId,
+          });
+        }
+        const turnStartedAt =
+          window.localStorage.getItem(activeCommandTurnStartedAtKey(commandSessionId)) ||
+          new Date(Date.now() - 65_000).toISOString();
+        const activeCommandSessions = readActiveCommandSessions();
+        activeCommandSessions[commandSessionId] = {
+          turnId: `turn-${commandSessionId}-sent`,
+          turnStartedAt,
+        };
+        window.localStorage.setItem(activeCommandTurnStartedAtKey(commandSessionId), turnStartedAt);
+        writeActiveCommandSessions(activeCommandSessions);
+        emitRunningStatus(commandSessionId, activeCommandSessions[commandSessionId].turnId, turnStartedAt);
+        return;
       }
 
-      send(payload) {
-        const message = JSON.parse(payload);
-        window.__chatRuntimeSentMessages.push(message);
+      if (message.type !== 'check-session-status') {
+        return;
+      }
 
-        if (message.type === 'codex-command' || message.type === 'pi-command') {
-          const commandSessionId = message.ozwSessionId || message.ozw_session_id || message.sessionId;
-          if (!commandSessionId) {
-            return;
-          }
-          if (message.clientRequestId) {
-            window.__chatRuntimeEmit?.({
-              type: 'message-accepted',
-              provider: message.provider || 'codex',
-              sessionId: commandSessionId,
-              ozwSessionId: commandSessionId,
-              ozw_session_id: commandSessionId,
-              clientRequestId: message.clientRequestId,
-            });
-          }
-          const turnStartedAt =
-            window.localStorage.getItem(activeCommandTurnStartedAtKey(commandSessionId)) ||
-            new Date(Date.now() - 65_000).toISOString();
-          const activeCommandSessions = readActiveCommandSessions();
-          activeCommandSessions[commandSessionId] = {
-            turnId: `turn-${commandSessionId}-sent`,
-            turnStartedAt,
-          };
-          window.localStorage.setItem(activeCommandTurnStartedAtKey(commandSessionId), turnStartedAt);
-          writeActiveCommandSessions(activeCommandSessions);
-          emitRunningStatus(commandSessionId, activeCommandSessions[commandSessionId].turnId, turnStartedAt);
-          return;
-        }
+      const requestedRouteSession =
+        message.ozwSessionId ||
+        message.ozw_session_id ||
+        (String(message.sessionId || '').match(/^c\d+$/) ? message.sessionId : null);
 
-        if (message.type !== 'check-session-status') {
-          return;
-        }
+      if (requestedRouteSession === 'c73') {
+        const turnStartedAt =
+          window.localStorage.getItem(activeTurnStartedAtKey) ||
+          new Date(Date.now() - 65_000).toISOString();
+        window.localStorage.setItem(activeTurnStartedAtKey, turnStartedAt);
+        window.__chatRuntimeEmit?.({
+          type: 'session-status',
+          provider: 'codex',
+          sessionId: 'provider-session-c73',
+          ozwSessionId: 'c73',
+          ozw_session_id: 'c73',
+          isProcessing: true,
+          turnId: 'turn-c73-live',
+          turn_id: 'turn-c73-live',
+          turnStartedAt,
+          turn_started_at: turnStartedAt,
+        });
 
-        const requestedRouteSession =
-          message.ozwSessionId ||
-          message.ozw_session_id ||
-          (String(message.sessionId || '').match(/^c\d+$/) ? message.sessionId : null);
-
-        if (requestedRouteSession === 'c73') {
-          const turnStartedAt =
-            window.localStorage.getItem(activeTurnStartedAtKey) ||
-            new Date(Date.now() - 65_000).toISOString();
-          window.localStorage.setItem(activeTurnStartedAtKey, turnStartedAt);
+        setTimeout(() => {
           window.__chatRuntimeEmit?.({
-            type: 'session-status',
+            type: 'codex-response',
             provider: 'codex',
             sessionId: 'provider-session-c73',
             ozwSessionId: 'c73',
             ozw_session_id: 'c73',
-            isProcessing: true,
-            turnId: 'turn-c73-live',
-            turn_id: 'turn-c73-live',
-            turnStartedAt,
-            turn_started_at: turnStartedAt,
-          });
-
-          setTimeout(() => {
-            window.__chatRuntimeEmit?.({
-              type: 'codex-response',
-              provider: 'codex',
-              sessionId: 'provider-session-c73',
-              ozwSessionId: 'c73',
-              ozw_session_id: 'c73',
-              data: {
-                type: 'item',
-                itemType: 'agent_message',
-                itemId: 'agent-message-c73-live',
-                message: {
-                  role: 'assistant',
-                  content: 'SPEC_C73_LIVE_OUTPUT',
-                },
+            data: {
+              type: 'item',
+              itemType: 'agent_message',
+              itemId: 'agent-message-c73-live',
+              message: {
+                role: 'assistant',
+                content: 'SPEC_C73_LIVE_OUTPUT',
               },
-            });
-          }, 50);
-          return;
-        }
-
-        const activeCommandSessions = readActiveCommandSessions();
-        if (requestedRouteSession && activeCommandSessions[requestedRouteSession]) {
-          const activeTurn = activeCommandSessions[requestedRouteSession];
-          emitRunningStatus(requestedRouteSession, activeTurn.turnId, activeTurn.turnStartedAt);
-          return;
-        }
-
-        window.__chatRuntimeEmit?.({
-          type: 'session-status',
-          provider: 'codex',
-          sessionId: message.sessionId,
-          ozwSessionId: requestedRouteSession,
-          isProcessing: false,
-        });
+            },
+          });
+        }, 50);
+        return;
       }
 
-      close() {
-        this.readyState = FakeWebSocket.CLOSED;
-        const event = new Event('close');
-        this.onclose?.(event);
-        this.dispatchEvent(event);
+      const activeCommandSessions = readActiveCommandSessions();
+      if (requestedRouteSession && activeCommandSessions[requestedRouteSession]) {
+        const activeTurn = activeCommandSessions[requestedRouteSession];
+        emitRunningStatus(requestedRouteSession, activeTurn.turnId, activeTurn.turnStartedAt);
+        return;
       }
-    }
 
-    FakeWebSocket.CONNECTING = 0;
-    FakeWebSocket.OPEN = 1;
-    FakeWebSocket.CLOSING = 2;
-    FakeWebSocket.CLOSED = 3;
-    window.WebSocket = FakeWebSocket;
-
-    window.__chatRuntimeEmit = (message) => {
-      window.__chatRuntimeEvents.push(message);
-      const socket = window.__chatRuntimeSocket;
-      const event = new MessageEvent('message', { data: JSON.stringify(message) });
-      socket?.onmessage?.(event);
-      socket?.dispatchEvent?.(event);
+      window.__chatRuntimeEmit?.({
+        type: 'session-status',
+        provider: 'codex',
+        sessionId: message.sessionId,
+        ozwSessionId: requestedRouteSession,
+        isProcessing: false,
+      });
     };
 
     window.__chatRuntimeCompleteSession = (sessionId) => {
@@ -331,27 +304,28 @@ async function writeBrowserState(page, fileName) {
 }
 
 /**
- * Write a real Codex JSONL fixture so the page loads the image tool card
- * through the production messages API instead of a route-level mock.
+ * Write a real Codex JSONL fixture so the page loads tool cards through the
+ * production messages API instead of a route-level mock.
  *
+ * @param {object} args
+ * @param {string} args.sessionId
+ * @param {string} args.userMessage
+ * @param {string} args.toolName
+ * @param {Record<string, unknown>} args.toolArguments
  * @returns {Promise<string>}
  */
-async function writeViewImageCodexFixture() {
-  const imagePath = path.join(MATX_PROJECT_PATH, VIEW_IMAGE_RELATIVE_PATH);
-  await fs.mkdir(path.dirname(imagePath), { recursive: true });
-  await fs.writeFile(imagePath, TINY_PNG_BYTES);
-
+async function writeCodexToolCardFixture({ sessionId, userMessage, toolName, toolArguments }) {
   const playwrightHome = path.resolve(MATX_PROJECT_PATH, '..', '..');
   const sessionDir = path.join(playwrightHome, '.codex', 'sessions', '2026', '06', '15');
   await fs.mkdir(sessionDir, { recursive: true });
-  const sessionPath = path.join(sessionDir, `${VIEW_IMAGE_SESSION_ID}.jsonl`);
+  const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
   const timestamp = '2026-06-15T12:49:00.000Z';
   const lines = [
     {
       type: 'session_meta',
       timestamp,
       payload: {
-        id: VIEW_IMAGE_SESSION_ID,
+        id: sessionId,
         cwd: MATX_PROJECT_PATH,
         model: 'gpt-5-codex',
       },
@@ -361,7 +335,7 @@ async function writeViewImageCodexFixture() {
       timestamp,
       payload: {
         type: 'user_message',
-        message: 'open generated image from view_image tool card',
+        message: userMessage,
       },
     },
     {
@@ -369,14 +343,55 @@ async function writeViewImageCodexFixture() {
       timestamp: '2026-06-15T12:49:01.000Z',
       payload: {
         type: 'function_call',
-        call_id: 'view-image-tool-link-call',
-        name: 'functions.view_image',
-        arguments: JSON.stringify({ path: imagePath }),
+        call_id: `${sessionId}-call`,
+        name: toolName,
+        arguments: JSON.stringify(toolArguments),
       },
     },
   ];
   await fs.writeFile(sessionPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf8');
+  return sessionPath;
+}
+
+/**
+ * Write the image fixture asset and JSONL transcript for view_image.
+ *
+ * @returns {Promise<string>}
+ */
+async function writeViewImageCodexFixture() {
+  const imagePath = path.join(MATX_PROJECT_PATH, VIEW_IMAGE_RELATIVE_PATH);
+  await fs.mkdir(path.dirname(imagePath), { recursive: true });
+  await fs.writeFile(imagePath, TINY_PNG_BYTES);
+  await writeCodexToolCardFixture({
+    sessionId: VIEW_IMAGE_SESSION_ID,
+    userMessage: 'open generated image from view_image tool card',
+    toolName: 'functions.view_image',
+    toolArguments: { path: imagePath },
+  });
   return imagePath;
+}
+
+/**
+ * Write a text file plus a Read/Edit tool-card transcript for browser open tests.
+ *
+ * @param {object} args
+ * @param {string} args.sessionId
+ * @param {string} args.relativePath
+ * @param {string} args.toolName
+ * @param {Record<string, unknown>} args.toolArguments
+ * @returns {Promise<string>}
+ */
+async function writeTextToolCodexFixture({ sessionId, relativePath, toolName, toolArguments }) {
+  const absolutePath = path.join(MATX_PROJECT_PATH, relativePath);
+  await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+  await fs.writeFile(absolutePath, 'export const toolOpenFile = true;\n', 'utf8');
+  await writeCodexToolCardFixture({
+    sessionId,
+    userMessage: `open ${relativePath} from ${toolName} tool card`,
+    toolName,
+    toolArguments: { ...toolArguments, file_path: absolutePath },
+  });
+  return absolutePath;
 }
 
 /**
@@ -539,6 +554,50 @@ test('view_image tool card path opens the image preview', async ({ page }) => {
   await imagePathButton.click();
   await expect(page.getByRole('img', { name: path.basename(VIEW_IMAGE_RELATIVE_PATH) })).toBeVisible();
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'view-image-tool-link-opened.png'), fullPage: true });
+});
+
+test('Read tool card path opens the text editor', async ({ page }) => {
+  /** Business rule: Read file paths use the same workspace file-open flow as image tools. */
+  await writeTextToolCodexFixture({
+    sessionId: READ_TOOL_SESSION_ID,
+    relativePath: READ_TOOL_RELATIVE_PATH,
+    toolName: 'Read',
+    toolArguments: {},
+  });
+  const matxRoute = `${buildProjectRoutePrefix(MATX_PROJECT_PATH)}/${READ_TOOL_SESSION_ID}`;
+  await page.goto(matxRoute, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /open src\/read-tool-l/i }).first().click();
+
+  const openReadButton = page.getByRole('button', { name: `Open ${READ_TOOL_RELATIVE_PATH}` });
+  await expect(openReadButton).toBeVisible();
+  await openReadButton.click();
+  await expect(page.getByRole('heading', { name: path.basename(READ_TOOL_RELATIVE_PATH) })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Save|保存/i })).toBeVisible();
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'read-tool-link-opened.png'), fullPage: true });
+});
+
+test('Edit tool card path opens diff context in the text editor', async ({ page }) => {
+  /** Business rule: Edit cards open the target file while carrying the old/new diff context. */
+  await writeTextToolCodexFixture({
+    sessionId: EDIT_TOOL_SESSION_ID,
+    relativePath: EDIT_TOOL_RELATIVE_PATH,
+    toolName: 'Edit',
+    toolArguments: {
+      old_string: 'export const toolOpenFile = true;',
+      new_string: 'export const toolOpenFile = "edited";',
+    },
+  });
+  const matxRoute = `${buildProjectRoutePrefix(MATX_PROJECT_PATH)}/${EDIT_TOOL_SESSION_ID}`;
+  await page.goto(matxRoute, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /open src\/edit-tool-l/i }).first().click();
+
+  const openEditButton = page.getByRole('button', { name: `Open ${EDIT_TOOL_RELATIVE_PATH}` });
+  await expect(openEditButton).toBeVisible();
+  await openEditButton.click();
+  await expect(page.getByRole('heading', { name: path.basename(EDIT_TOOL_RELATIVE_PATH) })).toBeVisible();
+  await expect(page.getByText('显示更改')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Save|保存/i })).toBeVisible();
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'edit-tool-link-opened.png'), fullPage: true });
 });
 
 test('running cN follow-up turns green and renders live output before JSONL catches up', async ({ page }) => {

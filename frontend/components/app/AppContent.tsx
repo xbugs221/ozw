@@ -215,7 +215,13 @@ export default function AppContent() {
           stageKey: options?.workflowStageKey || fallbackSelectedSession.stageKey,
         }
       : null;
-    const workflowRouteSession = childSession || workflowDraftSession;
+    const workflowRouteSession = childSession && requestedRoutePath
+      ? {
+          ...childSession,
+          address: requestedAddress || childSession.address,
+          routePath: requestedRoutePath,
+        }
+      : childSession || workflowDraftSession;
     const searchResultWorkflow = matchingProject && !targetWorkflow && Number.isInteger(options?.workflowRouteIndex)
       ? {
           id: explicitWorkflowId,

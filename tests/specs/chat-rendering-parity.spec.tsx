@@ -1,5 +1,6 @@
 /**
- * Sources: 2026-06-14-116-统一Pi与Codex聊天渲染反馈
+ * Sources: 2026-06-14-116-统一Pi与Codex聊天渲染反馈,
+ * 2026-06-16-6-聊天Live渲染与工具卡片体系化
  *
  * PURPOSE: Verify Codex/Pi chat rendering parity with the real frontend
  * message component and merge utilities used by manual sessions.
@@ -465,6 +466,69 @@ test('Codex view_image tool card opens the image path like a compact Read card',
   assert.match(visibleTextFromHtml(html), /test-results\/final-view\.png/, 'view_image card must show the project-relative image path');
   assert.match(html, /<button[^>]*title="test-results\/final-view\.png"[^>]*>/, 'view_image path must be rendered as a direct clickable file-open control');
   assert.doesNotMatch(visibleTextFromHtml(html), /functions\.view_image/, 'view_image must not fall back to a generic function title');
+});
+
+test('file-backed tool cards expose accessible open-file controls', async () => {
+  /**
+   * Read, Edit and FileChanges are file-backed cards; each visible file path
+   * must be an actual button/link target rather than inert transcript text.
+   */
+  const selectedProject: Project = {
+    name: 'matx',
+    displayName: 'matx',
+    fullPath: '/home/zzl/projects/matx',
+    path: '/home/zzl/projects/matx',
+  };
+
+  const readHtml = await renderMessage(row({
+    type: 'assistant',
+    provider: 'codex',
+    source: 'codex-history',
+    isToolUse: true,
+    toolName: 'Read',
+    toolInput: { file_path: '/home/zzl/projects/matx/src/read-target.ts' },
+    toolResult: { content: 'read file body' },
+    toolId: 'read-open-file-tool',
+    messageKey: 'codex:read-open-file-tool',
+  }), 'codex', selectedProject, () => undefined);
+
+  const editHtml = await renderMessage(row({
+    type: 'assistant',
+    provider: 'codex',
+    source: 'codex-history',
+    isToolUse: true,
+    toolName: 'Edit',
+    toolInput: {
+      file_path: '/home/zzl/projects/matx/src/edit-target.ts',
+      old_string: 'before',
+      new_string: 'after',
+    },
+    toolResult: { content: 'ok' },
+    toolId: 'edit-open-file-tool',
+    messageKey: 'codex:edit-open-file-tool',
+  }), 'codex', selectedProject, () => undefined);
+
+  const fileChangesHtml = await renderMessage(row({
+    type: 'assistant',
+    provider: 'codex',
+    source: 'codex-history',
+    isToolUse: true,
+    toolName: 'FileChanges',
+    toolInput: {
+      status: 'changed',
+      changes: [{ kind: 'modified', path: '/home/zzl/projects/matx/src/changed.ts' }],
+    },
+    toolResult: null,
+    toolId: 'file-changes-open-file-tool',
+    messageKey: 'codex:file-changes-open-file-tool',
+  }), 'codex', selectedProject, () => undefined);
+
+  await writeEvidence('file-backed-open-controls.html', `${readHtml}\n${editHtml}\n${fileChangesHtml}`);
+
+  assert.match(readHtml, /aria-label="Open src\/read-target\.ts"/, 'Read title open control must have an accessible name');
+  assert.match(editHtml, /aria-label="Open src\/edit-target\.ts"/, 'Edit title open control must have an accessible name');
+  assert.match(fileChangesHtml, /<button[^>]*title="src\/changed\.ts"[^>]*>/, 'FileChanges rows must render clickable file buttons');
+  assert.match(fileChangesHtml, /src\/changed\.ts/, 'FileChanges must keep project-relative display paths');
 });
 
 test('final assistant image links stay on the workspace file preview route', async () => {

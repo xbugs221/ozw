@@ -81,7 +81,8 @@ test('server build remains a tsc build that emits dist-node', async () => {
   const buildConfig = await readJson<TsConfig>('tsconfig.build.json');
   const options = buildConfig.compilerOptions ?? {};
 
-  assert.equal(packageJson.scripts?.['build:server'], 'tsc -p tsconfig.build.json');
+  assert.match(packageJson.scripts?.['build:server'] ?? '', /^tsc -p tsconfig\.build\.json\b/);
+  assert.match(packageJson.scripts?.['build:server'] ?? '', /copy-build-runtime-js\.mjs/);
   assert.equal(options.noEmit, false);
   assert.equal(options.outDir, 'dist-node');
 });

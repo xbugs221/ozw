@@ -48,7 +48,17 @@ test('统一运行依赖报告覆盖 oz、Codex、Pi 和登录动作', async () 
       'exit 0',
     ]);
 
-    const report = await buildRuntimeReadinessReport({
+    const report: {
+      ready: boolean;
+      commands: Record<string, {
+        available: boolean;
+        commandPath?: string | null;
+        version?: string | null;
+        authenticated?: string | null;
+        requiredAction: string;
+        error: string;
+      }>;
+    } = await buildRuntimeReadinessReport({
       env: {
         ...process.env,
         PATH: binDir,
@@ -96,7 +106,17 @@ test('oz flow contract 缺少能力时整体 ready=false 并说明缺失能力',
     await writeExecutable(path.join(binDir, 'codex'), ['#!/bin/sh', 'echo "codex 0.134.0"']);
     await writeExecutable(path.join(binDir, 'pi'), ['#!/bin/sh', 'echo "pi 0.75.5"']);
 
-    const report = await buildRuntimeReadinessReport({
+    const report: {
+      ready: boolean;
+      commands: Record<string, {
+        available: boolean;
+        commandPath?: string | null;
+        version?: string | null;
+        authenticated?: string | null;
+        requiredAction: string;
+        error: string;
+      }>;
+    } = await buildRuntimeReadinessReport({
       env: {
         ...process.env,
         PATH: binDir,

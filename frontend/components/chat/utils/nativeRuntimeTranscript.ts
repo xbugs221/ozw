@@ -10,6 +10,10 @@ import {
   normalizeCodexToolOutput,
   parseCodexJsonMaybe,
 } from '../../../../shared/codex-message-normalizer.js';
+import {
+  isProviderFileUpdatePayload,
+  resolveCodexToolUpdateJson,
+} from './providerPayloadParsers.js';
 
 export type ChatMessageLike = {
   type: string;
@@ -94,48 +98,17 @@ function buildLiveFileChangeEvent(
 }
 
 /**
- * Detect provider bookkeeping JSON that reports a real file operation rather
- * than an assistant response.
- */
-function isProviderFileUpdatePayload(value: unknown): boolean {
-  /**
-   * Only drop payloads that match the same file-operation allowlist used for
-   * card rendering; ordinary business JSON can also contain type/kind and path.
-   */
-  return Boolean(normalizeCodexFileOperationPayload(value));
-}
-
-/**
  * Resolve Codex app-server update envelopes that carry tool calls so they render
  * through the same card path as first-class function_call live items.
  */
-function resolveProviderToolUpdatePayload(value: unknown, depth = 0): Record<string, unknown> | null {
-  if (depth > 5 || value === null || value === undefined) {
+function resolveProviderToolUpdatePayload(value: unknown): Record<string, unknown> | null {
+  const resolved = resolveCodexToolUpdateJson(value);
+  if (!resolved) {
     return null;
   }
 
-  const parsed = parseCodexJsonMaybe(value);
-  if (parsed !== value) {
-    return resolveProviderToolUpdatePayload(parsed, depth + 1);
-  }
-
-  if (Array.isArray(value)) {
-    for (const part of value) {
-      const payload = resolveProviderToolUpdatePayload(part, depth + 1);
-      if (payload) {
-        return payload;
-      }
-    }
-    return null;
-  }
-
-  if (typeof value !== 'object') {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const rawType = String(record.type ?? record.itemType ?? '');
-  if (rawType === 'functionCall' || rawType === 'function_call') {
+  const record = resolved.payload;
+  if (resolved.kind === 'tool_use') {
     return {
       type: 'item',
       itemType: 'function_call',
@@ -143,27 +116,13 @@ function resolveProviderToolUpdatePayload(value: unknown, depth = 0): Record<str
       item: { ...record, type: 'function_call' },
     };
   }
-  if (rawType === 'functionCallOutput' || rawType === 'function_call_output') {
-    return {
-      type: 'item',
-      itemType: 'function_call_output',
-      itemId: record.call_id ?? record.callId ?? record.id,
-      item: { ...record, type: 'function_call_output' },
-    };
-  }
-  if (rawType === 'update') {
-    const nested = record.item ?? record.payload ?? record.data ?? record.update;
-    if (nested !== undefined && nested !== value) {
-      return resolveProviderToolUpdatePayload(nested, depth + 1);
-    }
-  }
 
-  const nested = record.item ?? record.payload ?? record.data ?? record.update ?? record.message ?? record.content ?? record.text;
-  if (nested !== undefined && nested !== value) {
-    return resolveProviderToolUpdatePayload(nested, depth + 1);
-  }
-
-  return null;
+  return {
+    type: 'item',
+    itemType: 'function_call_output',
+    itemId: record.call_id ?? record.callId ?? record.id,
+    item: { ...record, type: 'function_call_output' },
+  };
 }
 
 const LIVE_ITEM_TYPES = new Set([
@@ -473,6 +432,22 @@ function isEmptyOutput(output: string): boolean {
   return output.trim().length === 0;
 }
 
+function hasRenderableToolPayload(toolPayload: Partial<ChatMessageLike>): boolean {
+  /**
+   * Live function_call/file_change events are useful before a terminal status
+   * arrives because their input already contains the command or changed paths.
+   * Empty tool placeholders still stay pending until completion or output.
+   */
+  return Boolean(
+    toolPayload.isToolUse
+    && (
+      toolPayload.toolInput !== undefined
+      || toolPayload.toolResult !== undefined
+      || toolPayload.toolName
+    ),
+  );
+}
+
 function getActiveTurnOverlayFields(messages: ChatMessageLike[]): Partial<ChatMessageLike> {
   /**
    * Copy turn identity from the latest local user into subsequent live rows.
@@ -578,9 +553,11 @@ export function reduceNativeRuntimeEvent(
     itemType === 'reasoning' ||
     itemType === 'thinking'
   ) && Boolean(visibleContent || extractText(content));
+  const hasVisibleToolPayload = hasRenderableToolPayload(toolPayload);
   const shouldHidePending = (provider === 'codex' || provider === 'pi')
     && !isCompleted
-    && (isPendingToolCall || !hasVisibleTextDelta);
+    && itemType !== 'command_execution'
+    && ((isPendingToolCall && !hasVisibleToolPayload) || (!hasVisibleTextDelta && !hasVisibleToolPayload));
 
   // Thinking events without a stable itemId: merge into the most recent
   // thinking block from the same provider if no non-thinking messages were

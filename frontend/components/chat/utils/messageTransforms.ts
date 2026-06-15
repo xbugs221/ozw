@@ -4,8 +4,11 @@ import { dedupeAdjacentChatMessages } from './messageDedup';
 import {
   normalizeCodexFunctionCall,
   normalizeCodexToolOutput,
-  parseCodexJsonMaybe,
 } from '../../../../shared/codex-message-normalizer.js';
+import {
+  isProviderFileUpdatePayload,
+  resolveCodexToolUpdateJson,
+} from './providerPayloadParsers';
 
 export interface DiffLine {
   type: 'added' | 'removed';
@@ -23,122 +26,6 @@ type CursorBlob = {
 };
 
 const USER_UPLOAD_NOTE_MARKER = '[User uploaded files for this message]';
-const PROVIDER_FILE_UPDATE_KINDS = new Set([
-  'add',
-  'added',
-  'create',
-  'created',
-  'delete',
-  'deleted',
-  'modify',
-  'modified',
-  'update',
-  'updated',
-]);
-
-/**
- * Detect provider bookkeeping JSON that reports a file update instead of a
- * user-visible assistant reply.
- */
-function resolveProviderFileUpdatePayload(value: unknown, depth = 0): Record<string, unknown> | null {
-  if (depth > 5 || value === null || value === undefined) {
-    return null;
-  }
-
-  const parsed = parseCodexJsonMaybe(value);
-  if (parsed !== value) {
-    return resolveProviderFileUpdatePayload(parsed, depth + 1);
-  }
-
-  if (Array.isArray(value)) {
-    for (const part of value) {
-      const payload = resolveProviderFileUpdatePayload(part, depth + 1);
-      if (payload) {
-        return payload;
-      }
-    }
-    return null;
-  }
-
-  if (typeof value !== 'object') {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  if (typeof record.path === 'string' && (typeof record.kind === 'string' || typeof record.type === 'string')) {
-    return record;
-  }
-
-  const nested = record.message ?? record.content ?? record.text ?? record.output ?? record.result;
-  if (nested !== undefined && nested !== value) {
-    return resolveProviderFileUpdatePayload(nested, depth + 1);
-  }
-
-  return null;
-}
-
-/**
- * Return true when assistant content is only provider file-update bookkeeping.
- */
-function isProviderFileUpdatePayload(value: unknown): boolean {
-  const payload = resolveProviderFileUpdatePayload(value);
-  const kind = typeof payload?.kind === 'string'
-    ? payload.kind
-    : (typeof payload?.type === 'string' ? payload.type : '');
-  return typeof payload?.path === 'string' && PROVIDER_FILE_UPDATE_KINDS.has(kind);
-}
-
-/**
- * Resolve Codex update/functionCall JSON that leaked into assistant text from
- * provider read models, so refresh/follow-latest renders a tool card instead.
- */
-function resolveCodexToolUpdateJson(value: unknown, depth = 0): { kind: 'tool_use' | 'tool_result'; payload: Record<string, unknown> } | null {
-  if (depth > 5 || value === null || value === undefined) {
-    return null;
-  }
-
-  const parsed = parseCodexJsonMaybe(value);
-  if (parsed !== value) {
-    return resolveCodexToolUpdateJson(parsed, depth + 1);
-  }
-
-  if (Array.isArray(value)) {
-    for (const part of value) {
-      const resolved = resolveCodexToolUpdateJson(part, depth + 1);
-      if (resolved) {
-        return resolved;
-      }
-    }
-    return null;
-  }
-
-  if (typeof value !== 'object') {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const rawType = String(record.type ?? record.itemType ?? '');
-  if (rawType === 'functionCall' || rawType === 'function_call') {
-    return { kind: 'tool_use', payload: { ...record, type: 'function_call' } };
-  }
-  if (rawType === 'functionCallOutput' || rawType === 'function_call_output') {
-    return { kind: 'tool_result', payload: { ...record, type: 'function_call_output' } };
-  }
-  if (rawType === 'update') {
-    const nested = record.item ?? record.payload ?? record.data ?? record.update;
-    if (nested !== undefined && nested !== value) {
-      return resolveCodexToolUpdateJson(nested, depth + 1);
-    }
-  }
-
-  const nested = record.item ?? record.payload ?? record.data ?? record.update ?? record.message ?? record.content ?? record.text;
-  if (nested !== undefined && nested !== value) {
-    return resolveCodexToolUpdateJson(nested, depth + 1);
-  }
-
-  return null;
-}
-
 function toCodexToolUpdateChatMessage(
   value: unknown,
   timestamp: string | number | Date,

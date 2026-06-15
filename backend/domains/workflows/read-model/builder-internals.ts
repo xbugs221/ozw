@@ -10,19 +10,10 @@ import {
   resolveFlowBatchesRoot,
   resolveFlowRunsRoot,
 } from '../flow-runtime-paths.js';
-import {
-  inferRole,
-} from './stage-taxonomy.js';
-import {
-  buildPathReadModel,
-  buildPlanningArtifacts,
-  scanRunDirFixedArtifacts,
-} from './artifact-reader.js';
-import {
-  acceptedProviderFromSessionKey,
-  buildChildSessions,
-  isKnownProvider,
-} from './session-refs.js';
+import { buildWorkflowArtifacts } from './artifact-projection.js';
+import { buildWorkflowChildSessions, buildWorkflowOwnedSessions } from './session-projection.js';
+import { buildRunnerProcesses } from './process-projection.js';
+import { buildWorkflowDiagnostics } from './diagnostics-projection.js';
 import {
   buildWorkflowDag,
   runWoStatus,
@@ -34,6 +25,7 @@ import {
   buildWorkflowRoleSummary,
   buildWorkflowStatusSummary,
 } from './status-summary.js';
+import { normalizeWorkflowStateWithWarnings, pick, type WorkflowState } from './workflow-state-schema.js';
 
 type AnyRecord = Record<string, any>;
 type WorkflowArtifact = AnyRecord;
@@ -80,29 +72,6 @@ const REVIEW_TITLES = {
   review_2: '实现风险与回归',
   review_3: '验收与交付闭环',
 };
-const KNOWN_PROCESS_FIELDS = new Set([
-  'stage',
-  'stageKey',
-  'stage_key',
-  'role',
-  'status',
-  'sessionId',
-  'session_id',
-  'provider',
-  'pid',
-  'exitCode',
-  'exit_code',
-  'failed',
-  'logPath',
-  'log_path',
-]);
-
-/**
- * Return a snake_case runner field value.
- */
-function pick(object: AnyRecord | null | undefined, snakeKey: string): any {
-  return object?.[snakeKey];
-}
 
 /**
  * Return a filesystem-style error code when an unknown error carries one.
@@ -123,19 +92,8 @@ function errorMessage(error: unknown): string {
 /**
  * Convert arbitrary runner paths to project-relative slash paths.
  */
-function normalizeRelativePath(projectPath: string, value: unknown): string {
-  const raw = String(value || '').trim();
-  if (!raw) {
-    return '';
-  }
-  const normalized = raw.replace(/\\/g, '/');
-  if (!path.isAbsolute(raw)) {
-    return normalized;
-  }
-  return path.relative(projectPath, raw).replace(/\\/g, '/');
-}
-
 /**
+ * Map runner status words/**
  * Map runner status words to the Web workflow state vocabulary.
  */
 function mapRunState(status: unknown): string {
@@ -153,16 +111,8 @@ function mapRunState(status: unknown): string {
  * Return the explicit stage from an oz flow process row, accepting current and
  * historical field spellings.
  */
-function pickProcessStage(process: RunnerProcess): string {
-  return String(
-    pick(process, 'stage')
-    || pick(process, 'stage_key')
-    || process?.stageKey
-    || '',
-  ).trim();
-}
-
 /**
+ * Normalize oz flow batch run_ids/**
  * Normalize oz flow batch run_ids from the real map contract or legacy arrays.
  */
 function normalizeBatchRunIds(runIds: unknown, changes: string[]): string[] {
@@ -244,127 +194,15 @@ function displayBatchCurrentIndex(currentIndex: number, total: number): number {
 /**
  * Preserve oz flow state.sessions as provider-aware ids for frontend filtering.
  */
-function buildWorkflowOwnedSessionRefs(state: AnyRecord): WorkflowSessionRef[] {
-  const sessions = pick(state, 'sessions') || {};
-  if (!sessions || typeof sessions !== 'object') {
-    return [];
-  }
-  const refs: WorkflowSessionRef[] = [];
-  for (const [key, value] of Object.entries(sessions)) {
-    const sessionId = String(value || '').trim();
-    if (!sessionId) {
-      continue;
-    }
-    const parsed = acceptedProviderFromSessionKey(key);
-    if (!parsed.accepted) {
-      continue;
-    }
-    refs.push({
-      key,
-      role: parsed.role,
-      provider: parsed.provider,
-      sessionId,
-    });
-  }
-  return refs;
-}
-
 /**
- * Normalize runner process rows from explicit processes only.
- * Sessions-only state never generates synthetic process rows.
- */
-function buildRunnerProcesses(
-  state: AnyRecord,
-  stageStatuses: StageStatus[],
-  logsByKey: Map<string, string>,
-  warnings: string[],
-): RunnerProcess[] {
-  const explicit = pick(state, 'processes');
-  if (!Array.isArray(explicit) || explicit.length === 0) {
-    return [];
-  }
-  const sessions = pick(state, 'sessions') || {};
-
-  /**
-   * Resolve process provider using process metadata first, then the matching
-   * provider-qualified state.sessions key for this stage/role.
-   */
-  function resolveProcessProvider(process: RunnerProcess, stage: string, role: string, sessionId: string): string {
-    const explicitProvider = String(pick(process, 'provider') || process?.provider || '').trim();
-    if (isKnownProvider(explicitProvider)) {
-      return explicitProvider;
-    }
-    if (explicitProvider) {
-      warnings.push(`Unsupported runner process provider ${explicitProvider}; child session link omitted for ${sessionId || stage}.`);
-      return explicitProvider;
-    }
-    const inferredRole = inferRole(stage);
-    const roleCandidates = new Set([role, inferredRole, stage].map((value) => String(value || '').trim()).filter(Boolean));
-    if (stage === 'execution') roleCandidates.add('executor');
-    if (stage === 'archive') roleCandidates.add('archiver');
-    if (/^review_\d+$/.test(stage)) roleCandidates.add('reviewer');
-    if (/^qa(?:_\d+)?$/.test(stage)) roleCandidates.add('qa');
-    if (/^(?:fix|repair)_\d+$/.test(stage)) roleCandidates.add('fixer');
-
-    const valueMatches = [];
-    for (const [key, value] of Object.entries(sessions && typeof sessions === 'object' ? sessions : {})) {
-      if (String(value || '').trim() !== sessionId) {
-        continue;
-      }
-      const parsed = acceptedProviderFromSessionKey(key);
-      if (!parsed.accepted) {
-        continue;
-      }
-      if (roleCandidates.has(parsed.role)) {
-        return parsed.provider;
-      }
-      valueMatches.push(parsed.provider);
-    }
-    return valueMatches[0] || 'codex';
-  }
-
-  return explicit.map((process) => {
-    const unknownFields = Object.keys(process && typeof process === 'object' ? process : {})
-      .filter((key) => !KNOWN_PROCESS_FIELDS.has(key));
-    unknownFields.forEach((key) => {
-      warnings.push(`Unknown runner process field: ${key}`);
-    });
-    const stage = pickProcessStage(process);
-    const role = String(pick(process, 'role') || inferRole(stage)).trim();
-    const sessionId = String(pick(process, 'session_id') || process?.sessionId || '').trim() || undefined;
-    const logPath = normalizeRelativePath('', pick(process, 'log_path') || process?.logPath || logsByKey.get(`${stage}_${role}_log`) || logsByKey.get(`${role}_log`) || logsByKey.get(`${stage}_log`));
-    return {
-      stage,
-      role,
-      status: String(pick(process, 'status') || '').trim() || undefined,
-      sessionId,
-      provider: sessionId ? resolveProcessProvider(process, stage, role, sessionId) : undefined,
-      pid: Number.isInteger(process?.pid) ? process.pid : undefined,
-      exitCode: Number.isInteger(pick(process, 'exit_code') ?? process?.exitCode) ? (pick(process, 'exit_code') ?? process?.exitCode) : undefined,
-      failed: process?.failed === true,
-      logPath: logPath || undefined,
-    };
-  }).map((process) => Object.fromEntries(Object.entries(process).filter(([, value]) => value !== undefined && value !== '')));
-}
-
-/**
+ * Group DAG review targets/**
  * Group DAG review targets by their owning workflow stage.
  */
 /**
  * Merge run-dir-scanned artifacts with path-based artifacts, deduplicating by label.
  */
-function mergeArtifacts(pathArtifacts: WorkflowArtifact[], scannedArtifacts: WorkflowArtifact[]): WorkflowArtifact[] {
-  const merged = [...pathArtifacts];
-  const pathLabels = new Set(pathArtifacts.map((a) => a.label));
-  for (const scanned of scannedArtifacts) {
-    if (!pathLabels.has(scanned.label)) {
-      merged.push(scanned);
-    }
-  }
-  return merged;
-}
-
 /**
+ * Read and build a batch read model/**
  * Read and build a batch read model from a batch state.json file.
  */
 export async function buildBatchReadModel({
@@ -476,11 +314,11 @@ export function buildBatchContextMap(batches: BatchReadModel[]): BatchContextMap
  * Merge equivalent runner status JSON over sealed state without discarding
  * fields that are only present in state.json.
  */
-function mergeRuntimeStatusState(state: AnyRecord, statusState: unknown): AnyRecord {
+function mergeRuntimeStatusState(state: WorkflowState, statusState: unknown, warnings: string[]): WorkflowState {
   if (!statusState || typeof statusState !== 'object') {
     return state;
   }
-  return {
+  const normalized = normalizeWorkflowStateWithWarnings({
     ...state,
     ...statusState,
     workflow_config: {
@@ -491,7 +329,9 @@ function mergeRuntimeStatusState(state: AnyRecord, statusState: unknown): AnyRec
     sessions: (statusState as AnyRecord).sessions || state?.sessions,
     stages: (statusState as AnyRecord).stages || state?.stages,
     dag_nodes: (statusState as AnyRecord).dag_nodes || state?.dag_nodes,
-  };
+  });
+  warnings.push(...normalized.warnings.map((warning) => `Runtime status ${warning}`));
+  return normalized.value;
 }
 
 /**
@@ -506,114 +346,45 @@ export async function buildWorkflowReadModel({
   batchContext,
 }: WorkflowReadModelInput): Promise<AnyRecord> {
   const warnings: string[] = [];
-  const runId = String(pick(state, 'run_id') || runDirName || '').trim();
+  const normalizedState = normalizeWorkflowStateWithWarnings(state);
+  let workflowState = normalizedState.value;
+  warnings.push(...normalizedState.warnings);
+  const runId = String(pick(workflowState, 'run_id') || runDirName || '').trim();
   const statusResult = await runWoStatus(projectPath, runId);
   if (statusResult.ok) {
-    state = mergeRuntimeStatusState(state, statusResult.data);
+    workflowState = mergeRuntimeStatusState(workflowState, statusResult.data, warnings);
   } else {
     warnings.push(`oz flow status json unavailable: ${statusResult.error}`);
   }
-  const changeName = String(pick(state, 'change_name') || '').trim();
-  const rawStatus = String(pick(state, 'status') || '').trim();
-  const rawStage = String(pick(state, 'stage') || '').trim();
-  const updatedAt = String(pick(state, 'updated_at') || stateStat?.mtime?.toISOString?.() || runDirName || '').trim();
-  const { artifacts: pathArtifacts, logsByKey } = await buildPathReadModel(projectPath, state, warnings);
-
-  // Scan run directory for fixed artifact files
-  const runDir = path.join(resolveFlowRunsRoot(projectPath), runDirName);
-  const scannedArtifacts = await scanRunDirFixedArtifacts(runDir, runId, warnings);
-
-  let artifacts: WorkflowArtifact[] = mergeArtifacts(
-    pathArtifacts as WorkflowArtifact[],
-    scannedArtifacts as WorkflowArtifact[],
-  );
-
-  // Inject planning artifacts from oz change documents
-  const planningArtifacts = await buildPlanningArtifacts(projectPath, changeName) as WorkflowArtifact[];
-  if (planningArtifacts.length > 0) {
-    const pathLabels = new Set(artifacts.map((a) => a.label));
-    for (const planningArtifact of planningArtifacts) {
-      if (!pathLabels.has(planningArtifact.label)) {
-        artifacts.push(planningArtifact);
-      }
-    }
-  }
-
-  const stageStatuses = buildStageStatuses(state, rawStage, rawStatus, warnings);
-  const archiveStage = stageStatuses.find((stage) => stage.key === 'archive');
-  if (archiveStage && String(archiveStage.status || '').toLowerCase() !== 'pending' && !artifacts.some((artifact) => artifact.type === 'delivery-summary')) {
-    artifacts.push({
-      id: 'delivery-summary:delivery-summary.md',
-      label: 'delivery-summary.md',
-      type: 'delivery-summary',
-      stage: 'archive',
-      relativePath: 'delivery-summary.md',
-      path: 'delivery-summary.md',
-      exists: false,
-    });
-  }
-
-  // Infer expected qa-N.json artifacts from qa_N stages when not already present
-  // (paths reference or run-dir scan). Missing files add diagnostics and a
-  // exists:false artifact so the UI can suppress broken links.
-  // TODO: Replace with generic stage→artifact inference when oz flow formalizes artifact-stage bindings.
-  {
-    const artifactLabels = new Set(artifacts.map((a) => a.label));
-    for (const stage of stageStatuses) {
-      const qaStageMatch = /^qa_(\d+)$/.exec(stage.key);
-      if (!qaStageMatch) {
-        continue;
-      }
-      if (String(stage.status || '').toLowerCase() === 'pending') {
-        continue;
-      }
-      const qaLabel = `qa-${qaStageMatch[1]}.json`;
-      if (artifactLabels.has(qaLabel)) {
-        continue;
-      }
-      const qaPath = path.join(runDir, qaLabel);
-      let exists = true;
-      try {
-        await fs.access(qaPath);
-      } catch {
-        exists = false;
-        warnings.push(`Expected qa-N artifact not found: ${qaPath}`);
-      }
-      artifacts.push({
-        id: `stage-inferred:${runId}:${qaLabel}`,
-        label: qaLabel,
-        type: 'qa-result',
-        semanticType: 'qa-result',
-        stage: stage.key,
-        relativePath: qaPath,
-        path: qaPath,
-        exists,
-        source: 'stage-inferred',
-      });
-    }
-  }
-  const runnerProcesses = buildRunnerProcesses(state, stageStatuses, logsByKey, warnings);
-  const childSessions = buildChildSessions(
+  const changeName = String(pick(workflowState, 'change_name') || '').trim();
+  const rawStatus = String(pick(workflowState, 'status') || '').trim();
+  const rawStage = String(pick(workflowState, 'stage') || '').trim();
+  const updatedAt = String(pick(workflowState, 'updated_at') || stateStat?.mtime?.toISOString?.() || runDirName || '').trim();
+  const stageStatuses = buildStageStatuses(workflowState, rawStage, rawStatus, warnings);
+  const { artifacts, logsByKey, planningArtifacts } = await buildWorkflowArtifacts(
+    projectPath,
+    runDirName,
     runId,
-    runnerProcesses,
+    changeName,
+    stageStatuses,
+    workflowState,
     warnings,
-    stageStatuses as any,
-    pick(state, 'sessions') || {},
-    pick(state, 'workflow_config'),
-  ) as WorkflowSessionRef[];
+  );
+  const runnerProcesses = buildRunnerProcesses(workflowState, stageStatuses, logsByKey, warnings);
+  const childSessions = buildWorkflowChildSessions(runId, runnerProcesses, warnings, stageStatuses, workflowState) as WorkflowSessionRef[];
   const workflowDisplay = {
-    lines: buildWorkflowDisplayLines(state, stageStatuses, childSessions, runnerProcesses, warnings),
+    lines: buildWorkflowDisplayLines(workflowState, stageStatuses, childSessions, runnerProcesses, warnings),
   };
-  const workflowRoleSummary = buildWorkflowRoleSummary(state, childSessions);
-  const dagNodes = pick(state, 'dag_nodes') || {};
+  const workflowRoleSummary = buildWorkflowRoleSummary(workflowState, childSessions);
+  const dagNodes = pick(workflowState, 'dag_nodes') || {};
   const hasExistingPlanningArtifact = planningArtifacts.some((artifact) => artifact.exists !== false);
-  const workflowStatusSummary = buildWorkflowStatusSummary(state, childSessions, artifacts, dagNodes, hasExistingPlanningArtifact);
-  const runnerError = String(pick(state, 'error') || '').trim();
+  const workflowStatusSummary = buildWorkflowStatusSummary(workflowState, childSessions, artifacts, dagNodes, hasExistingPlanningArtifact);
+  const runnerError = String(pick(workflowState, 'error') || '').trim();
 
   const workflowDag = await buildWorkflowDag({
     projectPath,
     runDirName,
-    state,
+    state: workflowState,
     changeName,
     childSessions,
     artifacts,
@@ -621,44 +392,20 @@ export async function buildWorkflowReadModel({
     warnings,
   });
 
-  // Merge DAG review target sessions into workflow-owned session refs so that
-  // project-list summaries (which strip workflowDag.nodes) still filter them.
-  // Use composite key `${provider}:${sessionId}` to preserve cross-provider ownership.
-  const dagSessionMap = new Map<string, WorkflowSessionRef>();
-  for (const node of workflowDag?.nodes || []) {
-    for (const target of node.reviewTargets || []) {
-      if (target.kind === 'session' && target.sessionId) {
-        const provider = target.provider || 'codex';
-        const compositeKey = `${provider}:${target.sessionId}`;
-        if (!dagSessionMap.has(compositeKey)) {
-          dagSessionMap.set(compositeKey, { sessionId: target.sessionId, provider });
-        }
-      }
-    }
-  }
-  const baseOwnedSessions = buildWorkflowOwnedSessionRefs(state);
-  const baseOwnedCompositeIds = new Set(baseOwnedSessions.map((s) => `${s.provider || 'codex'}:${s.sessionId}`));
-  const workflowOwnedSessions = [
-    ...baseOwnedSessions,
-    ...Array.from(dagSessionMap.values()).filter((s) => !baseOwnedCompositeIds.has(`${s.provider || 'codex'}:${s.sessionId}`)),
-  ];
+  const workflowOwnedSessions = buildWorkflowOwnedSessions(workflowState, workflowDag);
 
-  const diagnostics = {
-    statePath: formatFlowStatePathForDiagnostics(statePath),
-    stateMtime: stateStat?.mtime?.toISOString?.() || null,
+  const diagnostics = buildWorkflowDiagnostics({
+    state: workflowState,
+    statePath,
+    stateStat,
     rawStatus,
     rawStage,
-    woContractVersion: String(pick(state, 'contract_version') || ''),
-    woContractOk: true,
     runnerError,
-    pathCount: Object.keys(state?.paths || {}).length,
-    sessionCount: Object.keys(state?.sessions || {}).length,
-    workflowOwnedSessions,
-    workflowOwnedSessionIds: workflowOwnedSessions.map((session) => session.sessionId),
-    processCount: Array.isArray(state?.processes) ? state.processes.length : runnerProcesses.length,
+    runnerProcesses,
     warnings,
-  };
-  const stageInspections = buildStageInspections(state, stageStatuses, childSessions, artifacts, runnerError, diagnostics, workflowDag);
+    workflowOwnedSessions,
+  });
+  const stageInspections = buildStageInspections(workflowState, stageStatuses, childSessions, artifacts, runnerError, diagnostics, workflowDag);
 
   const result: AnyRecord = {
     id: runId,
@@ -690,7 +437,7 @@ export async function buildWorkflowReadModel({
       provider: 'codex',
       message,
     })),
-    hasUnreadActivity: state.hasUnreadActivity === true || mapRunState(rawStatus) === 'running',
+    hasUnreadActivity: workflowState.hasUnreadActivity === true || mapRunState(rawStatus) === 'running',
     runnerDiagnostics: diagnostics,
     diagnostics,
   };

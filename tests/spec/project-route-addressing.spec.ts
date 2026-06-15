@@ -12,6 +12,12 @@ import {
   openFixtureProject,
   PRIMARY_FIXTURE_PROJECT_PATH,
 } from './helpers/spec-test-helpers.ts';
+import {
+  codexAssistantMessageEntry,
+  codexSessionFilePath,
+  codexUserMessageEntry,
+  writeCodexSessionFixture,
+} from './helpers/codex-jsonl-fixture.ts';
 import { resolveFlowRunStatePath } from '../../backend/domains/workflows/flow-runtime-paths.ts';
 
 const HISTORY_SCROLL_PROJECT_PATH = path.join(path.dirname(PRIMARY_FIXTURE_PROJECT_PATH), 'history-scroll');
@@ -224,6 +230,55 @@ test.describe('项目规范路由寻址', () => {
     await expect(page).toHaveURL(new RegExp(`${projectRoutePrefix}/runs/run-fixture/sessions/execution$`));
     await expect(page).not.toHaveURL(/provider=|projectPath=|workflowId=/);
     await expect(page.locator('[data-testid="chat-scroll-container"]')).toBeVisible();
+  });
+
+  test('stage-only 工作流子会话路由优先选择 exact executor 地址', async ({ page }) => {
+    const projectRoutePrefix = buildExpectedProjectRoutePrefix();
+    const subagentSessionId = 'fixture-project-execution-subagent-session';
+    const subagentSessionDay = ['2026', '04', '18'] as const;
+
+    await writeCodexSessionFixture({
+      sessionId: subagentSessionId,
+      projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
+      sessionDay: subagentSessionDay,
+      timestamp: '2026-04-18T09:02:00.000Z',
+      entries: [
+        codexUserMessageEntry('2026-04-18T09:02:01.000Z', 'fixture-project execution subagent session'),
+        codexAssistantMessageEntry(
+          '2026-04-18T09:02:02.000Z',
+          'fixture-project execution subagent session assistant turn 01',
+        ),
+      ],
+    });
+
+    try {
+      await rewriteFixtureRunState({
+        stage: 'execution',
+        status: 'running',
+        stages: { planning: 'completed', execution: 'running' },
+        sessions: {
+          'codex:executor': 'fixture-project-execution-session',
+        },
+        processes: [
+          {
+            stage: 'execution',
+            role: 'subagent:implementation_context:代码库侦察员:0',
+            provider: 'codex',
+            status: 'completed',
+            sessionId: subagentSessionId,
+          },
+        ],
+      });
+
+      await page.goto(`${projectRoutePrefix}/runs/run-fixture/sessions/execution`);
+
+      const chat = page.locator('[data-testid="chat-scroll-container"]');
+      await expect(page).toHaveURL(new RegExp(`${projectRoutePrefix}/runs/run-fixture/sessions/execution$`));
+      await expect(chat).toContainText('fixture-project execution fixture session assistant turn 01');
+      await expect(chat).not.toContainText('fixture-project execution subagent session assistant turn 01');
+    } finally {
+      await fs.rm(codexSessionFilePath(subagentSessionId, { sessionDay: subagentSessionDay }), { force: true });
+    }
   });
 
   test('刷新 role 工作流子会话页时恢复对应 session', async ({ page }) => {

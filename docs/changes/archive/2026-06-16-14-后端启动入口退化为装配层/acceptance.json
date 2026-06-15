@@ -1,0 +1,53 @@
+{
+  "summary": "后端 server-bootstrap 退化为装配层，业务 URL 和 WebSocket 分派进入独立 typed 模块。",
+  "coverage": [
+    {
+      "spec": "需求：server bootstrap 只负责装配和生命周期 / 场景：启动入口不再注册业务 URL",
+      "tests": ["server-bootstrap-composition", "backend-boundary-regression"],
+      "evidence": ["server-bootstrap-source-audit"],
+      "risk": "静态审计不能证明 system update 子进程输出全部正确，需要执行阶段补充 server fixture。"
+    },
+    {
+      "spec": "需求：WebSocket 连接边界必须可审查 / 场景：WebSocket 分派有独立边界模块",
+      "tests": ["server-bootstrap-composition", "backend-boundary-regression"],
+      "evidence": ["server-bootstrap-source-audit"],
+      "risk": "真实断线重连体验依赖既有 e2e。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "server-bootstrap-composition",
+      "source": "change_contract",
+      "path": "docs/changes/14-后端启动入口退化为装配层/tests/server-bootstrap-composition.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/14-后端启动入口退化为装配层/tests/server-bootstrap-composition.contract.test.ts",
+      "purpose": "证明启动入口不再承载业务 URL 和 WebSocket path 分派主体。",
+      "assertions": [
+        "server-bootstrap.ts 中没有直接 Express 业务 route 注册",
+        "system update 位于 HTTP route 模块",
+        "WebSocket gateway 独立存在并调用 chat/shell handler"
+      ],
+      "expected_initial_failure": "当前 server-bootstrap.ts 仍直接注册 /api/system/update，并承载 WebSocket path 分派。"
+    },
+    {
+      "id": "backend-boundary-regression",
+      "source": "existing_regression",
+      "path": "tests/specs/backend-type-module-boundary.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/backend-type-module-boundary.spec.ts tests/specs/backend-service-test-fixture.spec.ts",
+      "purpose": "证明后端边界测试和真实 server fixture 仍覆盖 HTTP/realtime 模块。",
+      "assertions": [
+        "业务 HTTP route 位于 backend/server/http/*-routes.ts",
+        "realtime 投递模块仍独立存在",
+        "server fixture 能启动并验证认证边界"
+      ],
+      "expected_initial_failure": "迁移前应通过；执行阶段若失败表示边界回归。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "server-bootstrap-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/14-server-bootstrap-composition/source-audit.json",
+      "purpose": "记录 bootstrap 行数、直接 route 数和拆分模块存在性。"
+    }
+  ]
+}

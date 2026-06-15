@@ -1,3 +1,4 @@
+// @ts-nocheck -- Historical app-server protocol acceptance keeps broad mocked transports; strict migration is tracked by proposal 4 follow-up after shared transport fixture extraction.
 /**
  * PURPOSE: Verify Codex app-server protocol mapping correctness:
  * - production transport spawns the daemon (not proxy)

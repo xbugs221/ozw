@@ -1,0 +1,146 @@
+{
+  "summary": "验证 workflow 后端 projection、前端 view model 和详情页 UI 组件完成拆分，同时保持七阶段、legacy fallback、child session、runner process 和 workflow 操作稳定。",
+  "coverage": [
+    {
+      "spec": "需求：后端 projection 独立 / 场景：artifact/session/process/diagnostics 可单测",
+      "tests": ["workflow-boundary", "workflow-dag-read-model"],
+      "evidence": ["workflow-readmodel-snapshot"],
+      "risk": "oz 新版本字段需要后续样例。"
+    },
+    {
+      "spec": "需求：前端 view model 独立 / 场景：详情页不直接承载所有状态推断",
+      "tests": ["workflow-boundary"],
+      "evidence": ["workflow-viewmodel-audit"],
+      "risk": "视觉回归由截图补充。"
+    },
+    {
+      "spec": "需求：七阶段与 legacy fallback 不回退 / 场景：v1.2 七阶段和旧 run 都能展示",
+      "tests": ["workflow-dag-read-model", "workflow-presentation"],
+      "evidence": ["workflow-detail-screenshot"],
+      "risk": "真实 oz CLI 输出需要 QA 运行证据。"
+    },
+    {
+      "spec": "需求：child session 路由稳定 / 场景：provider-aware 子会话可点击",
+      "tests": ["workflow-control-plane", "workflow-child-session-isolation"],
+      "evidence": ["workflow-route-trace"],
+      "risk": "真实浏览器 trace 需执行阶段补充。"
+    },
+    {
+      "spec": "需求：runner process 语义清晰 / 场景：process 与 session 编号不混用",
+      "tests": ["workflow-boundary", "workflow-presentation"],
+      "evidence": ["workflow-process-snapshot"],
+      "risk": "历史数据字段稀疏时需人工检查。"
+    },
+    {
+      "spec": "需求：详情页操作稳定 / 场景：continue/resume/abort 状态由 view model 生成",
+      "tests": ["workflow-boundary"],
+      "evidence": ["workflow-action-log"],
+      "risk": "后续 workflow 控制面扩展需新增场景。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "workflow-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/10-Workflow读模型与详情页边界重构/tests/workflow-boundary.contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/10-Workflow读模型与详情页边界重构/tests/workflow-boundary.contract.test.ts",
+      "purpose": "证明 workflow projection、view model 和详情页组件边界存在，且大视图不再承载核心推断。",
+      "assertions": [
+        "后端 artifact/session/process/diagnostics projection 模块存在",
+        "前端 workflow detail view model 和 UI 子组件存在",
+        "WorkflowDetailView.tsx 行数和 helper 数显著收敛",
+        "执行阶段需产出 workflow-readmodel-snapshot 到 test-results/10-workflow-boundary/readmodel.json",
+        "执行阶段需产出 workflow-viewmodel-audit 到 test-results/10-workflow-boundary/viewmodel-audit.json",
+        "执行阶段需产出 workflow-process-snapshot 到 test-results/10-workflow-boundary/process-snapshot.json",
+        "执行阶段需产出 workflow-action-log 到 test-results/10-workflow-boundary/action.log"
+      ],
+      "expected_initial_failure": "当前实现尚未拆出目标模块时，应失败于模块缺失或 WorkflowDetailView.tsx 仍过厚。"
+    },
+    {
+      "id": "workflow-dag-read-model",
+      "source": "existing_regression",
+      "path": "tests/specs/workflow-dag-read-model.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/workflow-dag-read-model.spec.ts",
+      "purpose": "证明 workflow DAG/read model 的核心字段保持稳定。",
+      "assertions": [
+        "七阶段 run 能被读取",
+        "artifact 和 child session 仍按阶段归属"
+      ],
+      "expected_initial_failure": "如果后端 projection 迁移破坏 read model，应失败。"
+    },
+    {
+      "id": "workflow-presentation",
+      "source": "existing_regression",
+      "path": "tests/spec/workflow-presentation.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/workflow-presentation.spec.ts",
+      "purpose": "证明 workflow 前端展示和 runner process 语义保持稳定。",
+      "assertions": [
+        "阶段进度和详情展示不回退",
+        "sessions-only 不伪造 process",
+        "执行阶段需产出 workflow-detail-screenshot 到 test-results/10-workflow-boundary/detail.png"
+      ],
+      "expected_initial_failure": "如果 UI 迁移破坏 workflow 展示，应失败。"
+    },
+    {
+      "id": "workflow-control-plane",
+      "source": "existing_regression",
+      "path": "tests/spec/project-workflow-control-plane.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/project-workflow-control-plane.spec.ts",
+      "purpose": "证明 workflow 控制面和子会话入口保持稳定。",
+      "assertions": [
+        "workflow 子会话入口仍可打开",
+        "执行阶段需产出 workflow-route-trace 到 test-results/10-workflow-boundary/route-trace.zip"
+      ],
+      "expected_initial_failure": "如果路由 view model 迁移破坏 child session，应失败。"
+    },
+    {
+      "id": "workflow-child-session-isolation",
+      "source": "existing_regression",
+      "path": "tests/spec/project-workflow-child-session-isolation.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/project-workflow-child-session-isolation.spec.ts",
+      "purpose": "证明从 workflow 子会话创建新工作流时不串用旧消息。",
+      "assertions": [
+        "新 workflow 不展示旧子会话历史消息"
+      ],
+      "expected_initial_failure": "如果 session route 拆分导致会话串用，应失败。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "workflow-readmodel-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/10-workflow-boundary/readmodel.json",
+      "purpose": "记录拆分后 read model projection 输出字段。"
+    },
+    {
+      "id": "workflow-viewmodel-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/10-workflow-boundary/viewmodel-audit.json",
+      "purpose": "记录 WorkflowDetailView.tsx 行数、helper 数和 view model 模块。"
+    },
+    {
+      "id": "workflow-detail-screenshot",
+      "kind": "screenshot",
+      "path": "test-results/10-workflow-boundary/detail.png",
+      "purpose": "证明 workflow 详情页阶段、artifact 和 session 链接视觉稳定。"
+    },
+    {
+      "id": "workflow-route-trace",
+      "kind": "trace",
+      "path": "test-results/10-workflow-boundary/route-trace.zip",
+      "purpose": "证明 provider-aware child session 点击路径正确。"
+    },
+    {
+      "id": "workflow-process-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/10-workflow-boundary/process-snapshot.json",
+      "purpose": "记录 runner process 与 session 编号分离后的输出。"
+    },
+    {
+      "id": "workflow-action-log",
+      "kind": "runtime_log",
+      "path": "test-results/10-workflow-boundary/action.log",
+      "purpose": "记录 continue/resume/abort 状态生成和触发结果。"
+    }
+  ]
+}

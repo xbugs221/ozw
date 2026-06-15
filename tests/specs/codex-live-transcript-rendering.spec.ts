@@ -116,6 +116,34 @@ test('Codex split file-operation JSON converts to one FileChanges card', async (
   assertFileChangesCard(messages[0], 'src/split-update.ts');
 });
 
+test('Codex displayText file-operation JSON converts to FileChanges card', async () => {
+  /**
+   * Some live provider envelopes place the visible text mirror in displayText.
+   * The file-operation renderer and filter must share that same envelope chain
+   * so bookkeeping JSON is shown as a FileChanges card instead of disappearing.
+   */
+  const { reduceNativeRuntimeEvent } = await loadNativeTranscriptModule();
+
+  const messages = reduceNativeRuntimeEvent([], {
+    type: 'codex-response',
+    sessionId: 'codex-live-rendering-spec',
+    data: {
+      type: 'item',
+      itemType: 'agent_message',
+      itemId: 'spec-display-text-json',
+      message: {
+        role: 'assistant',
+        content: {
+          displayText: JSON.stringify({ kind: 'update', path: 'src/display-text-update.ts' }),
+        },
+      },
+    },
+  });
+
+  assert.equal(messages.length, 1);
+  assertFileChangesCard(messages[0], 'src/display-text-update.ts');
+});
+
 test('Codex business JSON remains assistant text', async () => {
   /**
    * User-requested JSON may contain path-like fields. It remains ordinary

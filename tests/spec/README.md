@@ -4,6 +4,8 @@
 
 `tests/spec` 存放规格派生的验收测试。它们验证需求文档承诺的业务行为，例如会话管理、工作流读模型、测试分类合同和浏览器规格入口，而不是只检查组件是否能挂载。
 
+Provider 相关规格使用当前 `provider runtime` 口径；Codex 路径称为 `Codex app-server`，Pi 路径称为 `Pi native SDK`。
+
 ## 运行命令
 
 ```bash
@@ -23,6 +25,12 @@ pnpm run test:spec
 ## 新增测试
 
 新增测试应放在这里，当它来自规格验收、需要长期锁定业务合同，或需要同时约束 Node 与浏览器入口边界。只验证后端 API 的测试放入 `tests/backend`；需要完整真实页面链路的测试放入 `tests/e2e`。
+
+## 共享夹具
+
+Codex JSONL 历史使用 `tests/spec/helpers/codex-jsonl-fixture.ts` 写入，避免各 spec 手写 `.codex/sessions` 路径和 JSONL 行格式。需要等待项目 API 发现本地 Codex fixture 时，使用 `tests/spec/helpers/fixture-session-discovery.ts`，失败消息会包含 projectPath、sessionId、routeIndex、providerSessionId 和候选 sessions。
+
+Browser spec 需要替换 provider WebSocket 时，优先使用 `tests/spec/helpers/provider-runtime-harness.ts`。该 helper 只替换传输层，页面、路由、API 和 reducer 仍走真实应用链路。
 
 ## 历史 OpenSpec 验收
 

@@ -151,7 +151,7 @@ export function normalizeCodexFileOperationPayload(value: unknown, depth = 0): {
   }
 
   const nested = record.item ?? record.payload ?? record.data ?? record.update
-    ?? record.message ?? record.content ?? record.text ?? record.output ?? record.result;
+    ?? record.message ?? record.content ?? record.text ?? record.output ?? record.result ?? record.displayText;
   if (nested !== undefined && nested !== value) {
     return normalizeCodexFileOperationPayload(nested, depth + 1);
   }
