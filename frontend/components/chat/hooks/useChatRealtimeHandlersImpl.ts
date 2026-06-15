@@ -884,7 +884,7 @@ export function useChatRealtimeHandlers({
           console.log('[Codex] Unhandled item type:', codexData.itemType, codexData);
         }
 
-        // Live content is rendered directly from the native SDK event
+        // Live content is rendered directly from the native provider event
         // without waiting for JSONL persistence.
         if (codexData.type === 'item' && CODEX_LIVE_ITEM_TYPES.includes(codexData.itemType)) {
           const action = normalizeNativeRuntimeMessage(latestMessage as Record<string, unknown>);
@@ -1031,7 +1031,7 @@ export function useChatRealtimeHandlers({
           console.log('[Pi] Unhandled item type:', piData.itemType, piData);
         }
 
-        // Live content is rendered directly from the native SDK event
+        // Live content is rendered directly from the native provider event
         // without waiting for JSONL persistence.
         if (piData.type === 'item' && PI_LIVE_ITEM_TYPES.includes(piData.itemType)) {
           const action = normalizeNativeRuntimeMessage(latestMessage as Record<string, unknown>);

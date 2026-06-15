@@ -1895,14 +1895,14 @@ ozw 必须把当前项目下存在的 Codex/Pi provider JSONL 作为会话列表
 
 ## 需求：手动聊天不得依赖 co
 
-ozw 的 Codex/Pi 手动聊天必须由服务端 native agent runtime 直接调用 provider SDK，不得通过 co request、co conversation 或 co read model。
+ozw 的 Codex/Pi 手动聊天必须由服务端 native agent runtime 直接调用 Codex app-server 或 Pi SDK，不得通过 co request、co conversation 或 co read model。
 
-### 场景：Codex 手动消息直接进入 Codex SDK
+### 场景：Codex 手动消息直接进入 Codex app-server
 
 - **给定** 用户在项目聊天页选择 Codex
 - **当** 用户发送一条新消息
-- **则** 服务端应创建或恢复 Codex SDK Thread
-- **并且** 使用 `Thread.runStreamed()` 转发结构化事件
+- **则** 服务端应创建或恢复 Codex app-server session
+- **并且** 使用 app-server protocol 转发结构化事件
 - **并且** 不写入 `co-request-v1`
 
 ### 场景：Pi 手动消息直接进入 Pi SDK
@@ -2032,12 +2032,12 @@ ozw 不需要迁移、读取或展示历史 co conversation。
 
 ---
 
-## 需求：native SDK 事件直接驱动运行中消息渲染
+## 需求：provider 原生事件直接驱动运行中消息渲染
 
 ### 场景：Codex JSONL 尚未落盘时页面也能显示 assistant 内容
 
 - **给定** 用户在 ozw 中发起 Codex 手动聊天
-- **且** Codex SDK 已通过 WebSocket 返回 `agent_message` item
+- **且** Codex app-server 已通过 WebSocket 返回 `agent_message` item
 - **且** provider JSONL 尚未可读或尚未包含完整 assistant 内容
 - **当** 前端收到 `codex-response`
 - **那么** 页面应直接显示该 assistant 内容
@@ -2123,7 +2123,7 @@ ozw 不需要迁移、读取或展示历史 co conversation。
 
 ### 场景：生产代码不再包含 co 文件协议入口
 
-- **给定** ozw 已使用 Codex/Pi native SDK
+- **给定** ozw 已使用 Codex app-server 与 Pi native SDK
 - **当** 构建或测试生产源码
 - **那么** `backend/co-client.ts`、`backend/co-read-model.ts` 和 co request/state/event 兼容入口不应存在
 - **并且** 手动聊天路径不读取 `CCFLOW_CO_HOME` 或 `co-request-v1` / `co-conversation-v1`

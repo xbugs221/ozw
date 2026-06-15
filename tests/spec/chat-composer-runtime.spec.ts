@@ -21,6 +21,19 @@ const ACTIVE_TURN_EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results', 'ac
 const MATX_PROJECT_PATH = PLAYWRIGHT_FIXTURE_PROJECT_PATHS.find((projectPath) =>
   projectPath.endsWith(`${path.sep}workspace${path.sep}matx`),
 ) || path.join(path.dirname(PRIMARY_FIXTURE_PROJECT_PATH), 'matx');
+const VIEW_IMAGE_SESSION_ID = 'codex-view-image-tool-link';
+const VIEW_IMAGE_RELATIVE_PATH = 'images/view-image-tool-link.png';
+const TINY_PNG_BYTES = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+  0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+  0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+  0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+  0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+  0x44, 0xae, 0x42, 0x60, 0x82,
+]);
 
 /**
  * Ensure screenshots and state snapshots can be written by every scenario.
@@ -318,6 +331,55 @@ async function writeBrowserState(page, fileName) {
 }
 
 /**
+ * Write a real Codex JSONL fixture so the page loads the image tool card
+ * through the production messages API instead of a route-level mock.
+ *
+ * @returns {Promise<string>}
+ */
+async function writeViewImageCodexFixture() {
+  const imagePath = path.join(MATX_PROJECT_PATH, VIEW_IMAGE_RELATIVE_PATH);
+  await fs.mkdir(path.dirname(imagePath), { recursive: true });
+  await fs.writeFile(imagePath, TINY_PNG_BYTES);
+
+  const playwrightHome = path.resolve(MATX_PROJECT_PATH, '..', '..');
+  const sessionDir = path.join(playwrightHome, '.codex', 'sessions', '2026', '06', '15');
+  await fs.mkdir(sessionDir, { recursive: true });
+  const sessionPath = path.join(sessionDir, `${VIEW_IMAGE_SESSION_ID}.jsonl`);
+  const timestamp = '2026-06-15T12:49:00.000Z';
+  const lines = [
+    {
+      type: 'session_meta',
+      timestamp,
+      payload: {
+        id: VIEW_IMAGE_SESSION_ID,
+        cwd: MATX_PROJECT_PATH,
+        model: 'gpt-5-codex',
+      },
+    },
+    {
+      type: 'event_msg',
+      timestamp,
+      payload: {
+        type: 'user_message',
+        message: 'open generated image from view_image tool card',
+      },
+    },
+    {
+      type: 'response_item',
+      timestamp: '2026-06-15T12:49:01.000Z',
+      payload: {
+        type: 'function_call',
+        call_id: 'view-image-tool-link-call',
+        name: 'functions.view_image',
+        arguments: JSON.stringify({ path: imagePath }),
+      },
+    },
+  ];
+  await fs.writeFile(sessionPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf8');
+  return imagePath;
+}
+
+/**
  * Open the primary fixture project's manual chat route.
  *
  * @param {import('@playwright/test').Page} page
@@ -465,8 +527,22 @@ test('running cN session shows only the completed tool card', async ({ page }) =
   await writeBrowserState(page, 'c73-tool-card-runtime-state.json');
 });
 
-test('running cN follow-up collapses accepted and persisted user bubbles', async ({ page }) => {
-  /** Business rule: one follow-up send must stay one visible user bubble as it moves from accepted to persisted. */
+test('view_image tool card path opens the image preview', async ({ page }) => {
+  /** Business rule: a generated image path in a view_image tool card is a direct workspace file link. */
+  await writeViewImageCodexFixture();
+  const matxRoute = `${buildProjectRoutePrefix(MATX_PROJECT_PATH)}/${VIEW_IMAGE_SESSION_ID}`;
+  await page.goto(matxRoute, { waitUntil: 'networkidle' });
+  await page.getByText('open generated image').first().click();
+
+  const imagePathButton = page.getByRole('button', { name: VIEW_IMAGE_RELATIVE_PATH });
+  await expect(imagePathButton).toBeVisible();
+  await imagePathButton.click();
+  await expect(page.getByRole('img', { name: path.basename(VIEW_IMAGE_RELATIVE_PATH) })).toBeVisible();
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'view-image-tool-link-opened.png'), fullPage: true });
+});
+
+test('running cN follow-up turns green and renders live output before JSONL catches up', async ({ page }) => {
+  /** Business rule: accepted follow-up sends turn green and live output renders before persisted history catches up. */
   let includePersistedFollowup = false;
   await page.route('**/api/projects/**/sessions/c73/messages**', async (route) => {
     const messages = includePersistedFollowup
@@ -499,7 +575,29 @@ test('running cN follow-up collapses accepted and persisted user bubbles', async
 
   await textarea.fill('CHAT_RUNTIME_FOLLOWUP_DEDUPE');
   await textarea.press('Control+Enter');
-  await expect(page.locator('.chat-message.user').filter({ hasText: 'CHAT_RUNTIME_FOLLOWUP_DEDUPE' })).toHaveCount(1);
+  const followupRows = page.locator('.chat-message.user').filter({ hasText: 'CHAT_RUNTIME_FOLLOWUP_DEDUPE' });
+  await expect(followupRows).toHaveCount(1);
+  await expect(followupRows.first()).toHaveAttribute('data-delivery-status', 'persisted');
+  await expect(followupRows.first().locator(':scope > div > div').first()).toHaveCSS('background-color', 'rgb(22, 163, 74)');
+  await page.evaluate(() => window.__chatRuntimeEmit?.({
+    type: 'codex-response',
+    provider: 'codex',
+    sessionId: 'provider-session-c73',
+    ozwSessionId: 'c73',
+    ozw_session_id: 'c73',
+    data: {
+      type: 'item',
+      itemType: 'agent_message',
+      itemId: 'c73-followup-live-before-jsonl',
+      message: {
+        role: 'assistant',
+        content: 'CHAT_RUNTIME_LIVE_BEFORE_JSONL',
+      },
+      status: 'completed',
+    },
+  }));
+  await expect(page.getByText('CHAT_RUNTIME_LIVE_BEFORE_JSONL')).toBeVisible();
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'c73-followup-green-live-before-jsonl.png'), fullPage: true });
 
   includePersistedFollowup = true;
   await page.evaluate(() => window.__chatRuntimeEmit?.({
@@ -511,9 +609,9 @@ test('running cN follow-up collapses accepted and persisted user bubbles', async
     status: 'completed',
   }));
 
-  const followupRows = page.locator('.chat-message.user').filter({ hasText: 'CHAT_RUNTIME_FOLLOWUP_DEDUPE' });
   await expect(followupRows).toHaveCount(1);
   await expect(followupRows.first()).toHaveAttribute('data-delivery-status', 'persisted');
+  await expect(followupRows.first().locator(':scope > div > div').first()).toHaveCSS('background-color', 'rgb(22, 163, 74)');
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'c73-followup-dedupe.png'), fullPage: true });
 
   await writeBrowserState(page, 'c73-followup-dedupe-state.json');

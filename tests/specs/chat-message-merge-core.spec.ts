@@ -129,7 +129,7 @@ test('chat message reducer actions produce stable transcript state', () => {
   };
 
   reduce({ type: 'acceptedUserMessageSent', clientRequestId: 'client-1' });
-  assert.equal(messages[0].deliveryStatus, 'sent');
+  assert.equal(messages[0].deliveryStatus, 'persisted');
 
   reduce({ type: 'userMessagesPersisted' });
   assert.equal(messages[0].deliveryStatus, 'persisted');
@@ -276,6 +276,64 @@ test('chat message reducer actions produce stable transcript state', () => {
   ];
   assert.deepEqual([...coveredActions].sort(), [...expectedActions].sort());
   assert.deepEqual(visibleTexts(messages), ['persisted user', 'persisted assistant', 'delta assistant', 'live assistant']);
+});
+
+test('accepted Codex live turn renders before JSONL history catches up', () => {
+  /**
+   * Business case: Codex app-server accepts a manual prompt and starts streaming
+   * before ~/.codex/sessions JSONL exposes the user echo. The user bubble must
+   * already be green and the live assistant text must stay visible through an
+   * empty persisted reload.
+   */
+  const clientRequestId = 'codex-live-before-jsonl';
+  let messages: ChatMessage[] = [
+    row({
+      type: 'user',
+      content: 'explain why live status matters',
+      deliveryStatus: 'pending',
+      clientRequestId,
+      messageKey: `optimistic:${clientRequestId}`,
+    }),
+  ];
+
+  messages = chatMessageReducer(
+    { messages },
+    { type: 'acceptedUserMessageSent', clientRequestId },
+  ).messages;
+  assert.equal(messages[0].deliveryStatus, 'persisted', 'accepted user bubble must be green before JSONL echo');
+
+  messages = chatMessageReducer(
+    { messages },
+    {
+      type: 'liveRuntimeEventReceived',
+      event: {
+        type: 'codex-response',
+        data: {
+          type: 'item',
+          itemType: 'agent_message',
+          itemId: 'codex-live-before-jsonl-agent',
+          message: { role: 'assistant', content: 'live answer before persisted history' },
+          status: 'completed',
+        },
+      },
+    },
+  ).messages;
+  assert.deepEqual(visibleTexts(messages), ['explain why live status matters', 'live answer before persisted history']);
+
+  messages = chatMessageReducer(
+    { messages },
+    {
+      type: 'persistedReloaded',
+      persistedMessages: [],
+      preservePreviousMessages: true,
+      sessionId: 'codex-live-before-jsonl-session',
+    },
+  ).messages;
+  assert.deepEqual(
+    visibleTexts(messages),
+    ['explain why live status matters', 'live answer before persisted history'],
+    'empty JSONL refresh must not hide accepted live output',
+  );
 });
 
 test('persisted user echo stays in its original turn instead of moving to the bottom', () => {

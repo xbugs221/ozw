@@ -760,10 +760,13 @@ export function useChatSessionState({
           const hasLiveNativeRealtimeTail =
             (sessionProvider === 'codex' || sessionProvider === 'pi') &&
             chatMessagesRef.current.some(isNativeLiveMessage);
-          const hasUnconfirmedUserDelivery = chatMessagesRef.current.some((message) => (
+          const hasOptimisticUserDelivery = chatMessagesRef.current.some((message) => (
             message.type === 'user' &&
             Boolean(message.deliveryStatus) &&
-            message.deliveryStatus !== 'persisted'
+            (
+              message.deliveryStatus !== 'persisted' ||
+              String(message.messageKey || '').startsWith('optimistic:')
+            )
           ));
           if (!isSystemSessionChange || shouldResetForSessionLoad) {
             resetStreamingState();
@@ -774,7 +777,7 @@ export function useChatSessionState({
              * guaranteed to exist. Keep the local user send visible through that
              * handoff so persisted history can later confirm or fail it.
              */
-            if (!hasLiveNativeRealtimeTail && !(isDraftToConcreteSessionHandoff && hasUnconfirmedUserDelivery)) {
+            if (!hasLiveNativeRealtimeTail && !(isDraftToConcreteSessionHandoff && hasOptimisticUserDelivery)) {
               setChatMessages([]);
             }
             setSessionMessages([]);
@@ -1108,6 +1111,7 @@ export function useChatSessionState({
           isTemporarySessionId(currentSessionId) ||
           message.deliveryStatus === 'sent' ||
           message.deliveryStatus === 'failed' ||
+          (message.deliveryStatus === 'persisted' && String(message.messageKey || '').startsWith('optimistic:')) ||
           message.source === 'optimistic'
         ))
         .slice(-LOCAL_RECOVERY_MESSAGE_LIMIT);
@@ -1214,7 +1218,7 @@ export function useChatSessionState({
   }, [handleScroll]);
 
   // processingSessions frontend Set has been removed as an authoritative lifecycle source.
-  // Loading and abort states are driven exclusively by co session-status events.
+  // Loading and abort states are driven exclusively by provider session-status events.
 
   // Show "Load all" overlay after a batch finishes loading, persist for 2s then hide
   const prevLoadingRef = useRef(false);

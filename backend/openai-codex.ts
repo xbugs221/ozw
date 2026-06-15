@@ -1,13 +1,12 @@
 /**
- * OpenAI Codex SDK Integration
+ * OpenAI Codex CLI Integration
  * =============================
  *
- * This module provides integration with the OpenAI Codex SDK for non-interactive
- * chat sessions.
+ * This module runs Codex CLI non-interactive sessions for the agent API route.
  *
  * ## Usage
  *
- * - queryCodex(command, options, ws) - Execute a prompt with streaming via WebSocket
+ * - queryCodex(command, options, ws) - Execute a prompt with Codex CLI JSON streaming
  * - abortCodexSession(sessionId) - Cancel an active session
  * - isCodexSessionActive(sessionId) - Check if a session is running
  * - getActiveCodexSessions() - List all active sessions

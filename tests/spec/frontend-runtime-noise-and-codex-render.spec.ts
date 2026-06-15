@@ -243,7 +243,7 @@ test('slash commands 非取消失败仍保留 console error 诊断', async ({ pa
 
 test('Codex WS add/update 文件变更 JSON 字符串不会作为 assistant raw JSON 正文渲染', async ({ page }) => {
   /**
-   * 业务场景：Codex SDK 偶发把新建/更新文件并写入内容的 add/update payload 包在 agent_message content 字符串里。
+   * 业务场景：Codex app-server 偶发把新建/更新文件并写入内容的 add/update payload 包在 agent_message content 字符串里。
    * 失败含义：如果这里失败，用户会在聊天区看到 raw JSON，而不是结构化文件变更或正常对话内容。
    */
   const sessionId = 'proposal-75-codex-raw-json-ws';

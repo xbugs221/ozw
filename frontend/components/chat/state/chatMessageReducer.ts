@@ -32,7 +32,9 @@ export function markPendingUserMessagesDelivered(messages: ChatMessage[]): ChatM
 }
 
 /**
- * Mark the accepted user send as sent, falling back to the newest pending user row.
+ * Mark the accepted user send as confirmed, falling back to the newest pending user row.
+ * Codex app-server may stream live rows before JSONL catches up, so the accepted
+ * optimistic user row must already be the green anchor for that live turn.
  */
 export function markAcceptedUserMessageSent(messages: ChatMessage[], clientRequestId?: string): ChatMessage[] {
   const exactIndex = clientRequestId
@@ -52,7 +54,7 @@ export function markAcceptedUserMessageSent(messages: ChatMessage[], clientReque
     })();
   if (acceptedIndex < 0) return messages;
   return messages.map((message, index) =>
-    index === acceptedIndex ? { ...message, deliveryStatus: 'sent' as const } : message);
+    index === acceptedIndex ? { ...message, deliveryStatus: 'persisted' as const } : message);
 }
 
 /**

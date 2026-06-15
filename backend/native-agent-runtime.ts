@@ -2,12 +2,11 @@
  * Native Agent Runtime
  * ====================
  *
- * Directly manages Codex and Pi manual chat sessions using their native SDKs,
- * replacing the previous co file protocol intermediate layer.
+ * Coordinates Codex app-server manual chat and Pi SDK sessions, replacing the
+ * previous co file protocol intermediate layer.
  */
 
 import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from '@earendil-works/pi-coding-agent';
-import { Codex } from '@openai/codex-sdk';
 import os from 'os';
 import path from 'path';
 import { promises as fsp } from 'fs';
@@ -26,7 +25,6 @@ import {
   recordActiveTurnUser,
 } from './active-turn-overlay.js';
 import { resolveCodexPermissionPolicy } from './codex-permission-policy.js';
-import { transformCodexEvent } from '../shared/codex-message-normalizer.js';
 
 // ---------------------------------------------------------------------------
 // Provider capabilities
@@ -72,19 +70,14 @@ type CodexSessionRecord = {
   provider: 'codex';
   ozwSessionId: string;
   status: 'running' | 'completed' | 'aborted' | 'failed';
-  thread: import('@openai/codex-sdk').Thread | null;
-  abortController: AbortController;
   startedAt: string;
   projectPath: string;
   clientRequestId?: string | null;
   writer: RuntimeWriter | null;
-  messageQueue: Array<{ text: string; runningBehavior?: RunningBehavior }>;
-  activeRunPromise: Promise<void> | null;
   liveMessages: ChatMessageLike[];
   providerThreadId: string | null;
   activeTurnId: string | null;
   turnStartedAt?: string | null;
-  streamingDeltaBatcher?: StreamingDeltaBatcher;
 };
 
 type PiSessionRecord = {
@@ -158,25 +151,6 @@ function withActiveTurnOverlayWriter(
       writer.setSessionIndexContext?.(context);
     },
   };
-}
-
-// Codex event transformation is shared through codex-message-normalizer.
-
-function getCodexStreamingDeltaBatcher(session: CodexSessionRecord): StreamingDeltaBatcher {
-  /**
-   * Keep legacy Codex SDK WebSocket delivery and live transcript snapshots
-   * aligned while coalescing cumulative item.updated text.
-   */
-  if (!session.streamingDeltaBatcher) {
-    session.streamingDeltaBatcher = new StreamingDeltaBatcher((event) => {
-      session.writer?.send(event);
-      session.liveMessages = reduceNativeRuntimeEvent(
-        session.liveMessages,
-        event as Record<string, unknown>,
-      ) as ChatMessageLike[];
-    });
-  }
-  return session.streamingDeltaBatcher;
 }
 
 function getPiStreamingDeltaBatcher(session: PiSessionRecord): StreamingDeltaBatcher {
@@ -450,13 +424,9 @@ function getOrCreateCodexSession(ozwSessionId: string, projectPath: string, writ
       provider: 'codex',
       ozwSessionId,
       status: 'completed',
-      thread: null,
-      abortController: new AbortController(),
       startedAt: new Date().toISOString(),
       projectPath,
       writer,
-      messageQueue: [],
-      activeRunPromise: null,
       liveMessages: [],
       providerThreadId: null,
       activeTurnId: null,
@@ -560,147 +530,6 @@ export function clearPiSessionSnapshot(ozwSessionId: string, projectPath = ''): 
   const session = findRuntimeSession('pi', ozwSessionId, projectPath);
   if (!session) return;
   (session as PiSessionRecord).lastCompletedLiveMessages = null;
-}
-
-// ---------------------------------------------------------------------------
-// Codex runtime
-// ---------------------------------------------------------------------------
-
-async function runCodexTurn(session: CodexSessionRecord, text: string, options: {
-  model?: string;
-  reasoningEffort?: string;
-  permissionMode?: string;
-  highPermissionApproved?: boolean;
-  sessionId?: string;
-  clientRequestId?: string | null;
-}): Promise<void> {
-  const codex = new Codex();
-  const { sandboxMode, approvalPolicy } = resolveCodexPermissionPolicy({
-    permissionMode: options.permissionMode || 'default',
-    highPermissionApproved: options.highPermissionApproved === true,
-  });
-  const threadOptions = {
-    model: options.model || '',
-    sandboxMode: sandboxMode as import('@openai/codex-sdk').SandboxMode,
-    workingDirectory: session.projectPath,
-    skipGitRepoCheck: true,
-    modelReasoningEffort: (options.reasoningEffort || '') as import('@openai/codex-sdk').ModelReasoningEffort,
-    approvalPolicy: approvalPolicy as import('@openai/codex-sdk').ApprovalMode,
-  };
-
-  let thread: import('@openai/codex-sdk').Thread;
-  if (options.sessionId && !isCbwRouteSessionId(options.sessionId)) {
-    thread = codex.resumeThread(options.sessionId, threadOptions);
-  } else {
-    thread = codex.startThread(threadOptions);
-  }
-
-  session.thread = thread;
-  session.status = 'running';
-  session.abortController = new AbortController();
-  session.turnStartedAt = new Date().toISOString();
-
-  const effectiveSessionId = thread.id || options.sessionId || `codex-${Date.now()}`;
-
-  if (session.writer) {
-    session.writer.send({
-      type: 'session-created',
-      sessionId: effectiveSessionId,
-      provider: 'codex',
-      clientRequestId: options.clientRequestId || null,
-    });
-    if (typeof session.writer.setSessionId === 'function') {
-      session.writer.setSessionId(effectiveSessionId);
-    }
-    session.writer.send({
-      type: 'session-status',
-      sessionId: effectiveSessionId,
-      provider: 'codex',
-      isProcessing: true,
-      turnId: effectiveSessionId,
-      turnStartedAt: session.turnStartedAt || undefined,
-    });
-  }
-
-  try {
-    const streamed = await thread.runStreamed(text, { signal: session.abortController.signal });
-    for await (const event of streamed.events) {
-      if ((session.status as string) === 'aborted') {
-        getCodexStreamingDeltaBatcher(session).flushSession(thread.id || effectiveSessionId);
-        break;
-      }
-      const transformed = transformCodexEvent(event);
-      const currentSessionId = thread.id || effectiveSessionId;
-      if ((event as Record<string, unknown>)?.type === 'item.completed' || (event as Record<string, unknown>)?.type === 'item.updated' || (event as Record<string, unknown>)?.type === 'item.started' || (event as Record<string, unknown>)?.type === 'turn.completed' || (event as Record<string, unknown>)?.type === 'turn.failed') {
-        const eventName = String((event as Record<string, unknown>)?.type || '');
-        const transformedRecord = transformed && typeof transformed === 'object'
-          ? transformed as Record<string, unknown>
-          : null;
-        const transformedItemType = String(transformedRecord?.itemType || '');
-        if (
-          eventName !== 'item.completed' &&
-          transformedRecord?.type === 'item' &&
-          (transformedItemType === 'agent_message' || transformedItemType === 'reasoning')
-        ) {
-          const message = transformedRecord.message && typeof transformedRecord.message === 'object'
-            ? transformedRecord.message as Record<string, unknown>
-            : null;
-          const text = typeof message?.content === 'string' ? message.content : '';
-          getCodexStreamingDeltaBatcher(session).enqueue({
-            envelopeType: 'codex-response',
-            sessionId: currentSessionId,
-            itemType: transformedItemType as 'agent_message' | 'reasoning',
-            itemId: transformedRecord.itemId ?? null,
-            text,
-            mode: 'replace',
-          });
-          continue;
-        }
-        if (eventName === 'item.completed') {
-          getCodexStreamingDeltaBatcher(session).flushSession(currentSessionId);
-        }
-        session.writer?.send({ type: 'codex-response', data: transformed, sessionId: currentSessionId });
-        session.liveMessages = reduceNativeRuntimeEvent(session.liveMessages, { type: 'codex-response', data: transformed }) as ChatMessageLike[];
-      }
-      if ((event as Record<string, unknown>)?.type === 'turn.completed' && (event as Record<string, unknown>)?.usage) {
-        const usage = (event as Record<string, unknown>).usage as Record<string, number>;
-        session.writer?.send({
-          type: 'token-budget',
-          data: {
-            used: (usage.input_tokens || 0) + (usage.output_tokens || 0),
-            total: 200000,
-            source: 'codex-turn-completed',
-          },
-          sessionId: currentSessionId,
-        });
-      }
-    }
-
-    if ((session.status as string) !== 'aborted') {
-      getCodexStreamingDeltaBatcher(session).flushSession(thread.id || effectiveSessionId);
-      session.status = 'completed';
-      session.liveMessages = [];
-      const finalSessionId = thread.id || effectiveSessionId;
-      session.writer?.send({ type: 'codex-complete', sessionId: finalSessionId, actualSessionId: finalSessionId });
-    }
-  } catch (error) {
-    if ((session.status as string) === 'aborted' || (error as { name?: string }).name === 'AbortError') {
-      session.streamingDeltaBatcher?.flushAll();
-      session.status = 'aborted';
-      session.liveMessages = [];
-      return;
-    }
-    session.status = 'failed';
-    session.streamingDeltaBatcher?.flushAll();
-    session.liveMessages = [];
-    session.writer?.send({ type: 'codex-error', error: (error as { message?: string }).message || 'Codex error', sessionId: effectiveSessionId });
-  } finally {
-    if ((session.status as string) === 'running') {
-      session.status = 'completed';
-      session.liveMessages = [];
-    }
-    session.turnStartedAt = null;
-  }
 }
 
 export const __nativeAgentRuntimeInternalsForTest = {

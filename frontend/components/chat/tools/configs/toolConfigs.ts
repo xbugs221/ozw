@@ -396,16 +396,11 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
 
   view_image: {
     input: {
-      type: 'collapsible',
-      title: (input) => getFileOperationPath(input) || 'file',
-      displayToolName: 'View',
-      defaultOpen: false,
-      wrapTitle: true,
-      contentType: 'text',
-      getContentProps: (input) => ({
-        content: `🖼️ \`${getFileOperationPath(input) || 'unknown'}\``,
-        format: 'plain',
-      })
+      type: 'one-line',
+      label: 'View',
+      getValue: (input) => getFileOperationPath(input) || 'unknown',
+      action: 'open-file',
+      wrapText: true,
     },
     result: {
       hidden: true
@@ -414,16 +409,11 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
 
   'functions.view_image': {
     input: {
-      type: 'collapsible',
-      title: (input) => getFileOperationPath(input) || 'file',
-      displayToolName: 'View',
-      defaultOpen: false,
-      wrapTitle: true,
-      contentType: 'text',
-      getContentProps: (input) => ({
-        content: `🖼️ \`${getFileOperationPath(input) || 'unknown'}\``,
-        format: 'plain',
-      })
+      type: 'one-line',
+      label: 'View',
+      getValue: (input) => getFileOperationPath(input) || 'unknown',
+      action: 'open-file',
+      wrapText: true,
     },
     result: {
       hidden: true

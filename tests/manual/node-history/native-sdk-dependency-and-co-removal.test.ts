@@ -1,6 +1,6 @@
 /**
- * PURPOSE: Verify ozw manual Codex/Pi chat is wired to latest native SDKs
- * instead of the co file protocol.
+ * PURPOSE: Verify ozw manual Codex/Pi chat is wired to Codex app-server and
+ * the Pi native SDK instead of the co file protocol.
  */
 
 import assert from 'node:assert/strict';
@@ -64,19 +64,16 @@ function assertContains(text: string, pattern: RegExp, message: string): void {
   assert.equal(pattern.test(text), true, message);
 }
 
-test('package dependencies use the latest native SDKs selected for this change', async () => {
+test('package dependencies keep only the native SDK still used by manual chat', async () => {
   const packageJson = JSON.parse(await readRepoFile('package.json')) as {
     dependencies?: Record<string, string>;
   };
   const dependencies = packageJson.dependencies ?? {};
 
-  assert.ok(
+  assert.equal(
     dependencies['@openai/codex-sdk'],
-    'Codex manual chat must depend on @openai/codex-sdk',
-  );
-  assert.ok(
-    isAtLeast(parseVersionRange(dependencies['@openai/codex-sdk']), [0, 134, 0]),
-    `@openai/codex-sdk must be at least 0.134.0, got ${dependencies['@openai/codex-sdk']}`,
+    undefined,
+    'Codex manual chat must not keep the unused SDK dependency after app-server migration',
   );
 
   assert.ok(
@@ -114,10 +111,15 @@ test('server manual chat path does not route Codex/Pi through co', async () => {
   );
 
   const nativeRuntime = await readRepoFile('backend/native-agent-runtime.ts');
-  assertContains(
+  assertDoesNotContain(
     nativeRuntime,
     /@openai\/codex-sdk/,
-    'native runtime must import the Codex SDK',
+    'native runtime must not import the unused Codex SDK',
+  );
+  assertContains(
+    nativeRuntime,
+    /sendCodexAppServerMessage/,
+    'native runtime must route Codex manual chat through Codex app-server',
   );
   assertContains(
     nativeRuntime,
@@ -137,7 +139,7 @@ test('frontend does not send a universal co activePolicy steer for running messa
   assertDoesNotContain(
     composer,
     /targetTurnId/,
-    'frontend must not depend on co targetTurnId for native SDK chat',
+    'frontend must not depend on co targetTurnId for native provider chat',
   );
   assertContains(
     composer,

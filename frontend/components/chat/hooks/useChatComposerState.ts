@@ -725,7 +725,7 @@ export function useChatComposerState({
       // abort-session from a previous session racing with the new request.
       setCanAbortSession(false);
       // Loading state for stop-button visibility; authoritative running status
-      // comes from co session-status events, not from the local composer.
+      // comes from provider session-status events, not from the local composer.
       setIsLoading(true);
 
       setIsUserScrolledUp(false);
@@ -767,7 +767,7 @@ export function useChatComposerState({
         };
       }
       onSessionActive?.(sessionToActivate);
-      // onSessionProcessing removed: provider lifecycle is authoritative from co/oz flow.
+      // onSessionProcessing removed: provider lifecycle is authoritative from provider/ozw flow.
 
       const getToolsSettings = () => {
         try {
@@ -890,9 +890,9 @@ export function useChatComposerState({
         });
       }
       // Do NOT re-enable abort here.  Authoritative abortability comes
-      // exclusively from co session-status events carrying an active_turn_id.
+      // exclusively from provider session-status events carrying an active_turn_id.
       // Setting canAbortSession prematurely would allow abort-session to be
-      // sent before co acknowledges a turn, violating the spec.
+      // sent before the provider acknowledges a turn, violating the spec.
       armSubmitCooldown();
       onRequestDispatched?.();
 

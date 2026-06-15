@@ -463,6 +463,7 @@ test('Codex view_image tool card opens the image path like a compact Read card',
   assert.match(html, /data-testid="codex-tool-card"/, 'view_image must render through the shared tool card');
   assert.match(visibleTextFromHtml(html), /View/, 'view_image card must use the compact View label');
   assert.match(visibleTextFromHtml(html), /test-results\/final-view\.png/, 'view_image card must show the project-relative image path');
+  assert.match(html, /<button[^>]*title="test-results\/final-view\.png"[^>]*>/, 'view_image path must be rendered as a direct clickable file-open control');
   assert.doesNotMatch(visibleTextFromHtml(html), /functions\.view_image/, 'view_image must not fall back to a generic function title');
 });
 

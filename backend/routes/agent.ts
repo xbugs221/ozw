@@ -1025,7 +1025,7 @@ router.post('/', validateExternalApiKey, async (req, res) => {
       });
     }
 
-    console.log('🤖 Starting Codex SDK session');
+    console.log('🤖 Starting Codex CLI session');
 
     await queryCodex(message.trim(), {
       projectPath: finalProjectPath,

@@ -1989,7 +1989,7 @@ async function startServer() {
         const distIndexPath = path.join(PKG_ROOT, 'dist/index.html');
         const isProduction = fs.existsSync(distIndexPath);
 
-        console.log(`${c.info('[INFO]')} Native agent runtime ready (Codex SDK + Pi SDK)`);
+        console.log(`${c.info('[INFO]')} Native agent runtime ready (Codex app-server + Pi SDK)`);
         console.log(`${c.info('[INFO]')} Running in ${c.bright(isProduction ? 'PRODUCTION' : 'DEVELOPMENT')} mode`);
 
         if (!isProduction) {
