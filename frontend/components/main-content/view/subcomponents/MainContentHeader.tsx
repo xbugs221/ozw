@@ -14,6 +14,7 @@ export default function MainContentHeader({
   onMenuClick,
   leadingContent,
   dockLayout,
+  onRefresh,
 }: MainContentHeaderProps) {
   const showMenuButton = !isSidebarOpen;
 
@@ -33,6 +34,7 @@ export default function MainContentHeader({
               selectedProject={selectedProject}
               selectedSession={selectedSession}
               selectedWorkflow={selectedWorkflow}
+              onRefresh={onRefresh}
             />
           </div>
         </div>

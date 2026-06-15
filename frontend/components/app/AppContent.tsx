@@ -315,6 +315,7 @@ export default function AppContent() {
       onSelectWorkflow={handleWorkflowSelect}
       onNewSession={handleNewSession}
       onShowSettings={() => setShowSettings(true)}
+      onRefresh={handleSidebarRefresh}
       externalMessageUpdate={externalMessageUpdate}
     />
   );

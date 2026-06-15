@@ -60,6 +60,7 @@ function MainContent({
   onSelectWorkflow,
   onNewSession,
   onShowSettings,
+  onRefresh,
   externalMessageUpdate,
   headerLeadingContent,
 }: MainContentProps) {
@@ -303,6 +304,7 @@ function MainContent({
       isSidebarOpen={isSidebarOpen}
       onMenuClick={onMenuClick}
       leadingContent={headerLeadingContent}
+      onRefresh={onRefresh}
       dockLayout={isMobile ? undefined : {
         rightDockActive: layout.rightDock.activePanel,
         rightDockCollapsed: layout.rightDock.collapsed,
@@ -392,6 +394,7 @@ function MainContent({
           isSidebarOpen={isSidebarOpen}
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
+          onRefresh={onRefresh}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
@@ -487,6 +490,7 @@ function MainContent({
           isSidebarOpen={isSidebarOpen}
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
+          onRefresh={onRefresh}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
@@ -583,6 +587,7 @@ function MainContent({
           isSidebarOpen={isSidebarOpen}
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
+          onRefresh={onRefresh}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
@@ -696,6 +701,7 @@ function MainContent({
         isSidebarOpen={isSidebarOpen}
         onMenuClick={onMenuClick}
         leadingContent={headerLeadingContent}
+        onRefresh={onRefresh}
         dockLayout={{
           rightDockActive: layout.rightDock.activePanel,
           rightDockCollapsed: layout.rightDock.collapsed,

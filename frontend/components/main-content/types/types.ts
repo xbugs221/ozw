@@ -45,6 +45,7 @@ export type MainContentProps = {
   onSelectWorkflow: (project: Project, workflow: ProjectWorkflow) => void;
   onNewSession: NewSessionHandler;
   onShowSettings: () => void;
+  onRefresh: () => Promise<void> | void;
   externalMessageUpdate: number;
   headerLeadingContent?: ReactNode;
 };
@@ -68,6 +69,7 @@ export type MainContentHeaderProps = {
   onMenuClick: () => void;
   leadingContent?: ReactNode;
   dockLayout?: DockLayoutControl;
+  onRefresh?: () => Promise<void> | void;
 };
 
 export type MainContentStateViewProps = {
