@@ -162,7 +162,7 @@ export function useSidebarController({
     setDeletingProjects((prev) => new Set([...prev, project.name]));
 
     try {
-      const response = await api.deleteProject(project.name, true);
+      const response = await api.deleteProject(project.name, true, project.fullPath || project.path || '');
 
       if (response.ok) {
         onProjectDelete?.(project.name);

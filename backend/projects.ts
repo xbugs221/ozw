@@ -3060,6 +3060,7 @@ async function deletePiSession(sessionId, projectPath = '') {
     const sessionFilePath = await findPiSessionFilePath(providerSessionId || sessionId);
     if (sessionFilePath) {
       await fs.unlink(sessionFilePath);
+      await deleteProviderSessionIndexFile('pi', sessionFilePath);
       deleted = true;
     }
     clearProjectDirectoryCache();
@@ -3088,12 +3089,37 @@ function hasManualDraftsForProject(config, { projectName, projectPath, localProj
       || normalizeComparablePath(draft.projectPath) === normalizedProjectPath;
   });
 }
-async function isProjectEmpty(projectName) {
+async function resolveProjectPathForDeletion(config, projectName, projectPathHint = '') {
+  /**
+   * PURPOSE: Delete manual projects by their configured path, while allowing
+   * provider-only projects to use the real path carried by the sidebar payload.
+   */
+  const configuredPath = config[projectName]?.path || config[projectName]?.originalPath || '';
+  if (configuredPath) {
+    return configuredPath;
+  }
+  const hintedPath = typeof projectPathHint === 'string' ? projectPathHint.trim() : '';
+  if (hintedPath) {
+    return hintedPath;
+  }
+  try {
+    const discoveredProject = (await getProjects(null, { lightweightList: true })).find((project) => (
+      project.name === projectName
+      || project.routePath === projectName
+    ));
+    const discoveredPath = discoveredProject?.fullPath || discoveredProject?.path || '';
+    if (discoveredPath) {
+      return discoveredPath;
+    }
+  } catch (error) {
+    console.warn(`Could not resolve provider-only project path for ${projectName}:`, error.message);
+  }
+  return extractProjectDirectory(projectName);
+}
+async function isProjectEmpty(projectName, projectPathHint = '') {
   try {
     const config = await loadProjectConfig();
-    const projectPath = config[projectName]?.path
-      || config[projectName]?.originalPath
-      || await extractProjectDirectory(projectName);
+    const projectPath = await resolveProjectPathForDeletion(config, projectName, projectPathHint);
     if (hasManualDraftsForProject(config, { projectName, projectPath })) {
       return false;
     }
@@ -3119,31 +3145,40 @@ async function isProjectEmpty(projectName) {
     return false;
   }
 }
-async function deleteProject(projectName, force = false) {
+async function deleteProject(projectName, force = false, projectPathHint = '') {
   try {
     if (!force) {
-      const isEmpty = await isProjectEmpty(projectName);
+      const isEmpty = await isProjectEmpty(projectName, projectPathHint);
       if (!isEmpty) {
         throw new Error('Cannot delete project with existing sessions');
       }
     }
     const config = await loadProjectConfig();
-    let projectPath = config[projectName]?.path || config[projectName]?.originalPath;
-    if (!projectPath) {
-      projectPath = await extractProjectDirectory(projectName);
-    }
+    const projectPath = await resolveProjectPathForDeletion(config, projectName, projectPathHint);
     if (projectPath) {
       try {
         const codexSessions = await getCodexSessions(projectPath, { limit: 0, includeHidden: true });
         for (const session of codexSessions) {
           try {
-            await deleteCodexSession(session.id);
+            await deleteCodexSession(session.id, projectPath);
           } catch (err) {
             console.warn(`Failed to delete Codex session ${session.id}:`, err.message);
           }
         }
       } catch (err) {
         console.warn('Failed to delete Codex sessions:', err.message);
+      }
+      try {
+        const piSessions = await getPiSessions(projectPath, { limit: 0, includeHidden: true });
+        for (const session of piSessions) {
+          try {
+            await deletePiSession(session.id, projectPath);
+          } catch (err) {
+            console.warn(`Failed to delete Pi session ${session.id}:`, err.message);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to delete Pi sessions:', err.message);
       }
     }
     delete config[projectName];
@@ -5094,6 +5129,7 @@ async function deleteCodexSession(sessionId, projectPath = '') {
     if (sessionFilePath) {
       const resolvedProjectPath = projectPath || await readCodexSessionProjectPath(sessionFilePath);
       await fs.unlink(sessionFilePath);
+      await deleteProviderSessionIndexFile('codex', sessionFilePath);
       await cleanupDeletedSessionConfig(sessionId, resolvedProjectPath, 'codex');
       codexSessionFileCache.delete(sessionId);
       clearProjectDirectoryCache();

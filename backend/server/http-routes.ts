@@ -1557,8 +1557,9 @@ app.delete('/api/projects/:projectName', authenticateToken, async (req, res) => 
     try {
         const { projectName } = req.params;
         const force = req.query.force === 'true';
-        const deletedProjectPath = await extractProjectDirectory(projectName);
-        await deleteProject(projectName, force);
+        const projectPath = typeof req.body?.projectPath === 'string' ? req.body.projectPath.trim() : '';
+        const deletedProjectPath = projectPath || await extractProjectDirectory(projectName);
+        await deleteProject(projectName, force, projectPath);
         void broadcastProjectListInvalidated({ reason: 'project-delete', changedProjectPath: deletedProjectPath });
         res.json({ success: true });
     } catch (error: any) {

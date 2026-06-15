@@ -232,9 +232,10 @@ export const api = {
       method: 'DELETE',
       body: JSON.stringify({ projectPath }),
     }),
-  deleteProject: (projectName: string, force = false): Promise<Response> =>
+  deleteProject: (projectName: string, force = false, projectPath = ''): Promise<Response> =>
     authenticatedFetch(`${projectApiPath(projectName)}${force ? '?force=true' : ''}`, {
       method: 'DELETE',
+      body: JSON.stringify({ projectPath }),
     }),
   createProject: (path: string): Promise<Response> =>
     authenticatedFetch('/api/projects/create', {

@@ -15,6 +15,7 @@ import {
   clearProjectDirectoryCache,
   createManualSessionDraft,
   deleteProject,
+  getProjects,
   isProjectEmpty,
   loadProjectConfig,
 } from '../../backend/projects.ts';
@@ -125,5 +126,29 @@ test('Codex-only project cannot be deleted without force', { concurrency: false 
     const config = await loadProjectConfig();
     assert.ok(config[project.name]);
     await assert.doesNotReject(fs.access(sessionPath));
+  });
+});
+
+test('provider-only Codex project deletes by real project path instead of synthetic name', { concurrency: false }, async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const projectPath = path.join(tempHome, 'workspace', 'oz-cli-perm-codex');
+    await fs.mkdir(projectPath, { recursive: true });
+
+    const sessionPath = await createCodexSessionFile(tempHome, projectPath, 'provider-only-delete-session');
+    const projectsBefore = await getProjects(null, { lightweightList: true });
+    const providerOnlyProject = projectsBefore.find((project) => project.fullPath === projectPath);
+
+    assert.ok(providerOnlyProject, 'provider-only project should be discovered from Codex JSONL cwd');
+    assert.notEqual(providerOnlyProject.name, projectPath, 'provider-only route name should be synthetic');
+
+    await deleteProject(providerOnlyProject.name, true);
+
+    await assert.rejects(fs.access(sessionPath), /ENOENT/);
+    const projectsAfter = await getProjects(null, { lightweightList: true });
+    assert.equal(
+      projectsAfter.some((project) => project.fullPath === projectPath),
+      false,
+      'deleted provider-only project should not be rediscovered from stale JSONL/index data',
+    );
   });
 });
