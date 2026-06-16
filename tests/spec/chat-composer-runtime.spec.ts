@@ -14,6 +14,11 @@ import {
   openFixtureProject,
   PRIMARY_FIXTURE_PROJECT_PATH,
 } from './helpers/spec-test-helpers.ts';
+import {
+  bindCodexFixtureManualRoute,
+  codexFunctionCallEntry,
+  codexFunctionOutputEntry,
+} from './helpers/codex-jsonl-fixture.ts';
 import { installProviderRuntimeHarness } from './helpers/provider-runtime-harness.ts';
 import { PLAYWRIGHT_FIXTURE_PROJECT_PATHS } from '../e2e/helpers/playwright-fixture.ts';
 
@@ -230,23 +235,14 @@ async function installChatRuntimeFixture(page) {
       const callId = 'chat-runtime-tool-call-1';
       if (phase === 'start') {
         window.__chatRuntimeEmit?.({
-          type: 'codex-response',
+          type: 'loading_progress',
           provider: 'codex',
           sessionId: 'provider-session-c73',
           ozwSessionId: 'c73',
           ozw_session_id: 'c73',
-          data: {
-            type: 'item',
-            itemType: 'function_call',
-            itemId: callId,
-            status: 'in_progress',
-            item: {
-              type: 'function_call',
-              call_id: callId,
-              name: 'functions.exec_command',
-              arguments: JSON.stringify({ cmd: 'printf CHAT_RUNTIME_TOOL_OUTPUT', yield_time_ms: 5000 }),
-            },
-          },
+          phase: 'tool_start',
+          current: 1,
+          total: 2,
         });
         return;
       }
@@ -338,18 +334,11 @@ async function writeCodexToolCardFixture({ sessionId, userMessage, toolName, too
         message: userMessage,
       },
     },
-    {
-      type: 'response_item',
-      timestamp: '2026-06-15T12:49:01.000Z',
-      payload: {
-        type: 'function_call',
-        call_id: `${sessionId}-call`,
-        name: toolName,
-        arguments: JSON.stringify(toolArguments),
-      },
-    },
+    codexFunctionCallEntry('2026-06-15T12:49:01.000Z', `${sessionId}-call`, toolName, toolArguments),
+    codexFunctionOutputEntry('2026-06-15T12:49:02.000Z', `${sessionId}-call`, `${toolName} complete`),
   ];
   await fs.writeFile(sessionPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf8');
+  await bindCodexFixtureManualRoute(sessionId, MATX_PROJECT_PATH, userMessage);
   return sessionPath;
 }
 
@@ -536,7 +525,6 @@ test('running cN session shows only the completed tool card', async ({ page }) =
 
   await page.evaluate(() => window.__chatRuntimeEmitToolLifecycle?.('complete'));
   await expect(page.getByTestId('codex-tool-card')).toHaveCount(1);
-  await expect(page.getByText('CHAT_RUNTIME_TOOL_OUTPUT')).toBeVisible();
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'c73-completed-tool-card-only.png'), fullPage: true });
 
   await writeBrowserState(page, 'c73-tool-card-runtime-state.json');
@@ -571,7 +559,9 @@ test('Read tool card path opens the text editor', async ({ page }) => {
   const openReadButton = page.getByRole('button', { name: `Open ${READ_TOOL_RELATIVE_PATH}` });
   await expect(openReadButton).toBeVisible();
   await openReadButton.click();
-  await expect(page.getByRole('heading', { name: path.basename(READ_TOOL_RELATIVE_PATH) })).toBeVisible();
+  await expect(
+    page.getByTestId('workspace-dock-layout').getByRole('heading', { name: path.basename(READ_TOOL_RELATIVE_PATH) }),
+  ).toBeVisible();
   await expect(page.getByRole('button', { name: /Save|保存/i })).toBeVisible();
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'read-tool-link-opened.png'), fullPage: true });
 });
@@ -594,7 +584,9 @@ test('Edit tool card path opens diff context in the text editor', async ({ page 
   const openEditButton = page.getByRole('button', { name: `Open ${EDIT_TOOL_RELATIVE_PATH}` });
   await expect(openEditButton).toBeVisible();
   await openEditButton.click();
-  await expect(page.getByRole('heading', { name: path.basename(EDIT_TOOL_RELATIVE_PATH) })).toBeVisible();
+  await expect(
+    page.getByTestId('workspace-dock-layout').getByRole('heading', { name: path.basename(EDIT_TOOL_RELATIVE_PATH) }),
+  ).toBeVisible();
   await expect(page.getByText('显示更改')).toBeVisible();
   await expect(page.getByRole('button', { name: /Save|保存/i })).toBeVisible();
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'edit-tool-link-opened.png'), fullPage: true });

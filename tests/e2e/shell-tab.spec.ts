@@ -179,20 +179,12 @@ test('mobile shell helper keys send escape tab arrows and held ctrl arrow input'
   await page.getByTestId('shell-mobile-key-arrowUp').click();
 
   const ctrlButton = page.getByTestId('shell-mobile-key-ctrl');
-  await ctrlButton.dispatchEvent('pointerdown', {
-    pointerId: 71,
-    pointerType: 'touch',
-    isPrimary: true,
-    button: 0,
-  });
+  await ctrlButton.click();
   await expect(ctrlButton).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('shell-mobile-key-arrowRight').click();
-  await ctrlButton.dispatchEvent('pointerup', {
-    pointerId: 71,
-    pointerType: 'touch',
-    isPrimary: true,
-    button: 0,
-  });
+  await expect(ctrlButton).toHaveAttribute('aria-pressed', 'true');
+  await ctrlButton.click();
+  await expect(ctrlButton).toHaveAttribute('aria-pressed', 'false');
 
   await expect.poll(async () => page.evaluate(() => window.__sentShellInputData)).toEqual([
     '\x1b',

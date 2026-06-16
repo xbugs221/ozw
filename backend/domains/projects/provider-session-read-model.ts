@@ -120,6 +120,43 @@ export async function indexProviderSessionFile(provider: ProviderName, filePath:
 /**
  * 从 SQLite 索引删除已经移除的 Provider JSONL 文件。
  */
+export async function getProviderSessionProjectPathForFile(provider: ProviderName, filePath: string): Promise<string> {
+  /**
+   * 业务目的：在 provider JSONL 删除前找回其项目归属，供项目索引同步使用。
+   */
+  const deps = getDependencies();
+  try {
+    const [db, providerSessionIndexDb] = await Promise.all([
+      deps.getDb(),
+      deps.getProviderSessionIndexDb(),
+    ]);
+    return providerSessionIndexDb.getProjectPathForFile(db, provider, filePath);
+  } catch (error) {
+    deps.warn(`[ProviderIndex] Could not locate ${provider} file ${filePath}:`, error);
+    return '';
+  }
+}
+
+/**
+ * 统计一个项目当前仍保留的 Provider 会话索引行数。
+ */
+export async function countProviderSessionsForProject(projectPath: string): Promise<number> {
+  /**
+   * 业务目的：删除单个 JSONL 后判断 provider-only 项目是否仍应可见。
+   */
+  const deps = getDependencies();
+  try {
+    const [db, providerSessionIndexDb] = await Promise.all([
+      deps.getDb(),
+      deps.getProviderSessionIndexDb(),
+    ]);
+    return providerSessionIndexDb.countForProject(db, projectPath);
+  } catch (error) {
+    deps.warn(`[ProviderIndex] Could not count sessions for ${projectPath}:`, error);
+    return 0;
+  }
+}
+
 export async function deleteProviderSessionIndexFile(provider: ProviderName, filePath: string): Promise<void> {
   const deps = getDependencies();
   try {

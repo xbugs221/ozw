@@ -4,6 +4,7 @@
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const DEFAULT_SESSION_DAY = ['2026', '06', '09'] as const;
 const DEFAULT_FIXTURE_HOME = process.env.PLAYWRIGHT_FIXTURE_HOME || process.env.HOME || '/tmp';
@@ -181,6 +182,8 @@ export async function writeCodexSessionFixture(
   ];
   await fs.mkdir(path.dirname(sessionFilePath), { recursive: true });
   await fs.writeFile(sessionFilePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+  await indexCodexFixtureSession(sessionFilePath);
+  await bindCodexFixtureManualRoute(options.sessionId, projectPath);
   return { sessionId: options.sessionId, projectPath, sessionFilePath };
 }
 
@@ -199,5 +202,42 @@ export async function appendCodexSessionEntries(
   const sessionFilePath = codexSessionFilePath(sessionId, options);
   await fs.mkdir(path.dirname(sessionFilePath), { recursive: true });
   await fs.appendFile(sessionFilePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+  await indexCodexFixtureSession(sessionFilePath);
   return sessionFilePath;
+}
+
+/**
+ * Refresh the same provider session index that the backend API reads during browser specs.
+ */
+async function indexCodexFixtureSession(sessionFilePath: string): Promise<void> {
+  try {
+    const moduleUrl = pathToFileURL(path.join(process.cwd(), 'backend/domains/projects/project-overview-service.ts')).href;
+    const { indexProviderSessionFile } = await import(moduleUrl);
+    await indexProviderSessionFile('codex', sessionFilePath);
+  } catch {
+    // File-system discovery remains the fallback path when an isolated spec does not use the index DB.
+  }
+}
+
+/**
+ * Create the manual cN route that browser specs use to open provider-backed sessions.
+ */
+export async function bindCodexFixtureManualRoute(
+  sessionId: string,
+  projectPath: string,
+  label = sessionId,
+): Promise<void> {
+  try {
+    const {
+      createManualSessionDraft,
+      finalizeManualSessionRoute,
+    } = await import(pathToFileURL(path.join(process.cwd(), 'backend/domains/projects/manual-session-route-read-model.ts')).href);
+    const projectName = projectPath.replace(/[\\/:\s~_]/g, '-');
+    const draft = await createManualSessionDraft(projectName, projectPath, 'codex', label, {
+      providerSessionId: sessionId,
+    });
+    await finalizeManualSessionRoute(projectName, draft.id, sessionId, 'codex', projectPath);
+  } catch {
+    // Standalone provider-session discovery remains available for specs that do not need cN routes.
+  }
 }

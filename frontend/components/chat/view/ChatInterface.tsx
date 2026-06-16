@@ -13,26 +13,20 @@ import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import type { Provider } from '../types/types';
-import type { SessionProvider } from '../../../types/app';
 import { buildPiQueueState, isPiQueueForActiveSession, type PiQueueState } from '../utils/piQueueState';
 import { api } from '../../../utils/api';
 import { hasSessionControlChanged } from '../composer/sessionControlState';
-
-type PendingViewSession = {
-  sessionId: string | null;
-  startedAt: number;
-  clientRequestId?: string;
-  draftSessionId?: string | null;
-};
+import {
+  isCbwRouteSessionId,
+  isTemporarySessionId,
+  resolveProjectSessionProvider,
+  resolveSessionRoutingContext,
+  type PendingViewSession,
+} from '../session/sessionIdentity';
 
 const NETWORK_RESPONSE_TIMEOUT_MS = 30_000;
 const NETWORK_TIMEOUT_MESSAGE =
   '30 秒内没有收到服务端响应，疑似网络连接异常。请检查网络后重试。';
-const isTemporarySessionId = (sessionId?: string | null): boolean =>
-  Boolean(sessionId && sessionId.startsWith('new-session-'));
-
-const isUnsavedSessionId = (sessionId?: string | null): boolean =>
-  Boolean(sessionId && sessionId.startsWith('new-session-'));
 
 /**
  * Build the project identity needed by session-scoped config APIs.
@@ -44,59 +38,6 @@ const resolveSessionConfigTarget = (
   projectName: selectedSession?.__projectName || selectedProject?.name || '',
   projectPath: selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '',
 });
-
-/**
- * PURPOSE: Infer the authoritative provider for a persisted session from the
- * currently loaded project collections when route metadata is missing.
- */
-const isCbwRouteSessionId = (sessionId: string): boolean =>
-  /^c\d+$/.test(sessionId);
-
-const resolveProjectSessionProvider = (
-  selectedProject: ChatInterfaceProps['selectedProject'],
-  sessionId?: string | null,
-): SessionProvider | null => {
-  if (!selectedProject || !sessionId || isTemporarySessionId(sessionId)) {
-    return null;
-  }
-
-  // Direct ID match in provider session arrays.
-  if ((selectedProject.codexSessions || []).some((session) => session.id === sessionId)) {
-    return 'codex';
-  }
-  if ((selectedProject.piSessions || []).some((session) => session.id === sessionId)) {
-    return 'pi';
-  }
-
-  // Route-based sessions (cN) need routeIndex matching because their
-  // provider session has a UUID id, not the route id.
-  if (isCbwRouteSessionId(sessionId)) {
-    const routeIndex = Number(sessionId.slice(1));
-    if ((selectedProject.piSessions || []).some((s) => s.routeIndex === routeIndex)) {
-      return 'pi';
-    }
-    if ((selectedProject.codexSessions || []).some((s) => s.routeIndex === routeIndex)) {
-      return 'codex';
-    }
-  }
-
-  return null;
-};
-
-/**
- * Recover workflow routing context from persisted session metadata instead of query parameters.
- */
-const resolveFlowrkflowSessionContext = (
-  selectedProject: ChatInterfaceProps['selectedProject'],
-  selectedSession: ChatInterfaceProps['selectedSession'],
-) => {
-  return {
-    projectName: selectedSession?.__projectName || selectedProject?.name || '',
-    projectPath: selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '',
-    workflowId: typeof selectedSession?.workflowId === 'string' ? selectedSession.workflowId : '',
-    workflowStageKey: typeof selectedSession?.stageKey === 'string' ? selectedSession.stageKey : '',
-  };
-};
 
 /**
  * Identify whether a WebSocket message can be treated as backend activity for chat requests.
@@ -203,12 +144,12 @@ function ChatInterface({
     selectedSession,
   });
   const projectSessionProvider = useMemo(
-    () => resolveProjectSessionProvider(selectedProject, selectedSession?.id),
-    [selectedProject, selectedSession?.id],
+    () => resolveProjectSessionProvider(selectedProject, selectedSession?.id, selectedSession),
+    [selectedProject, selectedSession],
   );
   const workflowSessionContext = useMemo(
-    () => resolveFlowrkflowSessionContext(selectedProject, selectedSession),
-    [selectedProject, selectedSession],
+    () => resolveSessionRoutingContext(selectedProject, selectedSession, provider),
+    [provider, selectedProject, selectedSession],
   );
   const effectiveProvider = useMemo(() => {
     // URL query param takes highest precedence — it's the most reliable
@@ -455,7 +396,7 @@ function ChatInterface({
     async (patch: { provider?: Provider; model?: string; reasoningEffort?: string; thinkingLevel?: string }) => {
       if (
         !selectedSession?.id
-        || isUnsavedSessionId(selectedSession.id)
+        || isTemporarySessionId(selectedSession.id)
       ) {
         return;
       }
@@ -569,7 +510,7 @@ function ChatInterface({
   useEffect(() => {
     if (
       !selectedSession?.id
-      || isUnsavedSessionId(selectedSession.id)
+      || isTemporarySessionId(selectedSession.id)
     ) {
       return;
     }

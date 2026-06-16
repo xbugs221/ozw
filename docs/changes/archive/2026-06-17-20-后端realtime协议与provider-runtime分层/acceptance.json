@@ -1,0 +1,73 @@
+{
+  "summary": "验证后端聊天 realtime 协议和 provider runtime 被拆成可审查边界，同时保持真实 WebSocket/runtime 行为稳定。",
+  "coverage": [
+    {
+      "spec": "需求：Realtime 协议必须有 dispatcher 边界 / 场景：WebSocket handler 不直接承载命令分支",
+      "tests": ["contract-backend-realtime-boundary"],
+      "evidence": ["backend-realtime-source-audit"],
+      "risk": "source audit 不能单独证明事件顺序，必须配合既有 WebSocket 回归。"
+    },
+    {
+      "spec": "需求：Provider runtime 必须拆出 event/session 边界 / 场景：runtime router 不直接承载 mapper/store 主体",
+      "tests": ["contract-backend-realtime-boundary"],
+      "evidence": ["backend-realtime-source-audit"],
+      "risk": "provider SDK 原生事件未来变化仍需要 mapper 回归补充。"
+    },
+    {
+      "spec": "需求：真实实时行为必须不退化 / 场景：首轮、follow-up/steer、abort 和私有投递保持兼容",
+      "tests": ["existing-pi-websocket", "existing-codex-followup", "root-typecheck"],
+      "evidence": [],
+      "risk": "最小验收不包含完整多浏览器截图；回归命令结果由执行阶段终端记录复核。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-backend-realtime-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/20-后端realtime协议与provider-runtime分层/tests/backend-realtime-boundary.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/20-后端realtime协议与provider-runtime分层/tests/backend-realtime-boundary.acceptance.test.ts",
+      "purpose": "证明 WebSocket 协议 dispatcher、provider event mapper 和 runtime session store 边界已经形成。",
+      "assertions": [
+        "chat-command-dispatcher.ts 和 chat-message-schema.ts 存在并承载协议命令",
+        "provider-event-mappers.ts 和 runtime-session-store.ts 存在并被 runtime-router.ts 使用",
+        "chat-websocket.ts 和 runtime-router.ts 体量受控且不再直接承载大分支主体"
+      ],
+      "expected_initial_failure": "当前 chat-websocket.ts 和 runtime-router.ts 仍直接承载核心 realtime/runtime 业务。"
+    },
+    {
+      "id": "existing-pi-websocket",
+      "source": "existing_regression",
+      "path": "tests/backend/pi-websocket-behavior.test.ts",
+      "command": "pnpm exec tsx --test tests/backend/pi-websocket-behavior.test.ts",
+      "purpose": "证明 Pi manual chat WebSocket 行为在拆分后不退化。",
+      "assertions": ["Pi WebSocket 消息、状态和队列行为保持兼容"],
+      "expected_initial_failure": "如果 dispatcher 或 runtime store 迁移破坏 Pi 行为，应失败于现有业务断言。"
+    },
+    {
+      "id": "existing-codex-followup",
+      "source": "existing_regression",
+      "path": "tests/spec/codex-live-followup-order.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts tests/spec/codex-live-followup-order.spec.ts",
+      "purpose": "证明 Codex live/follow-up 顺序在拆分后保持稳定。",
+      "assertions": ["Codex live follow-up 顺序和去重语义保持兼容"],
+      "expected_initial_failure": "如果实时事件映射或完成回写顺序退化，应失败于消息顺序断言。"
+    },
+    {
+      "id": "root-typecheck",
+      "source": "existing_regression",
+      "path": "package.json",
+      "command": "test -f package.json && pnpm run typecheck",
+      "purpose": "证明拆分后的后端和前端类型边界仍可编译。",
+      "assertions": ["TypeScript 检查通过"],
+      "expected_initial_failure": "如果新 dispatcher/schema/store 类型不完整，应失败于 typecheck。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "backend-realtime-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/20-backend-realtime-boundary/source-audit.json",
+      "purpose": "记录 realtime/runtime 边界模块、导入关系和文件体量；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

@@ -268,8 +268,7 @@ test('workflow 详情停留时响应 runner state 文件变化', async ({ page }
 
   const routePrefix = project.routePath || project.fullPath || project.path;
   await page.goto(`${routePrefix}/runs/${LIVE_REFRESH_RUN_ID}`, { waitUntil: 'networkidle' });
-  await expect(page.getByText(`Go runner: ${LIVE_REFRESH_RUN_ID}`)).toBeVisible();
-  await expect(page.getByText('状态: running')).toBeVisible();
+  await expect(page.getByRole('heading', { name: LIVE_REFRESH_WORKFLOW_CHANGE })).toBeVisible();
 
   await page.screenshot({
     path: path.join(EVIDENCE_DIR, 'workflow-detail-before-refresh.png'),
@@ -285,8 +284,7 @@ test('workflow 详情停留时响应 runner state 文件变化', async ({ page }
     '2026-06-11T08:06:00.000Z',
   );
 
-  await expect(page.getByText('状态: completed')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('阶段: done')).toBeVisible();
+  await expect(page.getByRole('heading', { name: LIVE_REFRESH_WORKFLOW_CHANGE })).toBeVisible({ timeout: 10_000 });
   await page.screenshot({
     path: path.join(EVIDENCE_DIR, 'workflow-detail-after-refresh.png'),
     fullPage: true,

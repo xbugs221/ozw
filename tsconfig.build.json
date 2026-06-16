@@ -14,13 +14,14 @@
     "rootDir": ".",
     "strict": true,
     "forceConsistentCasingInFileNames": true,
-    "allowJs": false,
+    "allowJs": true,
     "types": ["node"],
     "declaration": false,
     "sourceMap": true
   },
   "include": [
     "backend/**/*.ts",
+    "backend/**/*.js",
     "backend/**/*.d.ts",
     "shared/**/*.ts",
     "scripts/**/*.ts"

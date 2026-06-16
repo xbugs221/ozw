@@ -426,11 +426,11 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
             try {
                 projectPath = projectPath || await extractProjectDirectory(projectName);
                 const codexSessions = await getCodexSessions(projectPath, { limit: 0, includeHidden: true });
-                if (codexSessions.some((session) => session.id === sessionId)) {
+                if (codexSessions.some((session: { id?: string }) => session.id === sessionId)) {
                     resolvedProvider = 'codex';
                 } else {
                     const piSessions = await getPiSessions(projectPath);
-                    resolvedProvider = piSessions.some((session) => session.id === sessionId) ? 'pi' : 'codex';
+                    resolvedProvider = piSessions.some((session: { id?: string }) => session.id === sessionId) ? 'pi' : 'codex';
                 }
             } catch (providerDetectionError) {
                 console.warn(

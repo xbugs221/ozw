@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { resolveFlowRunStatePath } from '../../../backend/domains/workflows/flow-runtime-paths.ts';
+import { getProjectLocalConfigPath } from '../../../backend/project-config-store.ts';
 
 const FIXTURE_ROOT = path.join(process.cwd(), '.tmp', 'playwright-home');
 const FIXTURE_STATE_HOME = path.join(process.cwd(), '.tmp', 'playwright-state-home');
@@ -328,8 +329,32 @@ function writeCodexSessionFixture(projectPath, sessionId, userMessage, messagePa
 }
 
 function writeManualProjectConfigFixture() {
-  const configPath = path.join(FIXTURE_ROOT, '.ozw', 'conf.json');
+  const legacyConfigPath = path.join(FIXTURE_ROOT, '.ozw', 'conf.json');
+  const stateConfigPath = path.join(FIXTURE_STATE_HOME, 'ozw', 'conf.json');
   const config = {};
+  const nextRouteIndexByProject = new Map();
+
+  const nextRouteIndex = (projectLabel) => {
+    const next = (nextRouteIndexByProject.get(projectLabel) || 0) + 1;
+    nextRouteIndexByProject.set(projectLabel, next);
+    return next;
+  };
+
+  const addChatRoute = (projectConfig, projectLabel, sessionId, title) => {
+    const routeIndex = nextRouteIndex(projectLabel);
+    projectConfig.chat ||= {};
+    projectConfig.chat[String(routeIndex)] = {
+      sessionId,
+      title,
+      provider: 'codex',
+      providerSessionId: sessionId,
+      origin: 'manual',
+    };
+    projectConfig.manualSessionNextRouteIndex = Math.max(
+      Number(projectConfig.manualSessionNextRouteIndex || 0),
+      routeIndex,
+    );
+  };
 
   for (const project of FIXTURE_PROJECTS) {
     const projectName = project.path.replace(/[\\/:\s~_]/g, '-');
@@ -340,8 +365,31 @@ function writeManualProjectConfigFixture() {
     };
   }
 
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  for (const extraSession of FIXTURE_PROJECT_EXTRA_SESSIONS) {
+    const project = FIXTURE_PROJECTS.find((entry) => entry.label === extraSession.projectLabel);
+    if (!project) {
+      continue;
+    }
+    const projectName = project.path.replace(/[\\/:\s~_]/g, '-');
+    addChatRoute(
+      config[projectName],
+      project.label,
+      extraSession.sessionId,
+      extraSession.userMessage,
+    );
+  }
+
+  for (const configPath of [legacyConfigPath, stateConfigPath]) {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  }
+
+  for (const project of FIXTURE_PROJECTS) {
+    const projectName = project.path.replace(/[\\/:\s~_]/g, '-');
+    const localConfigPath = getProjectLocalConfigPath(project.path);
+    fs.mkdirSync(path.dirname(localConfigPath), { recursive: true });
+    fs.writeFileSync(localConfigPath, `${JSON.stringify(config[projectName] || {}, null, 2)}\n`, 'utf8');
+  }
 }
 
 /**

@@ -5,11 +5,23 @@
 ## 测试入口
 
 - `pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts`
+- `pnpm exec tsx --test tests/specs/backend-realtime-boundary.spec.ts`
 - `pnpm exec tsx --test tests/specs/provider-live-non-streaming-render.spec.ts`
 - `pnpm exec tsx --test tests/specs/codex-live-transcript-rendering.spec.ts`
 - `pnpm exec tsx --test tests/specs/chat-tool-message-types.spec.ts`
 
 ## 需求：provider 原生事件直接驱动运行中消息渲染
+
+### 场景：Provider runtime facade 不直接承载 mapper、session store 和 fake runtime 主体
+
+- **给定** Codex/Pi 原生 runtime 事件、session status、abort 和 fake Pi runtime 都会经过 provider runtime facade
+- **当** 维护者修改 `backend/domains/provider-runtime/runtime-router.ts`
+- **那么** Pi/Codex 事件转换必须位于 `provider-event-mappers.ts`
+- **并且** session lookup、status 和 abort 状态主体必须位于 `runtime-session-store.ts`
+- **并且** fake runtime 或测试 harness 必须位于独立模块
+- **并且** `runtime-router.ts` 只能保留 public facade 和路由协调，不得重新定义 mapper/session lookup/fake runtime 主体
+
+对应规格测试：`tests/specs/backend-realtime-boundary.spec.ts`，并生成 `test-results/backend-realtime-boundary/source-audit.json`。
 
 ### 场景：Codex JSONL 尚未落盘时页面也能显示 assistant 内容
 

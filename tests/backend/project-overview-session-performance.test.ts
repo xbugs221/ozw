@@ -12,12 +12,6 @@ import test from 'node:test';
 
 import Database from 'better-sqlite3';
 
-import {
-  clearProjectDirectoryCache,
-  getCodexSessions,
-  getPiSessions,
-} from '../../backend/projects.ts';
-
 /**
  * Run one test body with isolated provider and ozw state roots.
  */
@@ -29,16 +23,16 @@ async function withTemporaryHome(testBody) {
   const originalHome = process.env.HOME;
   const originalXdgStateHome = process.env.XDG_STATE_HOME;
   const originalDatabasePath = process.env.DATABASE_PATH;
+  const originalPath = process.env.PATH;
+  const originalFakeOzMarker = process.env.OZW_FAKE_OZ_MARKER;
   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-overview-sessions-'));
 
   process.env.HOME = homeDir;
   process.env.XDG_STATE_HOME = path.join(homeDir, '.local', 'state');
   process.env.DATABASE_PATH = path.join(homeDir, 'auth.db');
-  clearProjectDirectoryCache();
   try {
     await testBody(homeDir);
   } finally {
-    clearProjectDirectoryCache();
     if (originalHome) {
       process.env.HOME = originalHome;
     } else {
@@ -53,6 +47,16 @@ async function withTemporaryHome(testBody) {
       process.env.DATABASE_PATH = originalDatabasePath;
     } else {
       delete process.env.DATABASE_PATH;
+    }
+    if (originalPath) {
+      process.env.PATH = originalPath;
+    } else {
+      delete process.env.PATH;
+    }
+    if (originalFakeOzMarker) {
+      process.env.OZW_FAKE_OZ_MARKER = originalFakeOzMarker;
+    } else {
+      delete process.env.OZW_FAKE_OZ_MARKER;
     }
     await fs.rm(homeDir, { recursive: true, force: true });
   }
@@ -70,8 +74,50 @@ async function writeJsonl(filePath, records) {
   await fs.writeFile(filePath, `${records.map((record) => JSON.stringify(record)).join('\n')}\n`, 'utf8');
 }
 
+/**
+ * Import production modules after temporary environment variables are set.
+ */
+async function importIsolatedRuntime() {
+  /**
+   * PURPOSE: Keep DATABASE_PATH/HOME-bound modules pointed at the test's real
+   * temporary filesystem instead of the developer's default database.
+   */
+  const cacheKey = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const [projects, workflows, flowPaths] = await Promise.all([
+    import(`../../backend/projects.ts?overviewPerf=${cacheKey}`),
+    import(`../../backend/workflows.ts?overviewPerf=${cacheKey}`),
+    import(`../../backend/domains/workflows/flow-runtime-paths.ts?overviewPerf=${cacheKey}`),
+  ]);
+  return { projects, workflows, flowPaths };
+}
+
+/**
+ * Install a fake oz executable that records accidental CLI calls.
+ */
+async function installFakeOz(homeDir) {
+  /**
+   * PURPOSE: Project overview must read sealed state directly and must not
+   * shell out to oz flow status/graph for card summaries.
+   */
+  const binDir = path.join(homeDir, 'bin');
+  const markerPath = path.join(homeDir, 'fake-oz-called.txt');
+  await fs.mkdir(binDir, { recursive: true });
+  await fs.writeFile(
+    path.join(binDir, 'oz'),
+    '#!/bin/sh\nprintf "%s\\n" "$*" >> "$OZW_FAKE_OZ_MARKER"\nexit 42\n',
+    { mode: 0o755 },
+  );
+  process.env.OZW_FAKE_OZ_MARKER = markerPath;
+  process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH || ''}`;
+  return markerPath;
+}
+
 test('project overview reads recent provider sessions and filters workflow-owned ids', async () => {
   await withTemporaryHome(async (homeDir) => {
+    const { projects, workflows, flowPaths } = await importIsolatedRuntime();
+    const { clearProjectDirectoryCache, getCodexSessions, getPiSessions } = projects;
+    clearProjectDirectoryCache();
+
     const projectPath = path.join(homeDir, 'work', 'matscigo');
     await fs.mkdir(projectPath, { recursive: true });
 
@@ -152,6 +198,53 @@ test('project overview reads recent provider sessions and filters workflow-owned
         },
       },
     ]);
+
+    const fakeOzMarkerPath = await installFakeOz(homeDir);
+    const workflowStatePath = flowPaths.resolveFlowRunStatePath(projectPath, 'run-overview-fast');
+    await fs.mkdir(path.dirname(workflowStatePath), { recursive: true });
+    await fs.writeFile(
+      workflowStatePath,
+      JSON.stringify({
+        run_id: 'run-overview-fast',
+        change_name: 'overview-fast-workflow',
+        status: 'running',
+        stage: 'execution',
+        updated_at: '2026-06-12T03:00:00.000Z',
+        stages: {
+          execution: 'running',
+          review_1: 'pending',
+        },
+        sessions: {
+          'codex:executor': 'codex-overview-workflow',
+          'pi:qa': 'pi-overview-workflow',
+        },
+        processes: [
+          {
+            stage: 'execution',
+            role: 'executor',
+            status: 'running',
+            session_id: 'codex-overview-workflow',
+            provider: 'codex',
+          },
+        ],
+        paths: {
+          executor_log: '.wo/runs/run-overview-fast/logs/executor.log',
+        },
+        workflow_config: {},
+      }),
+      'utf8',
+    );
+
+    const [overviewProject] = await workflows.attachWorkflowMetadata([{
+      name: 'matscigo',
+      path: projectPath,
+      fullPath: projectPath,
+    }]);
+    assert.equal(overviewProject.workflows.length, 1);
+    assert.equal(overviewProject.workflows[0].title, 'overview-fast-workflow');
+    assert.equal(overviewProject.workflows[0].stage, 'execution');
+    assert.equal(overviewProject.workflows[0].childSessions.some((session) => session.id === 'codex-overview-workflow'), true);
+    await assert.rejects(fs.access(fakeOzMarkerPath));
 
     const codexSessions = await getCodexSessions(projectPath, {
       limit: 10,

@@ -278,6 +278,45 @@ function listProviderSessionsForProject(db: any, provider: 'codex' | 'pi', proje
 }
 
 /**
+ * Return the project path currently indexed for one provider session file.
+ */
+function getProviderSessionProjectPathForFile(db: any, provider: 'codex' | 'pi', filePath: string): string {
+  /**
+   * PURPOSE: Let unlink watchers repair project_index after the JSONL file has
+   * already disappeared from disk.
+   */
+  ensureProviderSessionIndexSchema(db);
+  const row = db.prepare(`
+    SELECT project_path
+    FROM provider_session_index
+    WHERE provider = ? AND file_path = ?
+    LIMIT 1
+  `).get(provider, String(filePath || '')) as { project_path?: string } | undefined;
+  return row?.project_path || '';
+}
+
+/**
+ * Count remaining provider sessions for a project after an index mutation.
+ */
+function countProviderSessionsForProject(db: any, projectPath: string): number {
+  /**
+   * PURPOSE: Avoid hiding a provider project while another transcript for that
+   * project still exists.
+   */
+  ensureProviderSessionIndexSchema(db);
+  const normalizedProjectPath = normalizeProjectPath(projectPath);
+  if (!normalizedProjectPath) {
+    return 0;
+  }
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM provider_session_index
+    WHERE normalized_project_path = ?
+  `).get(normalizedProjectPath) as { count?: number } | undefined;
+  return Number(row?.count || 0);
+}
+
+/**
  * Remove stale index rows for a deleted or rewritten provider file.
  */
 function deleteProviderSessionFile(db: any, provider: 'codex' | 'pi', filePath: string): void {
@@ -292,6 +331,8 @@ function deleteProviderSessionFile(db: any, provider: 'codex' | 'pi', filePath: 
 const providerSessionIndexDb = {
   upsert: upsertProviderSessionIndex,
   listForProject: listProviderSessionsForProject,
+  getProjectPathForFile: getProviderSessionProjectPathForFile,
+  countForProject: countProviderSessionsForProject,
   deleteFile: deleteProviderSessionFile,
 };
 

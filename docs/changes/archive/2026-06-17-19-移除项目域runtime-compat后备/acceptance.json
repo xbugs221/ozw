@@ -1,0 +1,82 @@
+{
+  "summary": "验证项目域彻底移除 runtime compat/legacy runtime 后备，同时保持 public facade 和真实项目域业务行为稳定。",
+  "coverage": [
+    {
+      "spec": "需求：runtime compat 必须删除 / 场景：源码不存在 compat/legacy runtime 文件和导入者",
+      "tests": ["contract-runtime-compat-removal"],
+      "evidence": ["runtime-compat-source-audit"],
+      "risk": "source audit 只能证明依赖边界，不能单独证明业务行为兼容。"
+    },
+    {
+      "spec": "需求：公共 facade 必须稳定 / 场景：项目域公共入口继续可导入",
+      "tests": ["contract-runtime-compat-removal", "existing-backend-boundary"],
+      "evidence": ["runtime-compat-source-audit"],
+      "risk": "未枚举所有外部包消费者，只保护仓库内公共入口。"
+    },
+    {
+      "spec": "需求：真实业务行为必须不退化 / 场景：Provider session、manual route、搜索和删除回归通过",
+      "tests": ["existing-project-domain-business", "existing-provider-session-list", "root-typecheck"],
+      "evidence": [],
+      "risk": "完整浏览器 e2e 不在最小验收内；回归命令结果由执行阶段终端记录复核。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-runtime-compat-removal",
+      "source": "change_contract",
+      "path": "docs/changes/19-移除项目域runtime-compat后备/tests/project-domain-runtime-compat-removal.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/19-移除项目域runtime-compat后备/tests/project-domain-runtime-compat-removal.acceptance.test.ts",
+      "purpose": "证明项目域 runtime compat/legacy runtime 后备已经删除，且 public facade 仍暴露核心业务入口。",
+      "assertions": [
+        "project-domain-runtime-compat.* 和 project-domain-legacy-runtime.* 不存在",
+        "项目域 TypeScript modules 不再导入旧运行体",
+        "backend/projects.ts 与 project-domain-service.ts 仍包含关键 public facade 入口"
+      ],
+      "expected_initial_failure": "当前仓库仍存在项目域旧运行体，且多个项目域模块仍导入旧运行体。"
+    },
+    {
+      "id": "existing-project-domain-business",
+      "source": "existing_regression",
+      "path": "docs/changes/18-项目域核心类型化拆分/tests/project-domain-business.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/18-项目域核心类型化拆分/tests/project-domain-business.acceptance.test.ts",
+      "purpose": "证明 manual route、Provider session 归属和聊天搜索等项目域真实业务路径不退化。",
+      "assertions": ["真实项目配置和 JSONL 下 manual cN route、Provider session list、search 行为保持兼容"],
+      "expected_initial_failure": "如果迁移遗漏 compat 行为，应失败于真实业务断言。"
+    },
+    {
+      "id": "existing-provider-session-list",
+      "source": "existing_regression",
+      "path": "tests/specs/provider-session-list-read-model.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/provider-session-list-read-model.spec.ts",
+      "purpose": "证明 Provider session list read model 在删除 compat 后仍过滤和合并正确。",
+      "assertions": ["Provider session read model 保持 manual/workflow 归属过滤规则"],
+      "expected_initial_failure": "如果 typed modules 缺少原 compat 行为，应失败于 session list 断言。"
+    },
+    {
+      "id": "existing-backend-boundary",
+      "source": "existing_regression",
+      "path": "tests/specs/backend-type-module-boundary.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/backend-type-module-boundary.spec.ts",
+      "purpose": "保护后端项目域 facade 和类型边界不退回旧形态。",
+      "assertions": ["backend/projects.ts 保持 facade，project-domain-service.ts 保持小聚合入口"],
+      "expected_initial_failure": "如果迁移重新引入旧 JS core 或破坏 facade，应失败于边界断言。"
+    },
+    {
+      "id": "root-typecheck",
+      "source": "existing_regression",
+      "path": "package.json",
+      "command": "test -f package.json && pnpm run typecheck",
+      "purpose": "证明删除 compat 后 node/web/test 类型检查仍通过。",
+      "assertions": ["TypeScript 检查通过且不依赖 allowJs runtime compat"],
+      "expected_initial_failure": "如果迁移遗漏类型声明，应失败于 TypeScript 编译错误。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "runtime-compat-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/19-project-domain-runtime-compat/source-audit.json",
+      "purpose": "记录 compat 文件、导入者和 public facade 入口状态；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

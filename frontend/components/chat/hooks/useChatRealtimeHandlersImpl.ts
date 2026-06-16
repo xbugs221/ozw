@@ -17,13 +17,15 @@ import { normalizeNativeRuntimeMessage } from '../state/chatRealtimeEvents';
 import type { ChatMessageAction } from '../state/chatMessageStateTypes';
 import type { ChatMessage, PendingPermissionRequest } from '../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
-
-type PendingViewSession = {
-  sessionId: string | null;
-  startedAt: number;
-  clientRequestId?: string;
-  draftSessionId?: string | null;
-};
+import {
+  buildWorkflowNavigationOptions,
+  isCbwRouteSessionId,
+  isMessageForPendingRequest,
+  isMessageForSelectedProject,
+  isSessionCreatedForPendingView,
+  isTemporarySessionId,
+  type PendingViewSession,
+} from '../session/sessionIdentity';
 
 type LatestChatMessage = {
   type?: string;
@@ -87,88 +89,8 @@ interface UseChatRealtimeHandlersArgs {
   onTurnOutcome?: (payload: { sessionId: string | null; status: 'completed' | 'failed' }) => void;
 }
 
-const isTemporarySessionId = (sessionId?: string | null): boolean =>
-  Boolean(sessionId && sessionId.startsWith('new-session-'));
-
-const isCbwRouteSessionId = (sessionId?: string | null): boolean =>
-  Boolean(sessionId && /^c\d+$/.test(sessionId));
-
 const isUnsavedNewSessionId = (sessionId?: string | null): boolean =>
-  Boolean(sessionId && sessionId.startsWith('new-session-'));
-
-/**
- * Check whether a provider session-created event belongs to the draft request
- * currently shown in this chat view.
- */
-const isSessionCreatedForPendingView = (
-  latestMessage: LatestChatMessage,
-  pendingViewSession: PendingViewSession | null,
-): boolean => {
-  if (!pendingViewSession) {
-    return false;
-  }
-
-  const expectedRequestId = pendingViewSession.clientRequestId;
-  if (!expectedRequestId) {
-    return true;
-  }
-
-  return latestMessage.clientRequestId === expectedRequestId;
-};
-
-/**
- * Check whether a lifecycle event belongs to the optimistic request in this view.
- */
-const isMessageForPendingRequest = (
-  latestMessage: LatestChatMessage,
-  pendingViewSession: PendingViewSession | null,
-): boolean => {
-  const expectedRequestId = pendingViewSession?.clientRequestId;
-  return Boolean(expectedRequestId && latestMessage.clientRequestId === expectedRequestId);
-};
-
-const buildWorkflowNavigationOptions = (
-  selectedProject: Project | null,
-  selectedSession: ProjectSession | null,
-  provider: SessionProvider,
-) => {
-  if (!selectedSession?.workflowId) {
-    return undefined;
-  }
-
-  return {
-    provider: selectedSession.__provider || provider,
-    projectName: selectedSession.__projectName || selectedProject?.name || '',
-    projectPath: selectedSession.projectPath || selectedProject?.fullPath || selectedProject?.path || '',
-    workflowId: selectedSession.workflowId,
-    workflowStageKey: selectedSession.stageKey,
-  };
-};
-
-/**
- * Check whether a project-scoped realtime event belongs to the active project.
- */
-const isMessageForSelectedProject = (
-  latestMessage: LatestChatMessage,
-  selectedProject: Project | null,
-  selectedSession: ProjectSession | null,
-): boolean => {
-  const messageProjectPath = typeof latestMessage.projectPath === 'string' ? latestMessage.projectPath.trim() : '';
-  const messageProjectName = typeof latestMessage.projectName === 'string' ? latestMessage.projectName.trim() : '';
-  if (!messageProjectPath && !messageProjectName) {
-    return true;
-  }
-
-  const activeProjectPath = (selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '').trim();
-  const activeProjectName = (selectedSession?.__projectName || selectedProject?.name || '').trim();
-  if (messageProjectPath && activeProjectPath) {
-    return messageProjectPath === activeProjectPath;
-  }
-  if (messageProjectName && activeProjectName) {
-    return messageProjectName === activeProjectName;
-  }
-  return false;
-};
+  isTemporarySessionId(sessionId);
 
 const appendStreamingChunk = (
   setChatMessages: Dispatch<SetStateAction<ChatMessage[]>>,

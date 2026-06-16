@@ -109,6 +109,90 @@ test('Codex old-format fixture falls back to deep parse for cwd discovery', asyn
   });
 });
 
+test('lightweight getProjects keeps provider-only projects beside manual notes project', async () => {
+  await withTemporaryHome(async (homeDir) => {
+    const notesPath = path.join(homeDir, 'work', 'notes');
+    const providerProjectPath = path.join(homeDir, 'work', 'codex-provider-only');
+    const sessionPath = path.join(homeDir, '.codex', 'sessions', '2026', '05', '18', 'rollout-2026-05-18T02-30-00-codex-provider-only.jsonl');
+
+    await fs.mkdir(notesPath, { recursive: true });
+    await fs.mkdir(providerProjectPath, { recursive: true });
+    await addProjectManually(notesPath, 'notes');
+    await writeJsonl(sessionPath, [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-05-18T02:30:00.000Z',
+        payload: { id: 'source-provider-only', cwd: providerProjectPath, model: 'gpt-5' },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        timestamp: '2026-05-18T02:30:01.000Z',
+        payload: { type: 'user_message', message: 'provider-only project should appear in nav' },
+      }),
+    ]);
+
+    const projects = await getProjects(null, { lightweightList: true });
+    const projectPaths = projects.map((project) => project.fullPath || project.path);
+    const providerProject = projects.find((project) => (project.fullPath || project.path) === providerProjectPath);
+
+    assert.equal(projectPaths.includes(notesPath), true);
+    assert.equal(projectPaths.includes(providerProjectPath), true);
+    assert.equal('codexSessions' in providerProject, false);
+    assert.equal('piSessions' in providerProject, false);
+  });
+});
+
+test('lightweight getProjects excludes ephemeral ozw-pi temporary projects', async () => {
+  await withTemporaryHome(async (homeDir) => {
+    const tempPiProjectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-pi-send-'));
+    const realProjectPath = path.join(homeDir, 'work', 'real-provider-project');
+    const tempSessionPath = path.join(homeDir, '.pi', 'agent', 'sessions', 'tmp', 'pi-temp.jsonl');
+    const realSessionPath = path.join(homeDir, '.pi', 'agent', 'sessions', 'real', 'pi-real-provider.jsonl');
+
+    await fs.mkdir(realProjectPath, { recursive: true });
+    await writeJsonl(tempSessionPath, [
+      JSON.stringify({
+        type: 'session',
+        version: 3,
+        id: 'pi-temp',
+        timestamp: '2026-05-18T02:40:00.000Z',
+        cwd: tempPiProjectPath,
+      }),
+      JSON.stringify({
+        type: 'message',
+        id: 'pi-temp-user',
+        timestamp: '2026-05-18T02:40:01.000Z',
+        message: { role: 'user', content: [{ type: 'text', text: 'temporary project should not enter nav' }] },
+      }),
+    ]);
+    await writeJsonl(realSessionPath, [
+      JSON.stringify({
+        type: 'session',
+        version: 3,
+        id: 'pi-real-provider',
+        timestamp: '2026-05-18T02:41:00.000Z',
+        cwd: realProjectPath,
+      }),
+      JSON.stringify({
+        type: 'message',
+        id: 'pi-real-provider-user',
+        timestamp: '2026-05-18T02:41:01.000Z',
+        message: { role: 'user', content: [{ type: 'text', text: 'real provider project should enter nav' }] },
+      }),
+    ]);
+
+    try {
+      const projects = await getProjects(null, { lightweightList: true });
+      const projectPaths = projects.map((project) => project.fullPath || project.path);
+
+      assert.equal(projectPaths.includes(tempPiProjectPath), false);
+      assert.equal(projectPaths.includes(realProjectPath), true);
+    } finally {
+      await fs.rm(tempPiProjectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 test('Pi project discovery uses first type=session JSONL record', async () => {
   await withTemporaryHome(async (homeDir) => {
     const projectPath = path.join(homeDir, 'work', 'pi-project');

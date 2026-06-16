@@ -6,7 +6,7 @@
  * 失败含义：失败通常意味着测试被放回根目录、脚本指向旧路径，或 README 继续描述过期入口。
  * 业务场景：源码根目录的业务命名会影响发布、开发脚本和测试说明的一致性。
  * 审阅者收益：这些断言把目录整理变成可执行合同，而不是只靠人工记忆。
- * Sources: 2026-06-05-74-测试集重构中文批注, 2026-06-06-81-增量引入Vitest测试框架, 2026-06-06-84-精简Node测试入口并去除重复构建, 2026-06-06-85-分层Playwright浏览器回归
+ * Sources: 2026-06-05-74-测试集重构中文批注, 2026-06-06-81-增量引入Vitest测试框架, 2026-06-06-84-精简Node测试入口并去除重复构建, 2026-06-06-85-分层Playwright浏览器回归, 2026-06-17-24-测试门禁性能与manual历史资产再分层
  *
  * PURPOSE: Stable spec test for repository shape and test-suite taxonomy.
  * It reads the real ozw source tree, test tree, and runner configuration to
@@ -28,6 +28,7 @@ const COMMENT_LINE_PATTERN = /^\s*(\/\/|\/\*|\*|#)/;
 const STALE_TEST_PREFIX_PATTERN = /^(?:test_)?\d{4}-\d{2}-\d{2}-/;
 const BACKEND_TEST_GLOB = 'tests/backend/*.test.ts';
 const SERVER_SMOKE_TEST_FILES = [
+  'tests/backend/dist-server-entrypoint.test.ts',
   'tests/backend/pi-session-messages-endpoint.test.ts',
   'tests/backend/pi-sessions-read-model.test.ts',
   'tests/backend/provider-session-change.test.ts',
@@ -336,7 +337,7 @@ test('Node 测试入口区分快速 smoke、完整回归和发布构建', async 
   // 业务场景：维护者需要快速 smoke、完整 Node 回归和发布构建三个清楚入口，避免一次规格测试重复构建服务端。
   // 失败含义：入口重新混在一起会让本地验证变慢，且审阅者无法判断失败属于 smoke、完整回归还是发布构建。
   assert.match(scripts['build:server'] ?? '', /^tsc -p tsconfig\.build\.json\b/);
-  assert.match(scripts['build:server'] ?? '', /copy-build-runtime-js\.mjs/);
+  assert.doesNotMatch(scripts['build:server'] ?? '', /copy-build-runtime-js\.mjs/);
   assert.equal(scripts['test:server:smoke'], smokeCommand);
   assert.equal(scripts['test:server'], `tsx --test ${BACKEND_TEST_GLOB}`);
   assert.equal(scripts['test:node'], 'pnpm run test:server && pnpm run test:spec:node');
@@ -378,6 +379,37 @@ test('Playwright 浏览器回归区分快速 smoke、完整回归和失败证据
   assert.match(e2eReadme, /test:browser:full/);
   assert.match(e2eReadme, /真实页面|真实业务|端到端/);
   assert.match(e2eReadme, /smoke|快速|关键/);
+});
+
+test('分层质量门提供可复查 timing profile 且默认门禁不缩水', async () => {
+  const [packageRaw, timingScript, performanceDocs] = await Promise.all([
+    fs.readFile(path.join(REPO_ROOT, 'package.json'), 'utf8'),
+    readRequiredText('scripts/collect-test-timings.ts'),
+    readRequiredText('docs/testing-performance.md'),
+  ]);
+  const packageJson = JSON.parse(packageRaw) as {
+    scripts?: Record<string, string>;
+  };
+  const scripts = packageJson.scripts ?? {};
+
+  // 业务场景：测试性能优化必须可度量，且不能把完整回归从默认门禁里悄悄移走。
+  // 失败含义：profile 或默认入口退化会让审阅者无法复查耗时基线，或误以为缩水后的测试仍是完整门禁。
+  assert.equal(scripts.test, 'pnpm run test:full');
+  assert.equal(scripts['test:fast'], 'pnpm run typecheck && pnpm run test:vitest && pnpm run test:server:smoke');
+  assert.equal(scripts['test:smoke'], 'pnpm run test:fast && pnpm run test:e2e:smoke');
+  assert.match(scripts['test:full'] ?? '', /pnpm run typecheck/);
+  assert.match(scripts['test:full'] ?? '', /pnpm run test:browser:full/);
+  assert.equal(scripts['qa:test:timing:fast'], 'CBW_TEST_TIMING_PROFILE=fast tsx scripts/collect-test-timings.ts');
+  assert.equal(scripts['qa:test:timing:smoke'], 'CBW_TEST_TIMING_PROFILE=smoke tsx scripts/collect-test-timings.ts');
+  assert.equal(scripts['qa:test:timing:full'], 'CBW_TEST_TIMING_PROFILE=full tsx scripts/collect-test-timings.ts');
+  assert.match(timingScript, /CBW_TEST_TIMING_PROFILE/);
+  assert.match(timingScript, /test-results\/test-performance/);
+  assert.match(timingScript, /failed\.length > 0/);
+  assert.match(timingScript, /process\.exitCode = failed\[0\]\.exitCode \?\? 1/);
+  assert.match(performanceDocs, /qa:test:timing:fast/);
+  assert.match(performanceDocs, /fast\.json/);
+  assert.match(performanceDocs, /smoke\.json/);
+  assert.match(performanceDocs, /full\.json/);
 });
 
 test('运行和构建配置指向重命名后的源码根目录', async () => {

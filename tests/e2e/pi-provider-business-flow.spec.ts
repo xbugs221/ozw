@@ -171,15 +171,21 @@ test('sending a Pi message dispatches pi-command with provider=pi', async ({ pag
   const chat = page.locator('[data-testid="chat-scroll-container"]').last();
   await expect(chat.getByText(`fake pi response: ${testMessage}`).last()).toBeVisible({ timeout: 25_000 });
 
-  const projectData = await page.evaluate(async () => {
+  const projectData = await page.evaluate(async (commandProjectPath) => {
     const token = window.localStorage.getItem('auth-token');
     const response = await fetch('/api/projects', {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
-    return response.json();
-  });
-  const projectWithPi = (Array.isArray(projectData) ? projectData : []).find(
-    (p) => Array.isArray(p.piSessions) && p.piSessions.some((session) => session.id === piCommand.ozwSessionId),
-  );
-  expect(projectWithPi).toBeTruthy();
+    const projects = await response.json();
+    const project = Array.isArray(projects)
+      ? projects.find((candidate) => candidate.fullPath === commandProjectPath) || null
+      : null;
+    if (!project) return null;
+    const overviewResponse = await fetch(
+      `/api/projects/${encodeURIComponent(project.name)}/overview?projectPath=${encodeURIComponent(project.fullPath)}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    );
+    return overviewResponse.json();
+  }, piCommand.options?.projectPath);
+  expect(projectData?.piSessions?.some((session) => session.id === piCommand.ozwSessionId)).toBeTruthy();
 });

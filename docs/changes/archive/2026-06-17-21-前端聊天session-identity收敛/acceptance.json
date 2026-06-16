@@ -1,0 +1,87 @@
+{
+  "summary": "验证前端聊天 session identity 和 routing context 规则集中到纯逻辑模块，并保持聊天发送、实时处理和消息合并行为稳定。",
+  "coverage": [
+    {
+      "spec": "需求：session identity 规则必须集中 / 场景：组件/hook 不再重复定义临时和 cN 判断",
+      "tests": ["contract-chat-session-identity"],
+      "evidence": ["chat-session-identity-source-audit"],
+      "risk": "source audit 不能覆盖所有运行时分支，需配合聊天回归。"
+    },
+    {
+      "spec": "需求：provider 与 routing context 必须可纯函数验证 / 场景：Codex、Pi cN、workflow child session 解析正确",
+      "tests": ["contract-chat-session-identity"],
+      "evidence": ["chat-session-identity-source-audit"],
+      "risk": "测试覆盖当前核心字段，历史字段别名由既有回归继续保护。"
+    },
+    {
+      "spec": "需求：真实聊天行为必须不退化 / 场景：composer、realtime、message merge 和项目刷新协调回归通过",
+      "tests": [
+        "existing-chat-composer-runtime",
+        "existing-chat-message-merge",
+        "existing-project-refresh-coordination",
+        "root-typecheck"
+      ],
+      "evidence": [],
+      "risk": "如改动实际导航行为，执行阶段需追加 Playwright e2e；回归命令结果由执行阶段终端记录复核。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-chat-session-identity",
+      "source": "change_contract",
+      "path": "docs/changes/21-前端聊天session-identity收敛/tests/chat-session-identity-contract.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/21-前端聊天session-identity收敛/tests/chat-session-identity-contract.acceptance.test.ts",
+      "purpose": "证明聊天 session identity/routing 纯逻辑模块存在、可导入且替代重复局部规则。",
+      "assertions": [
+        "sessionIdentity.ts 导出 cN、临时 session、provider 和 routing context 解析函数",
+        "样例 Codex session、Pi cN route 和 workflow child session 解析结果正确",
+        "ChatInterface/composer/realtime/session state 不再重复定义核心 identity helper"
+      ],
+      "expected_initial_failure": "当前统一 sessionIdentity.ts 不存在，相关 helper 仍散落在多个组件和 hook 中。"
+    },
+    {
+      "id": "existing-chat-composer-runtime",
+      "source": "existing_regression",
+      "path": "tests/spec/chat-composer-runtime.spec.ts",
+      "command": "pnpm run test:spec:browser -- tests/spec/chat-composer-runtime.spec.ts",
+      "purpose": "证明 composer 发送和 runtime 控制行为不因 identity 抽离退化。",
+      "assertions": ["聊天发送、pending request 和运行中输入策略保持兼容"],
+      "expected_initial_failure": "如果 identity 抽离破坏 composer 行为，应失败于现有业务断言。"
+    },
+    {
+      "id": "existing-chat-message-merge",
+      "source": "existing_regression",
+      "path": "tests/specs/chat-message-merge-core.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/chat-message-merge-core.spec.ts",
+      "purpose": "证明实时和持久化消息合并不退化。",
+      "assertions": ["消息去重、顺序和 live/persisted 合并保持兼容"],
+      "expected_initial_failure": "如果 routing context 错误导致消息归属变化，应失败于合并断言。"
+    },
+    {
+      "id": "existing-project-refresh-coordination",
+      "source": "existing_regression",
+      "path": "tests/specs/project-refresh-coordination.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/project-refresh-coordination.spec.ts",
+      "purpose": "证明聊天相关项目刷新协调不因 identity/routing 抽离退化。",
+      "assertions": ["项目刷新协调、会话归属和刷新触发策略保持兼容"],
+      "expected_initial_failure": "如果 session routing context 抽离破坏项目刷新协调，应失败于现有业务断言。"
+    },
+    {
+      "id": "root-typecheck",
+      "source": "existing_regression",
+      "path": "package.json",
+      "command": "test -f package.json && pnpm run typecheck",
+      "purpose": "证明前端聊天模块替换调用点后类型检查通过。",
+      "assertions": ["TypeScript 检查通过"],
+      "expected_initial_failure": "如果共享类型或调用点替换不完整，应失败于 typecheck。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "chat-session-identity-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/21-chat-session-identity/source-audit.json",
+      "purpose": "记录统一模块导出、样例解析结果和重复 helper 状态；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { resolveFlowRunsRoot } from '../flow-runtime-paths.js';
-import { acceptedProviderFromSessionKey } from './session-refs.js';
+import { acceptedProviderFromSessionKey, resolveSessionProviderFromState } from './stage-session-resolver.js';
 import { mapStageStatus } from './stage-taxonomy.js';
 
 import { normalizeWorkflowGraphWithWarnings, type WorkflowGraphArtifact, type WorkflowGraphNode, type WorkflowGraphReviewTarget } from './workflow-graph-schema.js';
@@ -50,22 +50,6 @@ async function pathExists(projectPath: string, relativePath: string): Promise<bo
   } catch {
     return false;
   }
-}
-
-/**
- * Resolve a session provider by scanning state.sessions.
- */
-function resolveSessionProviderFromState(sessionId: unknown, sessions: WorkflowJsonRecord): string {
-  if (!sessionId) return 'codex';
-  for (const [key, value] of Object.entries(sessions || {})) {
-    if (String(value).trim() === String(sessionId).trim()) {
-      const parsed = acceptedProviderFromSessionKey(key);
-      if (parsed.accepted && parsed.provider) {
-        return parsed.provider;
-      }
-    }
-  }
-  return 'codex';
 }
 
 /**

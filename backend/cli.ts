@@ -14,6 +14,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { resolvePackageRoot } from './utils/package-root.js';
 
@@ -69,10 +70,14 @@ function loadEnvFile() {
     }
 }
 
-// Get the database path (same logic as db.js)
+// Get the database path (same logic as load-env.js)
 function getDatabasePath() {
+    /**
+     * PURPOSE: Keep `ozw status` aligned with server startup defaults while
+     * preserving explicit DATABASE_PATH overrides.
+     */
     loadEnvFile();
-    return process.env.DATABASE_PATH || path.join(PKG_ROOT, 'server', 'database', 'auth.db');
+    return process.env.DATABASE_PATH || path.join(os.homedir(), '.ozw', 'ozw.db');
 }
 
 // Get the installation directory

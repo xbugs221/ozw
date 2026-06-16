@@ -1,5 +1,5 @@
 /**
- * Sources: 2026-06-16-5-Provider运行边界与AppServer重构
+ * Sources: 2026-06-16-5-Provider运行边界与AppServer重构, 2026-06-17-20-后端realtime协议与provider-runtime分层
  *
  * PURPOSE: Verify the backend provider runtime boundary keeps Codex
  * app-server, Pi SDK, route binding, active-turn and live transcript ownership
@@ -52,6 +52,7 @@ test('cN route/provider session binding is centralized', async () => {
   assert.ok(EVIDENCE_CONTRACTS.some((entry) => entry.includes('provider-binding-state')));
   const binding = await readRepoFile('backend/domains/provider-runtime/provider-session-binding.ts');
   const chatWebsocket = await readRepoFile('backend/server/chat-websocket.ts');
+  const chatCommandDispatcher = await readRepoFile('backend/server/realtime/chat-command-dispatcher.ts');
   const messagesHandler = await readRepoFile('backend/session-messages-handler.ts');
 
   for (const symbol of [
@@ -63,9 +64,11 @@ test('cN route/provider session binding is centralized', async () => {
     assertExports(binding, symbol);
   }
 
-  assert.match(chatWebsocket, /provider-session-binding/);
+  assert.match(chatWebsocket, /createChatCommandDispatcher/);
+  assert.match(chatCommandDispatcher, /provider-session-binding/);
   assert.match(messagesHandler, /provider-session-binding/);
   assert.doesNotMatch(chatWebsocket, /providerSessionIdForMerge\s*=/, 'chat websocket should not recreate message handler binding logic');
+  assert.doesNotMatch(chatCommandDispatcher, /providerSessionIdForMerge\s*=/, 'chat command dispatcher should not recreate message handler binding logic');
 });
 
 test('active-turn overlay and live transcript stores have separate lifecycles', async () => {

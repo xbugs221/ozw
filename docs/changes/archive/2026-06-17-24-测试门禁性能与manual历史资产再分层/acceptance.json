@@ -1,0 +1,95 @@
+{
+  "summary": "验证测试质量门支持 profile 化耗时采集，manual browser-history 资产有标准化处置，并确保默认测试门禁不缩水。",
+  "coverage": [
+    {
+      "spec": "需求：测试耗时必须支持 profile 化采集 / 场景：fast/smoke/full timing 可分别运行",
+      "tests": ["contract-test-gate-performance", "qa-timing-fast", "qa-timing-smoke"],
+      "evidence": ["test-gate-fast-timing", "test-gate-smoke-timing"],
+      "risk": "full profile 耗时较长，最小验收只要求脚本存在，合并前再运行 full。"
+    },
+    {
+      "spec": "需求：manual 历史资产必须标准化处置 / 场景：browser-history 每个文件有标准状态",
+      "tests": ["contract-test-gate-performance", "existing-test-suite-taxonomy"],
+      "evidence": ["manual-history-inventory-audit"],
+      "risk": "清单状态是否合理仍需要人工判断和后续迁移执行。"
+    },
+    {
+      "spec": "需求：默认门禁不能缩水 / 场景：`pnpm test` 仍代表 full，迁移不能弱化业务覆盖",
+      "tests": ["contract-test-gate-performance", "existing-test-suite-taxonomy", "root-typecheck"],
+      "evidence": [],
+      "risk": "未直接证明每个慢测试都必要，只保证门禁入口不缩水；回归命令结果由执行阶段终端记录复核。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-test-gate-performance",
+      "source": "change_contract",
+      "path": "docs/changes/24-测试门禁性能与manual历史资产再分层/tests/test-gate-performance-contract.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/24-测试门禁性能与manual历史资产再分层/tests/test-gate-performance-contract.acceptance.test.ts",
+      "purpose": "证明 timing profile scripts、manual inventory 标准状态和默认 full 门禁合同存在。",
+      "assertions": [
+        "package.json 暴露 qa:test:timing:fast/smoke/full",
+        "collect-test-timings.ts 支持 CBW_TEST_TIMING_PROFILE 并写入 profile output",
+        "manual browser-history 每个 spec 在 inventory 中有标准状态",
+        "pnpm test 仍委托 test:full"
+      ],
+      "expected_initial_failure": "当前 timing profile scripts 和标准化 inventory 状态尚未实现。"
+    },
+    {
+      "id": "qa-timing-fast",
+      "source": "new_regression",
+      "path": "package.json",
+      "command": "test -f package.json && pnpm run qa:test:timing:fast",
+      "purpose": "生成 fast 质量门耗时基线。",
+      "assertions": ["test-results/test-performance/fast.json 包含命令耗时和退出码"],
+      "expected_initial_failure": "如果 profile 脚本或输出路径未实现，应失败于命令缺失或 evidence 缺失。"
+    },
+    {
+      "id": "qa-timing-smoke",
+      "source": "new_regression",
+      "path": "package.json",
+      "command": "test -f package.json && pnpm run qa:test:timing:smoke",
+      "purpose": "生成 smoke 质量门耗时基线。",
+      "assertions": ["test-results/test-performance/smoke.json 包含命令耗时和退出码"],
+      "expected_initial_failure": "如果 smoke profile 未实现，应失败于命令缺失或 evidence 缺失。"
+    },
+    {
+      "id": "existing-test-suite-taxonomy",
+      "source": "existing_regression",
+      "path": "tests/spec/test_suite_taxonomy.ts",
+      "command": "pnpm exec tsx --test tests/spec/test_suite_taxonomy.ts",
+      "purpose": "证明测试分类和 manual 默认门禁边界仍符合长期规格。",
+      "assertions": ["tests/README 和测试目录分类保持当前业务合同"],
+      "expected_initial_failure": "如果 inventory 或分类文档退化，应失败于 taxonomy 断言。"
+    },
+    {
+      "id": "root-typecheck",
+      "source": "existing_regression",
+      "path": "package.json",
+      "command": "test -f package.json && pnpm run typecheck",
+      "purpose": "证明测试脚本和文档调整不破坏 TypeScript 项目边界。",
+      "assertions": ["TypeScript 检查通过"],
+      "expected_initial_failure": "如果新增脚本或测试类型不完整，应失败于 typecheck。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "test-gate-fast-timing",
+      "kind": "runtime_log",
+      "path": "test-results/test-performance/fast.json",
+      "purpose": "fast 质量门耗时基线；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "test-gate-smoke-timing",
+      "kind": "runtime_log",
+      "path": "test-results/test-performance/smoke.json",
+      "purpose": "smoke 质量门耗时基线；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "manual-history-inventory-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/24-test-gate-performance/manual-history-inventory.json",
+      "purpose": "manual browser-history 文件与标准化处置状态清单；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

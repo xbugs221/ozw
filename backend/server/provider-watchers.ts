@@ -19,7 +19,7 @@ let goRunnerWatcherDebounceTimer: NodeJS.Timeout | null = null;
  * 创建 provider 与 workflow watcher 控制器。
  */
 export function createProviderWatcherController(deps: any) {
-    const { PROVIDER_WATCH_PATHS, WATCHER_IGNORED_PATTERNS, clearProjectDirectoryCache, deleteProviderSessionIndexFile, indexProviderSessionFile, resolveProviderSessionChange, broadcastSessionChanged, broadcastWorkflowChanged, attachWorkflowMetadata, getProjects, ensureGoRunnerWatchersForProjects } = deps;
+    const { PROVIDER_WATCH_PATHS, WATCHER_IGNORED_PATTERNS, clearProjectDirectoryCache, deleteProviderSessionIndexFile, getProviderSessionProjectPathForFile, countProviderSessionsForProject, indexProviderSessionFile, upsertProjectIndexFromProviderSession, hideProviderProjectIndex, resolveProviderSessionChange, broadcastSessionChanged, broadcastWorkflowChanged, broadcastProjectListInvalidated, attachWorkflowMetadata, getProjects, ensureGoRunnerWatchersForProjects } = deps;
     /**
      * Close all provider filesystem watchers and clear any pending debounce work.
      */
@@ -157,11 +157,31 @@ export function createProviderWatcherController(deps: any) {
             projectsWatcherDebounceTimer = setTimeout(async () => {
                 try {
                     clearProjectDirectoryCache();
-                    if (filePath.endsWith('.jsonl')) {
-                        if (eventType === 'unlink') {
-                            await deleteProviderSessionIndexFile(provider, filePath);
-                        } else if (eventType === 'add' || eventType === 'change') {
-                            await indexProviderSessionFile(provider, filePath);
+	                    if (filePath.endsWith('.jsonl')) {
+	                        if (eventType === 'unlink') {
+	                            const projectPath = typeof getProviderSessionProjectPathForFile === 'function'
+	                                ? await getProviderSessionProjectPathForFile(provider, filePath)
+	                                : '';
+	                            await deleteProviderSessionIndexFile(provider, filePath);
+	                            const remainingSessions = projectPath && typeof countProviderSessionsForProject === 'function'
+	                                ? await countProviderSessionsForProject(projectPath)
+	                                : 0;
+	                            if (projectPath && remainingSessions === 0 && typeof hideProviderProjectIndex === 'function') {
+	                                hideProviderProjectIndex(projectPath, 'provider-session-deleted');
+	                                void broadcastProjectListInvalidated({
+	                                    reason: 'project-index-sync-delete',
+	                                    changedProjectPath: projectPath,
+	                                });
+	                            }
+	                        } else if (eventType === 'add' || eventType === 'change') {
+                            const session = await indexProviderSessionFile(provider, filePath);
+                            const projectPath = await upsertProjectIndexFromProviderSession(session);
+                            if (projectPath) {
+                                void broadcastProjectListInvalidated({
+                                    reason: 'project-index-sync',
+                                    changedProjectPath: projectPath,
+                                });
+                            }
                         }
                     }
                     const sessionChange = await resolveProviderSessionChange({

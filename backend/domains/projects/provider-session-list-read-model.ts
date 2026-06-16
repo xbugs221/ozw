@@ -48,6 +48,24 @@ function getBoundProviderSessionId(session: LooseRecord): string {
 }
 
 /**
+ * 判断旧版本误记为 manual 的 workflow 角色会话，避免历史内部子任务污染手动列表。
+ */
+function isLegacyWorkflowRolePromptSession(session: LooseRecord): boolean {
+  /**
+   * PURPOSE: Hide historical workflow subagent sessions created before origin
+   * metadata was persisted, while keeping ordinary user-created prompts visible.
+   */
+  if (session?.origin === 'workflow' || session?.workflowId || session?.stageKey) {
+    return true;
+  }
+  const text = String(session?.title || session?.summary || session?.name || '').trim();
+  if (!text) {
+    return false;
+  }
+  return /^你是\s+[^，。]{1,40}(?:测试员|研究员|侦察员|审核员|规划员|执行员|修复员|归档员)，职责：/.test(text);
+}
+
+/**
  * 构建 Provider 会话列表：手动 cN 草稿优先显示，底层 provider session 去重，workflow 子会话可从普通列表过滤。
  */
 export function buildProviderSessionListReadModel(input: ProviderSessionListInput): LooseRecord[] {
@@ -63,10 +81,13 @@ export function buildProviderSessionListReadModel(input: ProviderSessionListInpu
     if (!session?.id) {
       return false;
     }
+    if (!getBoundProviderSessionId(session) && session.origin === 'manual') {
+      return false;
+    }
     if (!excludeWorkflowChildSessions) {
       return true;
     }
-    return session.origin !== 'workflow' && !isWorkflowOwnedProviderSession(session, workflowOwnedSessionIds);
+    return !isLegacyWorkflowRolePromptSession(session) && !isWorkflowOwnedProviderSession(session, workflowOwnedSessionIds);
   });
 
   const boundProviderSessionIds = new Set(
@@ -74,6 +95,7 @@ export function buildProviderSessionListReadModel(input: ProviderSessionListInpu
       .map((session) => getBoundProviderSessionId(session))
       .filter(Boolean),
   );
+  const providerById = new Map(providerSessions.map((session) => [String(session.id || ''), session]));
 
   const standaloneProviderSessions = providerSessions.filter((session) => {
     if (!session?.id || boundProviderSessionIds.has(String(session.id))) {
@@ -82,11 +104,25 @@ export function buildProviderSessionListReadModel(input: ProviderSessionListInpu
     if (!excludeWorkflowChildSessions) {
       return true;
     }
-    return session.origin !== 'workflow' && !isWorkflowOwnedProviderSession(session, workflowOwnedSessionIds);
+    return !isLegacyWorkflowRolePromptSession(session) && !isWorkflowOwnedProviderSession(session, workflowOwnedSessionIds);
+  });
+
+  const routedSessions = normalizedDrafts.map((session) => {
+    const providerSessionId = getBoundProviderSessionId(session);
+    const providerSession = providerSessionId ? providerById.get(providerSessionId) : null;
+    return providerSession
+      ? {
+          ...providerSession,
+          ...session,
+          lastActivity: providerSession.lastActivity || session.lastActivity,
+          updated_at: providerSession.updated_at || session.updated_at,
+          createdAt: session.createdAt || providerSession.createdAt,
+        }
+      : session;
   });
 
   const sessions = Array.from(
-    new Map([...standaloneProviderSessions, ...normalizedDrafts].map((session) => [session?.id, session])).values(),
+    new Map([...standaloneProviderSessions, ...routedSessions].map((session) => [session?.id, session])).values(),
   )
     .filter((session) => includeHidden || !isHiddenArchivedSession(session))
     .sort((sessionA, sessionB) => new Date(sessionB.lastActivity || 0).getTime() - new Date(sessionA.lastActivity || 0).getTime());

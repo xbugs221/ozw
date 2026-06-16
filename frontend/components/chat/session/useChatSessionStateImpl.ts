@@ -52,13 +52,15 @@ import {
   isCurrentSessionLoadGeneration,
   nextSessionLoadGeneration,
 } from './terminalReconcileController';
+import {
+  getSessionLoadId,
+  isTemporarySessionId,
+  resolveSessionProvider,
+  resolveSessionRoutingContext,
+  type PendingViewSession,
+} from './sessionIdentity';
 
 const INITIAL_VISIBLE_MESSAGES = 100;
-
-type PendingViewSession = {
-  sessionId: string | null;
-  startedAt: number;
-};
 
 interface UseChatSessionStateArgs {
   selectedProject: Project | null;
@@ -81,68 +83,10 @@ type LoadMessagesUntilTargetOptions = {
 };
 
 /**
- * Temporary route ids represent an unsaved new-session draft view.
- */
-function isTemporarySessionId(sessionId: string | null | undefined): boolean {
-  return typeof sessionId === 'string' && sessionId.startsWith('new-session-');
-}
-
-/**
- * Resolve the provider from explicit metadata first, then project session membership.
- */
-function resolveSessionProvider(
-  selectedProject: Project | null,
-  selectedSession: ProjectSession | null,
-): SessionProvider | null {
-  const explicitProvider = selectedSession?.__provider || selectedSession?.provider;
-  if (explicitProvider === 'codex' || explicitProvider === 'pi') {
-    return explicitProvider;
-  }
-
-  const sessionId = selectedSession?.id;
-  if (!selectedProject || !sessionId) {
-    return null;
-  }
-
-  if ((selectedProject.codexSessions || []).some((session) => session.id === sessionId)) {
-    return 'codex';
-  }
-
-  if ((selectedProject.piSessions || []).some((session) => session.id === sessionId)) {
-    return 'pi';
-  }
-
-  return null;
-}
-
-/**
  * Resolve the backend project name for a session.
  */
 function getSessionProjectName(selectedProject: Project | null, selectedSession: ProjectSession | null): string {
-  if (resolveSessionProvider(selectedProject, selectedSession) === 'codex') {
-    return selectedProject?.name || '';
-  }
-
-  if (typeof selectedSession?.__projectName === 'string' && selectedSession.__projectName) {
-    return selectedSession.__projectName;
-  }
-
-  return selectedProject?.name || '';
-}
-
-/**
- * Resolve the session ID used for server message API calls.
- * cN/co-owned sessions have a cN route ID as their id (e.g. "c61") and must
- * use it unchanged so the server reads from the co conversation read model.
- * Ordinary Codex JSONL sessions have a UUID id and must keep it so the
- * server reads from the native Codex JSONL.  Do NOT reconstruct cN from
- * routeIndex — routeIndex is a sidebar slot that ALL sessions have.
- */
-function getSessionLoadId(session: ProjectSession | null): string {
-  if (!session?.id) {
-    return '';
-  }
-  return session.id;
+  return resolveSessionRoutingContext(selectedProject, selectedSession).projectName;
 }
 
 /**
@@ -657,7 +601,15 @@ export function useChatSessionState({
     const nextSessionId = selectedSession?.id ?? null;
     const previousSessionId = previousSelectedSessionIdRef.current;
     previousSelectedSessionIdRef.current = nextSessionId;
-    if (!nextSessionId || previousSessionId === nextSessionId) {
+    if (!nextSessionId) {
+      if (previousSessionId) {
+        resetSessionViewState();
+        setCurrentSessionId(null);
+      }
+      return;
+    }
+
+    if (previousSessionId === nextSessionId) {
       return;
     }
 

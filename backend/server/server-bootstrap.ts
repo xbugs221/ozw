@@ -45,6 +45,8 @@ import mime from 'mime-types';
 import {
     getProjects,
     getSessions,
+    getProviderSessionProjectPathForFile,
+    countProviderSessionsForProject,
     getSessionMessages,
     getCodexSessions,
     getPiSessions,
@@ -146,6 +148,11 @@ import { registerBackendHttpRoutes } from './backend-http-routes.js';
 import { registerDiagnosticsRoutes } from './http/diagnostics-routes.js';
 import { registerSystemRoutes } from './http/system-routes.js';
 import { createProviderWatcherController } from './provider-watchers.js';
+import {
+    backfillProjectIndex,
+    hideProviderProjectIndex,
+    upsertProjectIndexFromProviderSession,
+} from '../domains/projects/project-index-sync-service.js';
 import { createBroadcastRegistry } from './realtime/broadcast-registry.js';
 import { createProjectInvalidationBus } from './realtime/project-invalidation-bus.js';
 import { createRuntimeWriterAdapter } from './realtime/runtime-writer-adapter.js';
@@ -341,10 +348,11 @@ async function resolveCbwRouteSessionIdFromProviderSession(provider: "codex" | "
     }
 
     for (const [routeIndex, record] of Object.entries(config?.chat || {})) {
+        const chatRecord = record as LooseRecord | undefined;
         if (
-            providerMatches(record)
-            && isManualBacked(record)
-            && record?.providerSessionId === providerSessionId
+            providerMatches(chatRecord)
+            && isManualBacked(chatRecord)
+            && chatRecord?.providerSessionId === providerSessionId
         ) {
             return buildCbwRouteSessionId(routeIndex);
         }
@@ -713,9 +721,14 @@ const providerWatcherController = createProviderWatcherController({
     clearProjectDirectoryCache,
     deleteProviderSessionIndexFile,
     indexProviderSessionFile,
+    getProviderSessionProjectPathForFile,
+    countProviderSessionsForProject,
+    upsertProjectIndexFromProviderSession,
+    hideProviderProjectIndex,
     resolveProviderSessionChange,
     broadcastSessionChanged,
     broadcastWorkflowChanged,
+    broadcastProjectListInvalidated,
     attachWorkflowMetadata,
     getProjects,
     ensureGoRunnerWatchersForProjects,
@@ -1102,6 +1115,10 @@ async function startServer() {
 
             try {
                 // Start watching provider and Go runner output folders after the workflow runner is live.
+                const backfillResult = await backfillProjectIndex();
+                if (backfillResult.manualCount > 0 || backfillResult.providerCount > 0) {
+                    void broadcastProjectListInvalidated({ reason: 'project-index-backfill' });
+                }
                 await setupProjectsWatcher();
                 await setupGoRunnerWatchers();
             } catch (watcherError: any) {

@@ -10,53 +10,27 @@ import {
   authenticatePage,
 } from '../spec/helpers/spec-test-helpers.ts';
 import {
-  ensurePlaywrightFixture,
-  PLAYWRIGHT_FIXTURE_HOME,
+  PLAYWRIGHT_FIXTURE_PROJECT_PATHS,
 } from './helpers/playwright-fixture.ts';
 import { getProjectLocalConfigPath } from '../../backend/project-config-store.ts';
 
 const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results', '114-session-route-numbering');
-
-/**
- * 计算全局项目配置里的手动项目 key，保持与 e2e fixture 的项目发现格式一致。
- */
-function encodeFixtureProjectName(projectPath: string): string {
-  /**
-   * PURPOSE: Match the fixture's manual project key encoding so the browser can
-   * discover this project through the normal /api/projects path.
-   */
-  return projectPath.replace(/[\\/:\s~_]/g, '-');
-}
+const ROUTE_NUMBERING_PROJECT_NAME = 'fixture-project';
+const ROUTE_NUMBERING_PROJECT_PATH = PLAYWRIGHT_FIXTURE_PROJECT_PATHS[0];
 
 /**
  * 写入 114 专用项目和过期 route counter，模拟用户已有真实 provider 会话的项目。
  */
 async function seedRouteNumberingProject(): Promise<{ projectPath: string; projectName: string }> {
   /**
-   * PURPOSE: Seed the isolated browser HOME with real ozw config files so the
-   * browser exercises the production project discovery and save paths.
+   * PURPOSE: Seed an already indexed fixture project with stale route state so
+   * the browser exercises manual session creation without DB setup noise.
    */
-  const projectPath = path.join(PLAYWRIGHT_FIXTURE_HOME, 'workspace', 'route-numbering-114');
-  const projectName = encodeFixtureProjectName(projectPath);
-  const globalConfigPath = getProjectLocalConfigPath('');
+  const projectPath = ROUTE_NUMBERING_PROJECT_PATH;
   const projectConfigPath = getProjectLocalConfigPath(projectPath);
 
   await fs.mkdir(projectPath, { recursive: true });
   await fs.writeFile(path.join(projectPath, 'README.md'), '# route numbering 114\n', 'utf8');
-
-  let globalConfig = {};
-  try {
-    globalConfig = JSON.parse(await fs.readFile(globalConfigPath, 'utf8'));
-  } catch {
-    globalConfig = {};
-  }
-  globalConfig[projectName] = {
-    manuallyAdded: true,
-    originalPath: projectPath,
-    displayName: 'route-numbering-114',
-  };
-  await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
-  await fs.writeFile(globalConfigPath, `${JSON.stringify(globalConfig, null, 2)}\n`, 'utf8');
 
   await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
   await fs.writeFile(projectConfigPath, `${JSON.stringify({
@@ -76,7 +50,7 @@ async function seedRouteNumberingProject(): Promise<{ projectPath: string; proje
     manualSessionRouteCounter: 1,
   }, null, 2)}\n`, 'utf8');
 
-  return { projectPath, projectName };
+  return { projectPath, projectName: ROUTE_NUMBERING_PROJECT_NAME };
 }
 
 /**
@@ -90,10 +64,6 @@ async function readProjectConfig(projectPath: string) {
   return JSON.parse(await fs.readFile(getProjectLocalConfigPath(projectPath), 'utf8'));
 }
 
-test.beforeEach(async () => {
-  ensurePlaywrightFixture({ preserveAuthDatabase: true });
-});
-
 test('114 browser route numbering creates c3/c4 from stale counter and restores after refresh', async ({ page }) => {
   const { projectPath, projectName } = await seedRouteNumberingProject();
   await fs.mkdir(EVIDENCE_DIR, { recursive: true });
@@ -103,14 +73,22 @@ test('114 browser route numbering creates c3/c4 from stale counter and restores 
   });
   await authenticatePage(page);
   await page.goto('/', { waitUntil: 'networkidle' });
+  const manualSessionCreateBodies = [];
+  await page.route('**/manual-sessions', async (route) => {
+    const body = route.request().postDataJSON();
+    manualSessionCreateBodies.push(body);
+    await route.continue();
+  });
 
-  await page.getByRole('button', { name: /^route-numbering-114\b/i }).click();
+  await page.getByTestId('project-list-item-fixture-project-desktop-surface').click();
   await expect(page.getByTestId('project-workspace-overview')).toBeVisible();
 
   const manualSessionGroup = page.getByTestId('project-overview-manual-sessions').first();
   await manualSessionGroup.getByRole('button', { name: /新建|New Session/ }).click();
   await page.getByTestId('project-new-session-provider-codex').click();
   await expect(page).toHaveURL(/\/workspace\/.*\/c3(?:\?.*)?$/, { timeout: 10_000 });
+  expect(manualSessionCreateBodies[0]?.routeIndex).toBeUndefined();
+  expect(manualSessionCreateBodies[0]?.label).toBe('');
 
   const configAfterFirstDraft = await readProjectConfig(projectPath);
   expect(configAfterFirstDraft.chat?.['3']?.sessionId).toBe('c3');
@@ -144,23 +122,26 @@ test('114 browser route numbering creates c3/c4 from stale counter and restores 
 
   await expect.poll(async () => {
     const config = await readProjectConfig(projectPath);
-    return config.chat?.['3']?.sessionId;
+    return config.chat?.['3']?.providerSessionId;
   }, {
     timeout: 10_000,
   }).toBe('codex-e2e-real-c3');
 
-  await page.getByRole('button', { name: /^route-numbering-114\b/i }).click();
+  await page.getByTestId('project-list-item-fixture-project-desktop-surface').click();
   await expect(page.getByTestId('project-workspace-overview')).toBeVisible();
   await manualSessionGroup.getByRole('button', { name: /新建|New Session/ }).click();
   await page.getByTestId('project-new-session-provider-pi').click();
   await expect(page).toHaveURL(/\/workspace\/.*\/c4(?:\?.*)?$/, { timeout: 10_000 });
+  expect(manualSessionCreateBodies[1]?.routeIndex).toBeUndefined();
+  expect(manualSessionCreateBodies[1]?.label).toBe('');
 
   const configAfterSecondDraft = await readProjectConfig(projectPath);
-  expect(configAfterSecondDraft.chat?.['3']?.sessionId).toBe('codex-e2e-real-c3');
+  expect(configAfterSecondDraft.chat?.['3']?.sessionId).toBe('c3');
+  expect(configAfterSecondDraft.chat?.['3']?.providerSessionId).toBe('codex-e2e-real-c3');
   expect(configAfterSecondDraft.chat?.['4']?.sessionId).toBe('c4');
   expect(configAfterSecondDraft.manualSessionRouteCounter).toBe(4);
 
-  await page.goto('/workspace/route-numbering-114/c3', { waitUntil: 'networkidle' });
+  await page.goto('/workspace/fixture-project/c3', { waitUntil: 'networkidle' });
   await expect(page).toHaveURL(/\/workspace\/.*\/c3(?:\?.*)?$/, { timeout: 10_000 });
   await page.reload({ waitUntil: 'networkidle' });
   await expect(page).toHaveURL(/\/workspace\/.*\/c3(?:\?.*)?$/, { timeout: 10_000 });

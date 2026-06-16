@@ -12,8 +12,8 @@ import type { SessionProvider } from '../types/app';
 import { buildProjectRoute, buildProjectSessionRoute, buildProjectWorkflowRoute, buildWorkflowChildSessionRoute } from '../utils/projectRoute';
 import type { NewSessionOptions } from '../utils/workflowAutoStart';
 import { findWorkflowById, getDirectSessionRouteIndex, normalizePathname, resolveRouteSelection, shouldPollWorkflowPlanningSession } from './projects/projectRouteSelection';
-import { findProjectSessionById, getNextManualSessionLabel, getOptimisticManualSessionRouteIndex, getProjectSessions, insertSessionIntoProject, isUpdateAdditive, providerToSessionsKey, withSessionProjectMetadata } from './projects/projectSessionCollections';
-import { findRefreshedSelectedSession, isInterruptedFetch, isTemporarySessionId, mergeProjectOverview, mergeProjectSummaries, normalizeComparablePath, projectMatchesOverview, projectsHaveChanges, serialize } from './projects/projectRefreshReducer';
+import { findProjectSessionById, getNextManualSessionLabel, getOptimisticManualSessionRouteIndex, getProjectSessions, insertSessionIntoProject, isUpdateAdditive, withSessionProjectMetadata } from './projects/projectSessionCollections';
+import { findRefreshedSelectedSession, isInterruptedFetch, isTemporarySessionId, mergeProjectOverview, mergeProjectSummaries, mergeProjectSummary, normalizeComparablePath, projectMatchesOverview, projectsHaveChanges, serialize } from './projects/projectRefreshReducer';
 import type { AppSocketMessage, AppTab, LoadingProgress, Project, ProjectSession, ProjectWorkflow, ProjectsUpdatedMessage } from '../types/app';
 type UseProjectsStateArgs = {
   locationPathname: string;
@@ -226,7 +226,7 @@ export function useProjectsState({
         : null
     ) || projects.find((project) => project.name === selectedProject.name);
     if (refreshedProject && serialize(refreshedProject) !== serialize(selectedProject)) {
-      setSelectedProject(refreshedProject);
+      setSelectedProject(mergeProjectSummary(selectedProject, refreshedProject));
     }
   }, [projects, selectedProject]);
   useEffect(() => {
@@ -495,15 +495,34 @@ export function useProjectsState({
   const handleNewSession = useCallback(
     async (project: Project, provider: SessionProvider = 'codex', options: NewSessionOptions = {}) => {
       const isManualSessionDraft = !options.workflowId;
-      const defaultSessionLabel = getNextManualSessionLabel(project);
+      const projectPath = normalizeComparablePath(project.fullPath || project.path || '');
+      const currentProjectSnapshot = projects.find((entry) => {
+        const entryPath = normalizeComparablePath(entry.fullPath || entry.path || '');
+        return Boolean(
+          (projectPath && entryPath && projectPath === entryPath) ||
+          (project.name && entry.name === project.name),
+        );
+      }) || null;
+      const optimisticRouteIndex = isManualSessionDraft
+        ? Math.max(
+          getOptimisticManualSessionRouteIndex(project),
+          currentProjectSnapshot ? getOptimisticManualSessionRouteIndex(currentProjectSnapshot) : 0,
+        )
+        : 0;
+      const defaultSessionLabel = isManualSessionDraft
+        ? `会话${optimisticRouteIndex}`
+        : getNextManualSessionLabel(project);
       let sessionSummary = typeof options.sessionSummary === 'string' ? options.sessionSummary.trim() : '';
+      let useBackendDefaultSessionLabel = isManualSessionDraft && !sessionSummary;
       const shouldPromptForLabel = options.promptForLabel !== false;
       if (!sessionSummary && shouldPromptForLabel && isManualSessionDraft && typeof window !== 'undefined') {
         const requestedLabel = window.prompt('请输入会话名称', defaultSessionLabel);
         if (requestedLabel === null) {
           return;
         }
-        sessionSummary = requestedLabel.trim() || defaultSessionLabel;
+        const trimmedLabel = requestedLabel.trim();
+        useBackendDefaultSessionLabel = !trimmedLabel || trimmedLabel === defaultSessionLabel;
+        sessionSummary = useBackendDefaultSessionLabel ? defaultSessionLabel : trimmedLabel;
       }
       if (!sessionSummary) {
         sessionSummary = isManualSessionDraft ? defaultSessionLabel : '新会话';
@@ -512,27 +531,50 @@ export function useProjectsState({
         id: `new-session-${Date.now()}`,
         routeIndex: undefined,
       };
-      let persistManualDraft: Promise<Response> | null = null;
       if (isManualSessionDraft) {
-        const routeIndex = getOptimisticManualSessionRouteIndex(project);
+        let payload: Record<string, any> | null = null;
+        try {
+          const response = await api.createManualSessionDraft(project.name, {
+            provider,
+            label: useBackendDefaultSessionLabel ? '' : sessionSummary,
+            projectPath: project.fullPath || project.path || '',
+          });
+          payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            const message = typeof payload?.error === 'string' && payload.error
+              ? payload.error
+              : `Failed to create manual session draft (${response.status})`;
+            throw new Error(message);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('Error creating manual session draft:', error);
+          return { ok: false as const, error: message };
+        }
+
+        const createdSession = payload?.session;
+        if (typeof createdSession?.id !== 'string' || !createdSession.id) {
+          return { ok: false as const, error: 'Manual session draft did not return a valid id' };
+        }
+        const routeIndex = Number(createdSession.routeIndex);
+        if (!Number.isInteger(routeIndex) || routeIndex <= 0) {
+          return { ok: false as const, error: 'Manual session draft did not return a valid route index' };
+        }
+        const resolvedLabel = createdSession.label || createdSession.title || sessionSummary || `会话${routeIndex}`;
+        sessionSummary = resolvedLabel;
         draftSession = {
-          id: `c${routeIndex}`,
+          ...createdSession,
+          id: createdSession.id,
           routeIndex,
           provider,
-          label: sessionSummary,
-          title: sessionSummary,
-          summary: sessionSummary,
-          name: sessionSummary,
-          projectName: project.name,
-          projectPath: project.fullPath || project.path || '',
-          createdAt: new Date().toISOString(),
+          label: resolvedLabel,
+          title: createdSession.title || resolvedLabel,
+          summary: createdSession.summary || createdSession.title || resolvedLabel,
+          name: createdSession.name || resolvedLabel,
+          projectName: createdSession.projectName || project.name,
+          projectPath: createdSession.projectPath || project.fullPath || project.path || '',
+          createdAt: createdSession.createdAt || new Date().toISOString(),
         };
-        persistManualDraft = api.createManualSessionDraft(project.name, {
-          provider,
-          label: sessionSummary,
-          projectPath: project.fullPath || project.path || '',
-          routeIndex,
-        });
       }
       let navigationProject = project;
       let targetWorkflow = findWorkflowById(project, options.workflowId);
@@ -608,87 +650,6 @@ export function useProjectsState({
         ? `${baseRoute}${baseRoute.includes('?') ? '&' : '?'}provider=pi&projectPath=${encodeURIComponent(syntheticSession.projectPath || projectWithSyntheticSession.fullPath || projectWithSyntheticSession.path || '')}`
         : baseRoute;
       navigate(routeWithProvider);
-      if (persistManualDraft) {
-        persistManualDraft
-          .then(async (response) => {
-            const payload = await response.json().catch(() => null);
-            if (!response.ok) {
-              const message = typeof payload?.error === 'string' && payload.error
-                ? payload.error
-                : `Failed to create manual session draft (${response.status})`;
-              throw new Error(message);
-            }
-            const createdSession = payload?.session;
-            if (typeof createdSession?.id !== 'string' || !createdSession.id) {
-              throw new Error('Manual session draft did not return a valid id');
-            }
-            if (createdSession.id !== draftSession.id) {
-              const correctedSession = withSessionProjectMetadata(
-                {
-                  ...syntheticSession,
-                  ...createdSession,
-                  label: createdSession.label || createdSession.title || sessionSummary,
-                  title: createdSession.title || createdSession.label || sessionSummary,
-                  summary: createdSession.summary || createdSession.title || sessionSummary,
-                  projectPath: createdSession.projectPath || syntheticSession.projectPath,
-                },
-                navigationProject,
-                provider,
-              );
-              const sessionsKey = providerToSessionsKey(provider);
-              const withoutOptimisticSession = {
-                ...navigationProject,
-                [sessionsKey]: (
-                  Array.isArray(navigationProject[sessionsKey])
-                    ? navigationProject[sessionsKey] as ProjectSession[]
-                    : []
-                ).filter((session) => session.id !== draftSession.id),
-              };
-              const correctedProject = {
-                ...insertSessionIntoProject(withoutOptimisticSession, correctedSession, provider),
-                manualSessionNextRouteIndex: Number(correctedSession.routeIndex) + 1,
-              };
-              setProjects((prevProjects) => prevProjects.map((entry) => {
-                if (entry.name !== navigationProject.name) {
-                  return entry;
-                }
-                const entryWithoutOptimisticSession = {
-                  ...entry,
-                  [sessionsKey]: (
-                    Array.isArray(entry[sessionsKey])
-                      ? entry[sessionsKey] as ProjectSession[]
-                      : []
-                  ).filter((session) => session.id !== draftSession.id),
-                };
-                return {
-                  ...insertSessionIntoProject(entryWithoutOptimisticSession, correctedSession, provider),
-                  manualSessionNextRouteIndex: Number(correctedSession.routeIndex) + 1,
-                };
-              }));
-              setSelectedProject(correctedProject);
-              setSelectedSession(correctedSession);
-              const correctedRoute = buildProjectSessionRoute(correctedProject, correctedSession);
-              navigate(provider === 'pi'
-                ? `${correctedRoute}${correctedRoute.includes('?') ? '&' : '?'}provider=pi&projectPath=${encodeURIComponent(correctedSession.projectPath || correctedProject.fullPath || correctedProject.path || '')}`
-                : correctedRoute);
-            }
-          })
-          .catch((error) => {
-            console.error('Error creating manual session draft:', error);
-            setProjects((prevProjects) => prevProjects.map((entry) => (
-              entry.name === navigationProject.name
-                ? {
-                  ...entry,
-                  [providerToSessionsKey(provider)]: (
-                    Array.isArray(entry[providerToSessionsKey(provider)])
-                      ? entry[providerToSessionsKey(provider)] as ProjectSession[]
-                      : []
-                  ).filter((session) => session.id !== draftSession.id),
-                }
-                : entry
-            )));
-          });
-      }
       return { ok: true as const };
     },
     [navigate, projects],

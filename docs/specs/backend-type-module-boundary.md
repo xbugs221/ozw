@@ -79,7 +79,7 @@ Codex event 到 chat message 的映射不得在多个后端文件中重复维护
 
 ## 需求：项目域核心必须进入 TypeScript 编译边界
 
-项目列表、会话路由、Provider 会话、搜索和项目重命名依赖的项目域核心实现不得退回手写 JS 与 d.ts 配对；公共 facade 必须保持业务入口稳定。
+项目列表、会话路由、Provider 会话、搜索、删除和项目重命名依赖的项目域核心实现不得退回手写 JS 与 d.ts 配对；公共 facade 必须保持业务入口稳定。项目域也不得通过 runtime compat、legacy runtime 或改名 implementation 后备绕过 TypeScript focused modules。
 
 ### 场景：项目域不再依赖手写 JS 核心
 
@@ -90,15 +90,36 @@ Codex event 到 chat message 的映射不得在多个后端文件中重复维护
 - **且** `build:server` 不得复制项目域手写 JS
 - **且** Node TypeScript 配置必须继续禁用 `allowJs`
 - **且** `project-domain-service.ts` 不得使用会触发构建错误的 `.ts` 扩展导入
+- **且** `project-domain-runtime-compat.*` 与 `project-domain-legacy-runtime.*` 不得重新出现
+- **且** 项目域 focused modules 不得导入旧 runtime 或 `*-implementation.js` 改名后备
 
 ### 场景：公共项目 facade 保持业务入口稳定
 
 - **给定** `backend/projects.ts` 兼容 facade 和项目 domain service
 - **当** 项目域核心实现迁移或继续拆分
-- **则** `getProjects`、`getSessionMessages`、`createManualSessionDraft`、`finalizeManualSessionRoute`、`renameProject`、`renameSession`、`searchChatHistory`、`indexProviderSessionFile` 等入口必须继续可见
+- **则** `getProjects`、`getSessionMessages`、`createManualSessionDraft`、`finalizeManualSessionRoute`、`renameProject`、`renameSession`、`deleteProject`、`searchChatHistory`、`indexProviderSessionFile` 等入口必须继续可见
 - **且** TypeScript ESM 的 `.js` import specifier 只有在没有物理手写 JS core 时才允许存在
 
 对应规格测试：`tests/specs/backend-type-module-boundary.spec.ts`，并生成 `test-results/13-project-domain-ts-boundary/source-audit.json`。
+
+### 场景：迁移 core 保持短兼容层且不承载主要业务入口
+
+- **给定** 项目域已经拆分为 discovery、config、manual route、overview、search、rename、delete 和 Provider read model 模块
+- **当** 维护者修改 `backend/domains/projects/project-domain-core.ts`
+- **则** `project-domain-core.ts` 不得使用 `@ts-nocheck`、`@ts-ignore` 或 `@ts-expect-error`
+- **且** 该文件必须保持短兼容层，不得重新定义 `getProjects`、`getSessionMessages`、`createManualSessionDraft`、`finalizeManualSessionRoute`、`searchChatHistory`、`renameProject`、`deleteProject` 等主体业务入口
+- **且** 项目域其他源码不得把巨型迁移实现改名为 `*-implementation.js` 或 legacy runtime 后继续导入
+
+### 场景：focused modules 拥有真实实现而不是薄 re-export
+
+- **给定** 项目发现、手动路由、overview、搜索、删除、Provider transcript/index/list/read model 等 focused modules
+- **当** 维护者继续拆分或修复项目域逻辑
+- **则** 这些模块不得只从 `project-domain-core.js`、runtime compat 或 legacy runtime 重新导出业务入口
+- **且** 不得只把 `...args` 原样透传给换名迁移实现
+- **且** 不得用 `export const xxxEntry = true` 哨兵常量代替可审查实现
+- **且** 每个模块必须保留本地可审查的函数或 typed 常量实现
+
+对应规格测试：`tests/specs/backend-type-module-boundary.spec.ts`。
 
 ## 需求：Codex app-server runtime 必须保持可注入边界
 
@@ -120,6 +141,21 @@ Codex app-server 实时路径不得重新退化为单个巨型 runtime 文件；
 
 `backend/server/http-routes.ts` 和 `backend/server/server-bootstrap.ts` 只负责启动装配、依赖注入和生命周期协调；system update、项目、workflow、session、附件、usage、diagnostics 等业务 HTTP URL 必须由 `backend/server/http/*-routes.ts` 模块注册。Codex/Pi 会话私有 realtime 投递、WebSocket path 分派、公共 project invalidation 和 runtime writer 包装必须由独立 typed 模块承载，避免入口重新退化为路由和广播巨型实现。
 
+## 需求：聊天 WebSocket handler 必须保持 realtime dispatcher 边界
+
+`backend/server/chat-websocket.ts` 负责连接生命周期、注册、消息解析和关闭清理；`codex-command`、`pi-command`、`abort-session`、`subscribe-session`、`check-session-status` 等协议命令分发必须位于 `backend/server/realtime/chat-command-dispatcher.ts`。WebSocket handler 不得直接承载 provider runtime send/abort/status 主体，也不得重新包含 `data.type` 大分支。
+
+### 场景：WebSocket handler 不直接承载命令分支
+
+- **给定** 用户通过 `/ws/chat` 发起 Codex/Pi manual 会话、follow-up、steer、abort 或订阅
+- **当** 维护者调整聊天 WebSocket 入口
+- **则** `chat-websocket.ts` 必须注册真实 message handler 并调用 `createChatCommandDispatcher`
+- **且** `chat-websocket.ts` 不得直接调用 `sendNativeMessage` 或 `abortNativeSession`
+- **且** `chat-websocket.ts` 不得包含 `data.type` 命令分支主体
+- **且** `chat-command-dispatcher.ts` 必须承载协议命令分发和 runtime command 调用
+
+对应规格测试：`tests/specs/backend-realtime-boundary.spec.ts`，并生成 `test-results/backend-realtime-boundary/source-audit.json`。
+
 ### 场景：业务 HTTP route 注册位于 HTTP 边界模块
 
 - **给定** 维护者调整后端 HTTP API
@@ -129,6 +165,15 @@ Codex app-server 实时路径不得重新退化为单个巨型 runtime 文件；
 - **且** `/api/system/update` 必须位于 `backend/server/http/system-routes.ts`
 - **且** `server-bootstrap.ts` 不得直接注册 Express route
 - **且** `http-routes.ts` 不得重新直接拥有大量业务 URL 或 route handler
+
+### 场景：业务 HTTP route 依赖合同必须类型化
+
+- **给定** 项目、workflow、session、附件、usage 和文件访问 route module
+- **当** 维护者调整 route 注册函数或依赖注入映射
+- **则** 每个业务 route module 必须导出具名 deps interface
+- **且** `register*Routes(deps)` 必须使用对应 deps interface，不得使用 `deps: any`
+- **且** `backend/server/backend-http-routes.ts` 只能做 route module 编排和最小依赖映射
+- **且** 聚合层不得重新承载大量 handler 主体
 
 ### 场景：会话私有和公共 realtime 投递位于 realtime 边界模块
 

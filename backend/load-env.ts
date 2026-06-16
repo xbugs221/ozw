@@ -37,6 +37,6 @@ function loadOptionalEnvFile() {
 loadOptionalEnvFile();
 
 if (!process.env.DATABASE_PATH) {
-  process.env.DATABASE_PATH = path.join(os.homedir(), '.ozw', 'auth.db');
+  process.env.DATABASE_PATH = path.join(os.homedir(), '.ozw', 'ozw.db');
   process.env.OZW_DATABASE_PATH_DEFAULTED = 'true';
 }

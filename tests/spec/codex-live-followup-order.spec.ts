@@ -12,6 +12,7 @@ import {
 } from '../e2e/helpers/playwright-fixture.ts';
 import {
   PRIMARY_FIXTURE_PROJECT_PATH,
+  authHeaders,
   authenticatePage,
   getFixtureProject,
 } from './helpers/spec-test-helpers.ts';
@@ -177,16 +178,23 @@ function buildExpectedProjectRoutePrefix(): string {
  */
 async function getFixtureProjectWithCodexSession(request, sessionId: string) {
   /**
-   * docstring：Codex session discovery is asynchronous, so route lookup must wait
-   * for the real project API to publish the JSONL file written by this test.
+   * docstring：项目列表是 lightweight，Codex session discovery 需要通过
+   * overview API 读取；route lookup 仍等待真实后端发布刚写入的 JSONL。
    */
   let latestProject = null;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     latestProject = await getFixtureProject(request);
-    const codexSessions = Array.isArray(latestProject.codexSessions) ? latestProject.codexSessions : [];
+    const overviewResponse = await request.get(`/api/projects/${encodeURIComponent(latestProject.name)}/overview`, {
+      headers: authHeaders(),
+    });
+    if (!overviewResponse.ok()) {
+      throw new Error(`Failed to load project overview: ${overviewResponse.status()}`);
+    }
+    const overview = await overviewResponse.json();
+    const codexSessions = Array.isArray(overview.codexSessions) ? overview.codexSessions : [];
     const session = codexSessions.find((candidate) => candidate.id === sessionId);
     if (session) {
-      return { project: latestProject, session };
+      return { project: { ...latestProject, ...overview }, session };
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }

@@ -1,4 +1,4 @@
-// Sources: 17-Workflow读模型Schema化, 90-适配oz flow合入oz后的DAG工作流审查页, 93-对齐oz flow状态栏新格式, 99-重设计oz flow工作流卡片移除DAG审查
+// Sources: 17-Workflow读模型Schema化, 23-工作流读模型stage-session规则统一, 90-适配oz flow合入oz后的DAG工作流审查页, 93-对齐oz flow状态栏新格式, 99-重设计oz flow工作流卡片移除DAG审查
 // @ts-nocheck -- 创建阶段契约测试：执行阶段负责把 workflowDag 类型收紧。
 /**
  * PURPOSE: Verify ozw converts oz flow graph JSON into an inspectable workflow DAG
@@ -12,12 +12,19 @@ import test from 'node:test';
 
 import { listWorkflowReadModels } from '../../backend/domains/workflows/workflow-read-model.ts';
 import { resolveFlowRunsRoot } from '../../backend/domains/workflows/flow-runtime-paths.ts';
+import {
+  acceptedProviderFromSessionKey,
+  inferSubagentRoleStage,
+  resolvePlannerSessionRef,
+  resolveSessionProviderFromState,
+} from '../../backend/domains/workflows/read-model/stage-session-resolver.ts';
 
 
 const CHANGE_NAME = '90-DAG审查页fixture';
 const RUN_ID = 'run-dag-review-contract';
 const WORKFLOW_BOUNDARY_EVIDENCE_DIR = path.join(process.cwd(), 'test-results', '10-workflow-boundary');
 const WORKFLOW_SCHEMA_EVIDENCE_DIR = path.join(process.cwd(), 'test-results', '17-workflow-read-model-schema');
+const WORKFLOW_STAGE_SESSION_EVIDENCE_DIR = path.join(process.cwd(), 'test-results', '23-workflow-stage-session');
 
 /**
  * 判断仓库相对路径是否存在。
@@ -52,6 +59,18 @@ async function writeWorkflowSchemaAudit(snapshot) {
   await fs.mkdir(WORKFLOW_SCHEMA_EVIDENCE_DIR, { recursive: true });
   await fs.writeFile(
     path.join(WORKFLOW_SCHEMA_EVIDENCE_DIR, 'source-audit.json'),
+    `${JSON.stringify(snapshot, null, 2)}\n`,
+    'utf8',
+  );
+}
+
+/**
+ * 写入 stage/session resolver 源码审计证据。
+ */
+async function writeWorkflowStageSessionAudit(snapshot) {
+  await fs.mkdir(WORKFLOW_STAGE_SESSION_EVIDENCE_DIR, { recursive: true });
+  await fs.writeFile(
+    path.join(WORKFLOW_STAGE_SESSION_EVIDENCE_DIR, 'source-audit.json'),
     `${JSON.stringify(snapshot, null, 2)}\n`,
     'utf8',
   );
@@ -1669,4 +1688,78 @@ test('workflow schema modules export business normalizers', async () => {
       assert.match(source, new RegExp(`export\\s+(function|interface|type)\\s+${exportName}\\b`), `${modulePath} must export ${exportName}`);
     }
   }
+});
+
+test('workflow stage/session resolver owns provider, role, and planner rules', async () => {
+  const resolverPath = 'backend/domains/workflows/read-model/stage-session-resolver.ts';
+  const consumerPaths = [
+    'backend/domains/workflows/read-model/status-summary.ts',
+    'backend/domains/workflows/read-model/dag-read-model.ts',
+    'backend/domains/workflows/read-model/session-refs.ts',
+    'backend/domains/workflows/read-model/builder-internals.ts',
+  ];
+  const resolverSource = await readRepoSource(resolverPath);
+  const consumerSources = Object.fromEntries(
+    await Promise.all(consumerPaths.map(async (relativePath) => [relativePath, await readRepoSource(relativePath)])),
+  );
+  const duplicateProviderResolvers = Object.entries(consumerSources)
+    .filter(([relativePath, source]) => (
+      relativePath !== resolverPath
+      && /function\s+resolveSessionProviderFromState/.test(source)
+    ))
+    .map(([relativePath]) => relativePath);
+  const builderInternals = consumerSources['backend/domains/workflows/read-model/builder-internals.ts'];
+  const stageStatuses = [
+    { key: 'review_1', status: 'completed' },
+    { key: 'review_2', status: 'active' },
+    { key: 'repair_1', status: 'completed' },
+    { key: 'qa_1', status: 'pending' },
+  ];
+  const sessions = {
+    'pi:executor': 'pi-exec-session',
+    'codex:planner': 'planner-session',
+    planning: 'legacy-planning-session',
+  };
+  const childSessions = [
+    { id: 'planner-session', provider: 'codex', address: 'planning', routePath: '/runs/run-1/sessions/planning' },
+  ];
+  const sampleResults = {
+    piExecutor: acceptedProviderFromSessionKey('pi:executor'),
+    providerForExecutor: resolveSessionProviderFromState('pi-exec-session', sessions),
+    activeReviewStage: inferSubagentRoleStage('reviewer', stageStatuses),
+    plannerRef: resolvePlannerSessionRef(sessions, { stages: { planning: { tool: 'codex' } } }, childSessions, 'run-1'),
+  };
+  const snapshot = {
+    hasResolverModule: await repoPathExists(resolverPath),
+    resolverExportsFound: [
+      'acceptedProviderFromSessionKey',
+      'resolveSessionProviderFromState',
+      'inferSubagentRoleStage',
+      'resolvePlannerSessionRef',
+      'resolveRoleDefaultStage',
+    ].filter((name) => new RegExp(`\\b${name}\\b`).test(resolverSource)),
+    duplicateProviderResolvers,
+    builderUsesAnyRecord: /type\s+AnyRecord\s*=\s*Record<string,\s*any>/.test(builderInternals),
+    builderHasBrokenComment: /\/\*\*[\s\S]{0,120}\/\*\*/.test(builderInternals),
+    sampleResults,
+  };
+
+  await writeWorkflowStageSessionAudit(snapshot);
+
+  assert.equal(snapshot.hasResolverModule, true, `${resolverPath} must exist`);
+  assert.equal(sampleResults.piExecutor.accepted, true, 'pi:executor 必须被识别为 provider session key');
+  assert.equal(sampleResults.piExecutor.provider, 'pi');
+  assert.equal(sampleResults.providerForExecutor, 'pi', 'sessionId 必须能从 sessions map 反查 provider');
+  assert.equal(sampleResults.activeReviewStage, 'review_2', 'review role 应优先映射到 active review round');
+  assert.deepEqual(sampleResults.plannerRef, {
+    sessionId: 'planner-session',
+    provider: 'codex',
+    role: 'planner',
+    stageKey: 'planning',
+    address: 'planning',
+    routePath: '/runs/run-1/sessions/planning',
+  });
+  assert.deepEqual(snapshot.duplicateProviderResolvers, [], 'provider resolver 不得在 read model consumers 中重复定义');
+  assert.equal(snapshot.builderUsesAnyRecord, false, 'builder-internals.ts 核心 read model 不得继续以 AnyRecord 为主类型');
+  assert.equal(snapshot.builderHasBrokenComment, false, 'builder-internals.ts 不得保留拆分遗留的破损注释');
 });

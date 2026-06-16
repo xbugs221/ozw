@@ -48,13 +48,11 @@ import {
   createComposerClientRequestId,
   isDuplicateComposerSubmit,
 } from './submitDedupPolicy';
-
-type PendingViewSession = {
-  sessionId: string | null;
-  startedAt: number;
-  clientRequestId?: string;
-  draftSessionId?: string | null;
-};
+import {
+  isCbwRouteSessionId,
+  isTemporarySessionId,
+  type PendingViewSession,
+} from '../session/sessionIdentity';
 
 interface UseChatComposerStateArgs {
   selectedProject: Project | null;
@@ -99,15 +97,6 @@ interface CommandExecutionResult {
   hasBashCommands?: boolean;
   hasFileIncludes?: boolean;
 }
-
-const isTemporarySessionId = (sessionId: string | null | undefined) =>
-  Boolean(sessionId && (sessionId.startsWith('new-session-') || /^c\d+$/.test(sessionId)));
-
-/**
- * Check whether a session id is a ozw route alias that should scope realtime events.
- */
-const isCbwRouteSessionId = (sessionId: string | null | undefined) =>
-  Boolean(sessionId && /^c\d+$/.test(sessionId));
 
 /**
  * Check the realtime processing marker for a session alias before dispatch.
@@ -1131,7 +1120,8 @@ export function useChatComposerState({
       : null;
 
     const concreteSessionId =
-      candidateSessionIds.find((sessionId) => Boolean(sessionId) && !isTemporarySessionId(sessionId)) || null;
+      candidateSessionIds.find((sessionId) =>
+        Boolean(sessionId) && !isTemporarySessionId(sessionId) && !isCbwRouteSessionId(sessionId)) || null;
     const draftSessionId =
       selectedRouteSessionId || pendingViewSessionRef.current?.draftSessionId || selectedSession?.id || currentSessionId || null;
     const targetSessionId = concreteSessionId || selectedRouteSessionId || (isTemporarySessionId(draftSessionId) ? draftSessionId : null);

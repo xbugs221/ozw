@@ -70,6 +70,55 @@ test('Provider 会话列表隐藏已绑定 cN 的原始 session 并过滤 workfl
   await writeEvidenceSnapshot('read-model-output.json', output);
 });
 
+test('Provider 会话列表过滤旧版本误标为 manual 的 workflow 角色提示会话', async () => {
+  /**
+   * 业务场景：历史 workflow 子会话曾以 cN manual route 形态持久化，项目首页不能把这些内部角色会话展示成手动会话。
+   */
+  const output = buildProviderSessionListReadModel({
+    provider: 'pi',
+    providerSessions: [
+      {
+        id: 'legacy-workflow-role-provider',
+        title: '你是 回归场景测试员，职责：覆盖邻近功能',
+        lastActivity: '2026-06-17T09:00:00.000Z',
+      },
+      {
+        id: 'manual-provider-thread',
+        title: '用户直接创建的 Pi 手动会话',
+        lastActivity: '2026-06-17T10:00:00.000Z',
+      },
+    ],
+    manualDrafts: [
+      {
+        id: 'c72',
+        routeIndex: 72,
+        provider: 'pi',
+        origin: 'manual',
+        providerSessionId: 'legacy-workflow-role-provider',
+        title: '你是 回归场景测试员，职责：覆盖邻近功能',
+        lastActivity: '2026-06-17T11:00:00.000Z',
+      },
+      {
+        id: 'c73',
+        routeIndex: 73,
+        provider: 'pi',
+        origin: 'manual',
+        providerSessionId: 'manual-provider-thread',
+        title: '用户直接创建的 Pi 手动会话',
+        lastActivity: '2026-06-17T12:00:00.000Z',
+      },
+    ],
+    workflowOwnedSessionIds: new Set(),
+    excludeWorkflowChildSessions: true,
+    includeHidden: true,
+  });
+
+  assert.deepEqual(output.map((session) => session.id), ['c73']);
+  assert.equal(output[0].providerSessionId, 'manual-provider-thread');
+
+  await writeEvidenceSnapshot('legacy-workflow-role-filter.json', output);
+});
+
 test('projects.ts 调用 Provider 会话列表 read model 而不是内联核心过滤规则', async () => {
   /**
    * 业务场景：后续修复项目首页会话展示时，开发者能先改项目域小模块和小测试，

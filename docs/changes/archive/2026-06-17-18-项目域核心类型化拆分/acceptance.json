@@ -1,0 +1,223 @@
+{
+  "summary": "验证项目域从 project-domain-core 迁移仓库收敛为 typed focused modules，同时保持项目清单、Provider 会话、手动 cN 路由、搜索和关键后端边界行为稳定。",
+  "coverage": [
+    {
+      "spec": "需求：项目域迁移核心必须类型化收敛 / 场景：迁移核心不再使用 suppression 且体量受控",
+      "tests": ["contract-project-domain-boundary"],
+      "evidence": ["source-audit-snapshot"],
+      "risk": "行数阈值只能防止继续巨型化，仍需要代码评审确认拆分质量。"
+    },
+    {
+      "spec": "需求：项目域迁移核心必须类型化收敛 / 场景：focused modules 拥有真实实现而不是薄 re-export",
+      "tests": ["contract-project-domain-boundary"],
+      "evidence": ["module-ownership-snapshot"],
+      "risk": "source audit 可发现薄 wrapper，但不能判断每个新函数的内部复杂度是否最佳。"
+    },
+    {
+      "spec": "需求：公共 facade 必须保持稳定 / 场景：`backend/projects.ts` 和 project-domain service 导出兼容",
+      "tests": ["contract-project-domain-boundary", "existing-backend-boundary"],
+      "evidence": ["source-audit-snapshot"],
+      "risk": "覆盖主要公共入口，少数未列出的历史导出仍需执行阶段用 typecheck 兜底。"
+    },
+    {
+      "spec": "需求：手动 cN 路由行为必须不退化 / 场景：draft、start、bind、finalize 后 route runtime 稳定",
+      "tests": ["contract-project-domain-business"],
+      "evidence": ["manual-route-snapshot"],
+      "risk": "多窗口 start lock 并发由既有测试继续覆盖。"
+    },
+    {
+      "spec": "需求：Provider 会话归属必须稳定 / 场景：已绑定 cN 隐藏底层 provider session",
+      "tests": ["contract-project-domain-business", "existing-provider-session-list"],
+      "evidence": ["manual-route-snapshot"],
+      "risk": "本提案新增测试偏 Codex，Pi 归属主要依赖既有 provider-session-list 和 Pi 后端测试。"
+    },
+    {
+      "spec": "需求：聊天搜索必须独立于项目清单 / 场景：搜索能找到真实 transcript 且不污染首页路径",
+      "tests": ["contract-project-domain-business"],
+      "evidence": ["search-snapshot"],
+      "risk": "搜索性能需要执行阶段补充 runtime log，不只依赖结果正确性。"
+    },
+    {
+      "spec": "需求：Provider transcript 读取必须保留增量语义 / 场景：Codex/Pi afterLine 不退回全文件读取",
+      "tests": ["existing-session-incremental-read"],
+      "evidence": ["incremental-read-log"],
+      "risk": "cache miss 仍允许安全回退，性能证据聚焦 cache hit 常见路径。"
+    },
+    {
+      "spec": "需求：项目清单必须保持轻量 / 场景：首页项目列表不深读搜索、删除或完整 transcript",
+      "tests": ["contract-project-domain-boundary", "existing-project-list-summary"],
+      "evidence": ["project-list-runtime-log"],
+      "risk": "source audit 不能替代真实运行时观测，执行阶段必须生成 runtime log。"
+    },
+    {
+      "spec": "需求：重命名和删除必须迁出迁移核心 / 场景：rename/delete 由服务模块协调且行为兼容",
+      "tests": ["contract-project-domain-boundary", "existing-backend-boundary"],
+      "evidence": ["module-ownership-snapshot"],
+      "risk": "真实文件删除风险需用既有后端 rename/delete 测试继续兜底。"
+    },
+    {
+      "spec": "需求：类型检查和构建边界必须收敛 / 场景：项目域拆分后 node/web/test 类型检查通过",
+      "tests": ["root-typecheck", "server-smoke"],
+      "evidence": ["typecheck-log", "server-smoke-log"],
+      "risk": "不强制完整浏览器 e2e，若执行阶段改动前端项目状态还需追加浏览器回归。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-project-domain-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/18-项目域核心类型化拆分/tests/project-domain-boundary.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/18-项目域核心类型化拆分/tests/project-domain-boundary.acceptance.test.ts",
+      "purpose": "证明项目域迁移核心、focused modules 和公共 facade 的源码边界达到提案要求。",
+      "assertions": [
+        "project-domain-core.ts 不包含 TypeScript suppression 且体量受控",
+        "项目发现、manual route、overview、搜索、删除等业务模块不再从 project-domain-core.js 薄 re-export",
+        "project-domain-service.ts 保留主要公共入口但不直接导出迁移 core 的业务实现"
+      ],
+      "expected_initial_failure": "当前 project-domain-core.ts 仍有 @ts-nocheck 且多个业务模块只是从 core 重新导出。"
+    },
+    {
+      "id": "contract-project-domain-business",
+      "source": "change_contract",
+      "path": "docs/changes/18-项目域核心类型化拆分/tests/project-domain-business.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/18-项目域核心类型化拆分/tests/project-domain-business.acceptance.test.ts",
+      "purpose": "用真实临时 HOME、项目配置和 Codex JSONL 证明拆分不能破坏手动 cN 路由、Provider 会话归属和搜索。",
+      "assertions": [
+        "Codex 手动草稿经过 start、bind、finalize 后仍能通过 cN route 找到真实 provider session",
+        "已绑定的底层 provider session 不会在会话列表重复出现",
+        "searchChatHistory 能搜索真实 Codex JSONL 用户消息并返回 sessionId/projectName/命中文本"
+      ],
+      "expected_initial_failure": "业务行为当前可能通过；若失败必须暴露真实路径退化而不是 fixture 或语法错误。"
+    },
+    {
+      "id": "existing-backend-boundary",
+      "source": "existing_regression",
+      "path": "tests/specs/backend-type-module-boundary.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/backend-type-module-boundary.spec.ts",
+      "purpose": "保留既有后端类型和模块边界规格。",
+      "assertions": [
+        "后端核心边界模块存在且不回退到 legacy 巨型入口",
+        "项目域 facade 保持主要公共入口",
+        "Codex app-server 和 HTTP/realtime 边界不退化"
+      ],
+      "expected_initial_failure": "若当前仓库已有边界债务，执行阶段应与本提案一起收敛。"
+    },
+    {
+      "id": "existing-provider-session-list",
+      "source": "existing_regression",
+      "path": "tests/specs/provider-session-list-read-model.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/provider-session-list-read-model.spec.ts",
+      "purpose": "保留 Provider 会话列表 read model 对 cN route 和 workflow-owned session 的业务合同。",
+      "assertions": [
+        "已绑定 cN 的底层 provider session 被隐藏",
+        "workflow-owned session 不进入普通手动会话列表",
+        "projects.ts 使用 provider session list read model"
+      ],
+      "expected_initial_failure": "当前应通过；拆分过程中失败表示 Provider 会话归属退化。"
+    },
+    {
+      "id": "existing-session-incremental-read",
+      "source": "existing_regression",
+      "path": "docs/changes/18-项目域核心类型化拆分/tests/session-incremental-read-log.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/18-项目域核心类型化拆分/tests/session-incremental-read-log.acceptance.test.ts",
+      "purpose": "防止 Provider transcript reader 拆分后恢复全文件读取，并写入 test-results/18-project-domain-qa/session-incremental-read.log。",
+      "assertions": [
+        "Codex afterLine cache hit 只读取新增尾部",
+        "Pi afterLine cache hit 只读取新增尾部",
+        "cursor 边界不重复返回旧消息",
+        "命令输出必须写入 evidence: incremental-read-log"
+      ],
+      "expected_initial_failure": "当前应通过；拆分后失败表示 I/O 优化退化。"
+    },
+    {
+      "id": "existing-project-list-summary",
+      "source": "existing_regression",
+      "path": "docs/changes/18-项目域核心类型化拆分/tests/project-list-runtime-log.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/18-项目域核心类型化拆分/tests/project-list-runtime-log.acceptance.test.ts",
+      "purpose": "保留项目列表轻量摘要 API 的浏览器/网络合同，并写入 test-results/18-project-domain-qa/project-list-runtime.log。",
+      "assertions": [
+        "/api/projects 不携带 provider 会话和 workflow 重集合",
+        "单项目 overview 按需返回最近会话和 workflow",
+        "项目清单首屏不等待重任务",
+        "命令输出必须写入 evidence: project-list-runtime-log"
+      ],
+      "expected_initial_failure": "当前应通过；若执行阶段改动 API，需要同步修复轻量摘要行为。"
+    },
+    {
+      "id": "root-typecheck",
+      "source": "existing_regression",
+      "path": "docs/changes/18-项目域核心类型化拆分/tests/typecheck-log.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/18-项目域核心类型化拆分/tests/typecheck-log.acceptance.test.ts",
+      "purpose": "证明项目域拆分进入 TypeScript 检查边界，并写入 test-results/18-project-domain-qa/typecheck.log。",
+      "assertions": [
+        "web、node、test TypeScript 配置均通过",
+        "不得靠新增 TypeScript suppression 逃避项目域类型错误",
+        "命令输出必须写入 evidence: typecheck-log"
+      ],
+      "expected_initial_failure": "当前可能通过；执行阶段必须保持通过。"
+    },
+    {
+      "id": "server-smoke",
+      "source": "existing_regression",
+      "path": "docs/changes/18-项目域核心类型化拆分/tests/server-smoke-log.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/18-项目域核心类型化拆分/tests/server-smoke-log.acceptance.test.ts",
+      "purpose": "快速验证 Pi 消息读取、Provider 会话绑定和 session discovery 没有退化，并写入 test-results/18-project-domain-qa/server-smoke.log。",
+      "assertions": [
+        "Pi session messages endpoint 仍能读取真实 provider 会话",
+        "Provider session change 和 session discovery smoke 保持通过",
+        "命令输出必须写入 evidence: server-smoke-log"
+      ],
+      "expected_initial_failure": "当前应通过；拆分后失败表示关键服务端业务回归。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "source-audit-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/18-project-domain-boundary/source-audit.json",
+      "purpose": "记录 project-domain-core 体量、suppression 和公共 facade 导出状态；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "module-ownership-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/18-project-domain-boundary/module-ownership.json",
+      "purpose": "记录 focused modules 是否仍从 project-domain-core.js 薄 re-export；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "manual-route-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/18-project-domain-business/manual-route.json",
+      "purpose": "记录手动 cN route 从 draft 到 finalize 的 routeIndex、providerSessionId 和会话列表状态。"
+    },
+    {
+      "id": "search-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/18-project-domain-business/search.json",
+      "purpose": "记录 searchChatHistory 对真实 Codex JSONL 唯一短语的命中结果。"
+    },
+    {
+      "id": "incremental-read-log",
+      "kind": "runtime_log",
+      "path": "test-results/18-project-domain-qa/session-incremental-read.log",
+      "purpose": "记录 Provider transcript 增量读取回归命令输出。"
+    },
+    {
+      "id": "project-list-runtime-log",
+      "kind": "runtime_log",
+      "path": "test-results/18-project-domain-qa/project-list-runtime.log",
+      "purpose": "记录 /api/projects 默认路径未等待搜索、删除或完整 transcript 深读。"
+    },
+    {
+      "id": "typecheck-log",
+      "kind": "runtime_log",
+      "path": "test-results/18-project-domain-qa/typecheck.log",
+      "purpose": "记录 pnpm run typecheck 输出。"
+    },
+    {
+      "id": "server-smoke-log",
+      "kind": "runtime_log",
+      "path": "test-results/18-project-domain-qa/server-smoke.log",
+      "purpose": "记录 pnpm run test:server:smoke 输出。"
+    }
+  ]
+}

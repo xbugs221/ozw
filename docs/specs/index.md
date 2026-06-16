@@ -22,8 +22,8 @@
 
 ## 聊天与会话
 
-- 规格：`chat-performance.md`、`chat-composer-runtime.md`、`chat-message-merge-core.md`、`codex-app-server-steer.md`、`codex-app-server-history.md`
-- 测试入口：`pnpm exec tsx --test tests/spec/chat-history-full-text-search.spec.ts`、`pnpm exec tsx --test tests/specs/codex-history-message-order.spec.ts`
+- 规格：`chat-performance.md`、`chat-composer-runtime.md`、`chat-session-identity.md`、`chat-message-merge-core.md`、`codex-app-server-steer.md`、`codex-app-server-history.md`
+- 测试入口：`pnpm exec tsx --test tests/specs/chat-session-identity.spec.ts`、`pnpm exec tsx --test tests/spec/chat-history-full-text-search.spec.ts`、`pnpm exec tsx --test tests/specs/codex-history-message-order.spec.ts`
 - 源码 owner：`frontend/`、`backend/`、`tests/spec/`
 
 ## Pi 输入与工具卡片

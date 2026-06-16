@@ -13,6 +13,47 @@ export type ProjectOverviewReadModelDependencies = {
 };
 
 /**
+ * 把 workflow 读模型中的内部会话统一提取成 provider 分组，供手动会话列表过滤。
+ */
+function collectWorkflowOwnedSessionIdsByProvider(workflows: LooseRecord[] = []): Record<string, Set<string>> {
+  const sessionIdsByProvider: Record<string, Set<string>> = {};
+  const addSession = (sessionId: unknown, provider: unknown = 'codex') => {
+    /**
+     * 兼容 summary refs、childSessions、runnerDiagnostics 等不同来源的内部会话记录。
+     */
+    const normalizedSessionId = String(sessionId || '').trim();
+    if (!normalizedSessionId) {
+      return;
+    }
+    const normalizedProvider = String(provider || '').trim() || 'codex';
+    if (!sessionIdsByProvider[normalizedProvider]) {
+      sessionIdsByProvider[normalizedProvider] = new Set<string>();
+    }
+    sessionIdsByProvider[normalizedProvider].add(normalizedSessionId);
+  };
+
+  for (const workflow of workflows) {
+    for (const ref of workflow.workflowOwnedSessionRefs || []) {
+      addSession(ref?.sessionId, ref?.provider);
+    }
+    for (const session of workflow.childSessions || []) {
+      addSession(session?.id || session?.sessionId, session?.provider);
+    }
+    for (const process of workflow.runnerProcesses || []) {
+      addSession(process?.sessionId || process?.session_id, process?.provider);
+    }
+    for (const session of workflow.runnerDiagnostics?.workflowOwnedSessions || []) {
+      addSession(session?.sessionId || session?.id, session?.provider);
+    }
+    for (const session of workflow.diagnostics?.workflowOwnedSessions || []) {
+      addSession(session?.sessionId || session?.id, session?.provider);
+    }
+  }
+
+  return sessionIdsByProvider;
+}
+
+/**
  * 构建首屏项目列表使用的轻量 summary，避免携带 Provider 会话与 workflow 明细。
  */
 export function summarizeProjectForList(project: LooseRecord = {}): LooseRecord {
@@ -47,20 +88,7 @@ export async function buildProjectOverviewReadModel(
     path: projectPath,
   }]);
   const workflowProject = projectsWithWorkflowMetadata[0] || {};
-  const workflowOwnedSessionIdsByProvider = (workflowProject.workflows || []).reduce((acc: Record<string, Set<string>>, workflow: LooseRecord) => {
-    for (const ref of workflow.workflowOwnedSessionRefs || []) {
-      const provider = String(ref?.provider || '').trim() || 'codex';
-      const sessionId = String(ref?.sessionId || '').trim();
-      if (!sessionId) {
-        continue;
-      }
-      if (!acc[provider]) {
-        acc[provider] = new Set<string>();
-      }
-      acc[provider].add(sessionId);
-    }
-    return acc;
-  }, {});
+  const workflowOwnedSessionIdsByProvider = collectWorkflowOwnedSessionIdsByProvider(workflowProject.workflows || []);
   const [codexSessions, piSessions] = await Promise.all([
     dependencies.getCodexSessions(projectPath, {
       limit: 10,

@@ -15,6 +15,21 @@ import {
 
 process.env.DATABASE_PATH = PLAYWRIGHT_FIXTURE_AUTH_DB;
 
+const PROJECT_INDEX_EVIDENCE_DIR = path.join(process.cwd(), 'test-results', 'project-index-db-backed');
+
+/**
+ * Persist browser-side evidence required by the project index acceptance gate.
+ */
+function writeProjectIndexEvidence(relativePath, content) {
+  /**
+   * PURPOSE: Store screenshots and network snapshots where the deterministic
+   * acceptance runner checks them.
+   */
+  const evidencePath = path.join(PROJECT_INDEX_EVIDENCE_DIR, relativePath);
+  fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+  fs.writeFileSync(evidencePath, content);
+}
+
 const [{ generateToken }, { userDb }] = await Promise.all([
   import('../../backend/middleware/auth.ts'),
   import('../../backend/database/db.ts'),
@@ -37,6 +52,35 @@ function createLocalAuthToken() {
 
 const AUTH_TOKEN = createLocalAuthToken();
 
+/**
+ * Fetch the overview read model that owns provider session details.
+ */
+async function fetchFixtureProjectOverview(page) {
+  return page.evaluate(async (fixtureProjectPath) => {
+    const token = window.localStorage.getItem('auth-token');
+    const projectsResponse = await fetch('/api/projects', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const projects = await projectsResponse.json();
+    const fixtureProject = Array.isArray(projects)
+      ? projects.find((item) => item.fullPath === fixtureProjectPath) || null
+      : null;
+    if (!fixtureProject) {
+      return { ok: false, status: projectsResponse.status, projectPaths: [], overview: null };
+    }
+    const overviewResponse = await fetch(
+      `/api/projects/${encodeURIComponent(fixtureProject.name)}/overview?projectPath=${encodeURIComponent(fixtureProject.fullPath)}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    );
+    return {
+      ok: projectsResponse.ok && overviewResponse.ok,
+      status: overviewResponse.status,
+      projectPaths: Array.isArray(projects) ? projects.map((item) => item.fullPath) : [],
+      overview: await overviewResponse.json(),
+    };
+  }, PLAYWRIGHT_FIXTURE_PROJECT_PATHS[0]);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((token) => {
     window.localStorage.setItem('auth-token', token);
@@ -52,28 +96,23 @@ test('local app loads with authenticated shell', async ({ page }) => {
 test('projects api exposes both fixture project roots', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  const payload = await page.evaluate(async (fixtureProjectPath) => {
-    const token = window.localStorage.getItem('auth-token');
-    const response = await fetch('/api/projects', {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    const data = await response.json();
-    return {
-      ok: response.ok,
-      status: response.status,
-      projectPaths: Array.isArray(data) ? data.map((item) => item.fullPath) : [],
-      fixtureProject: Array.isArray(data)
-        ? data.find((item) => item.fullPath === fixtureProjectPath) || null
-        : null,
-    };
-  }, PLAYWRIGHT_FIXTURE_PROJECT_PATHS[0]);
+  const payload = await fetchFixtureProjectOverview(page);
 
   expect(payload.ok).toBeTruthy();
   expect(payload.status).toBe(200);
   expect(payload.projectPaths).toContain(PLAYWRIGHT_FIXTURE_PROJECT_PATHS[0]);
   expect(payload.projectPaths).toContain(PLAYWRIGHT_FIXTURE_PROJECT_PATHS[1]);
-  expect(payload.fixtureProject?.codexSessions?.length || 0).toBeGreaterThan(0);
-  expect(payload.fixtureProject?.codexSessions?.every((session) => typeof session.summary === 'string')).toBe(true);
+  expect(payload.overview?.codexSessions?.length || 0).toBeGreaterThan(0);
+  expect(payload.overview?.codexSessions?.every((session) => typeof session.summary === 'string')).toBe(true);
+  writeProjectIndexEvidence('project-list-network.json', JSON.stringify({
+    evidence: 'network-project-list',
+    source: 'e2e-project-visibility',
+    status: payload.status,
+    ok: payload.ok,
+    projectCount: payload.projectPaths.length,
+    projectPaths: payload.projectPaths,
+    hasFixtureProjects: PLAYWRIGHT_FIXTURE_PROJECT_PATHS.every((projectPath) => payload.projectPaths.includes(projectPath)),
+  }, null, 2));
 });
 
 test('sidebar text shows both fixture labels', async ({ page }) => {
@@ -81,11 +120,18 @@ test('sidebar text shows both fixture labels', async ({ page }) => {
   await expect(page.locator('body')).not.toContainText('Loading...');
   await expect(page.locator('body')).toContainText('fixture-project');
   await expect(page.locator('body')).toContainText('.fixture-project');
+  await page.screenshot({
+    path: path.join(PROJECT_INDEX_EVIDENCE_DIR, '4001-project-list.png'),
+    fullPage: true,
+  });
 });
 
-test('worktree session route loads Codex history instead of empty state', async ({ page }) => {
-  await page.goto('/session/fixture-matx-worktree-session', { waitUntil: 'networkidle' });
-  await expect(page.locator('body')).toContainText('matx worktree fixture session');
+test('project overview session link loads Codex history instead of empty state', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /^fixture-project\b/i }).first().click();
+  await expect(page.locator('[data-testid="project-overview-manual-sessions"]')).toBeVisible();
+  await page.getByRole('button', { name: /fixture-project manu/ }).first().click();
+  await expect(page.locator('body')).toContainText('fixture-project manual-only session');
   await expect(page.locator('body')).not.toContainText('继续您的对话');
 });
 
@@ -94,8 +140,7 @@ test('mobile project selection opens session and workflow list in main content',
   await page.goto('/', { waitUntil: 'networkidle' });
   await expect(page.locator('body')).not.toContainText('Loading...');
 
-  await page.getByRole('button', { name: 'Open menu' }).click();
-  await page.getByText('fixture-project', { exact: true }).first().click();
+  await page.getByRole('button', { name: /^fixture-project\b/i }).first().click();
   await expect(page).toHaveURL(/\/workspace\//);
   await expect(page.locator('[data-testid="project-overview-manual-sessions"]').getByRole('heading', { name: '手动会话' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '自动工作流' })).toBeVisible();
@@ -106,6 +151,10 @@ test('mobile project selection opens session and workflow list in main content',
     scrollWidth: element.scrollWidth,
   }));
   expect(manualSessionPanelOverflow.scrollWidth).toBeLessThanOrEqual(manualSessionPanelOverflow.clientWidth + 1);
+  await page.screenshot({
+    path: path.join(PROJECT_INDEX_EVIDENCE_DIR, 'project-overview-mobile.png'),
+    fullPage: true,
+  });
 });
 
 test('manual session order stays pinned to creation time after an older session gets new messages', async ({ page }) => {

@@ -1,0 +1,100 @@
+{
+  "summary": "项目清单首屏改为 SQLite DB 读模型，默认数据库重命名为 ozw.db，并通过后台同步维护索引。",
+  "coverage": [
+    {
+      "spec": "需求：数据库命名迁移 / 场景：默认数据库路径使用 `ozw.db`",
+      "tests": ["contract-default-db-name"],
+      "evidence": ["runtime-log-4001"],
+      "risk": "不覆盖用户显式 DATABASE_PATH 指向网络盘时的性能。"
+    },
+    {
+      "spec": "需求：项目清单 DB 读模型 / 场景：`/api/projects` 不扫描 provider 历史目录",
+      "tests": ["contract-project-list-db-only"],
+      "evidence": ["network-project-list"],
+      "risk": "契约测试固定 project_index 最小字段，执行阶段可以增加字段但不能弱化 DB-only 读取约束。"
+    },
+    {
+      "spec": "需求：后台同步 / 场景：backfill 和 watcher 负责更新项目索引",
+      "tests": ["contract-project-list-db-only"],
+      "evidence": ["runtime-log-sync"],
+      "risk": "watcher 丢事件需要由启动 backfill 或手动 reindex 修复。"
+    },
+    {
+      "spec": "需求：兼容现有可见行为 / 场景：左侧项目清单继续显示真实项目且过滤临时目录",
+      "tests": ["e2e-project-visibility"],
+      "evidence": ["screenshot-project-list", "network-project-list"],
+      "risk": "只覆盖现有 Playwright fixture 和当前临时目录策略。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-default-db-name",
+      "source": "change_contract",
+      "path": "docs/changes/25-数据库化项目清单后台同步/tests/project-index-db-backed.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/25-数据库化项目清单后台同步/tests/project-index-db-backed.acceptance.test.ts",
+      "purpose": "证明默认数据库路径从 auth.db 迁移为 ozw.db。",
+      "assertions": [
+        "未设置 DATABASE_PATH 时，load-env 生成的默认数据库 basename 必须是 ozw.db",
+        "默认数据库必须位于用户 HOME 下的 .ozw 目录",
+        "QA 阶段必须在 test-results/project-index-db-backed/4001-runtime.log 记录 runtime-log-4001，包含实际数据库路径"
+      ],
+      "expected_initial_failure": "当前实现仍默认使用 auth.db。"
+    },
+    {
+      "id": "contract-project-list-db-only",
+      "source": "change_contract",
+      "path": "docs/changes/25-数据库化项目清单后台同步/tests/project-index-db-backed.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/25-数据库化项目清单后台同步/tests/project-index-db-backed.acceptance.test.ts",
+      "purpose": "证明默认项目清单从 SQLite project_index 返回项目且不扫描 provider 历史目录。",
+      "assertions": [
+        "临时 SQLite project_index 中的项目必须出现在 getProjects 轻量结果中",
+        "读取项目清单期间 .codex 和 .pi provider 目录扫描次数必须为 0",
+        "轻量结果不得包含 codexSessions 或 piSessions 重数组",
+        "QA 阶段必须在 test-results/project-index-db-backed/project-list-network.json 记录 network-project-list",
+        "QA 阶段必须在 test-results/project-index-db-backed/project-index-sync.log 记录 runtime-log-sync"
+      ],
+      "expected_initial_failure": "当前 getProjects 仍从配置和 provider transcript 扫描组合项目列表，不读取 project_index。"
+    },
+    {
+      "id": "e2e-project-visibility",
+      "source": "existing_regression",
+      "path": "tests/e2e/project-visibility.spec.ts",
+      "command": "pnpm exec playwright test tests/e2e/project-visibility.spec.ts",
+      "purpose": "证明用户打开首页时仍能看到真实项目并进入项目详情。",
+      "assertions": [
+        "项目 API 暴露 fixture 项目根",
+        "sidebar 显示 fixture 项目文案",
+        "项目 overview session link 能加载历史而不是空状态",
+        "QA 阶段必须在 test-results/project-index-db-backed/4001-project-list.png 记录 screenshot-project-list",
+        "QA 阶段必须在 test-results/project-index-db-backed/project-list-network.json 记录 network-project-list"
+      ],
+      "expected_initial_failure": "如果 DB-backed 改造遗漏 backfill 或项目索引同步，项目列表会缺失 fixture 项目。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "screenshot-project-list",
+      "kind": "screenshot",
+      "path": "test-results/project-index-db-backed/4001-project-list.png",
+      "purpose": "证明 4001 首页左侧项目清单显示真实项目且没有 ozw-pi-* 临时目录；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "network-project-list",
+      "kind": "network",
+      "path": "test-results/project-index-db-backed/project-list-network.json",
+      "purpose": "记录 /api/projects 响应字段、耗时和项目数量，证明首屏只返回轻量摘要。"
+    },
+    {
+      "id": "runtime-log-4001",
+      "kind": "runtime_log",
+      "path": "test-results/project-index-db-backed/4001-runtime.log",
+      "purpose": "记录服务启动时实际数据库路径，证明默认库名为 ozw.db。"
+    },
+    {
+      "id": "runtime-log-sync",
+      "kind": "runtime_log",
+      "path": "test-results/project-index-db-backed/project-index-sync.log",
+      "purpose": "记录后台 backfill 或 watcher 更新 project_index 的运行日志。"
+    }
+  ]
+}

@@ -110,11 +110,12 @@ test('manual session route numbering skips existing cN routes and binds finalize
     assert.equal(runtimeAfterFinalize?.providerSessionId, 'codex-real-gamma', 'finalize 后 c3 必须绑定真实 provider session id');
 
     const finalConfig = await loadProjectConfig(projectPath) as {
-      chat?: Record<string, { sessionId?: string }>;
+      chat?: Record<string, { providerSessionId?: string; sessionId?: string }>;
       manualSessionDrafts?: Record<string, { provider?: string }>;
       manualSessionRouteCounter?: number;
     };
-    assert.equal(finalConfig.chat?.['3']?.sessionId, 'codex-real-gamma', 'chat.3 必须指向真实 provider session');
+    assert.equal(finalConfig.chat?.['3']?.sessionId, firstDraft.id, 'chat.3 必须保留用户可见 cN route');
+    assert.equal(finalConfig.chat?.['3']?.providerSessionId, 'codex-real-gamma', 'chat.3 必须绑定真实 provider session');
     assert.equal(finalConfig.manualSessionDrafts?.c4?.provider, 'pi', '未 finalize 的第二个 draft 必须保留在 c4');
     assert.equal(finalConfig.manualSessionRouteCounter, 4, 'counter 必须推进到最新已分配 route index');
 

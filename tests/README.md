@@ -27,9 +27,11 @@
 - `pnpm run test:spec:node`：运行 `tests/spec/*.ts`。
 - `pnpm run test:spec:browser`：运行 `tests/spec/**/*.spec.ts`。
 - `pnpm run test:e2e`：运行 `tests/e2e/**/*.spec.ts`。
+- `pnpm run qa:test:timing:fast|smoke|full`：分别采集 fast、smoke、full 质量门耗时，输出到 `test-results/test-performance/<profile>.json`。
 - `pnpm run test:manual:codex-resume`：运行手动 Codex resume 回归。
 - `pnpm exec tsx --test tests/manual/node-history/*.test.ts`：按需审计旧 Node 历史回归，不进入默认测试入口。
 - `pnpm exec playwright test tests/manual/browser-history/*.spec.ts`：按需审计旧浏览器历史回归，不进入默认测试入口，也不作为默认门禁。
+  每个 `tests/manual/browser-history/*.spec.ts` 的标准处置状态记录在 `docs/testing/manual-history-inventory.md`。
 
 ## 新增规则
 

@@ -6,6 +6,8 @@ export {
   buildBatchContextMap,
   buildBatchReadModel,
   buildWorkflowReadModel,
+  buildWorkflowOverviewReadModel,
   listBatchReadModels,
   listWorkflowReadModels,
-} from './read-model/legacy-core.js';
+  listWorkflowOverviewReadModels,
+} from './read-model/builder-internals.js';

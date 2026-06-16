@@ -54,32 +54,30 @@ export default function ShellMobileKeyBar({
   }, []);
 
   /**
-   * Start the held Ctrl modifier and capture the pointer until it is released.
+   * Toggle Ctrl as a locked modifier so touch users can press a following key
+   * or software-keyboard character to form a terminal shortcut.
    *
    * @param {PointerEvent<HTMLButtonElement>} event
    */
-  const handleCtrlPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+  const handleCtrlPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     keepTerminalFocus(event);
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture is best-effort; normal pointer release still clears Ctrl.
-    }
-    onCtrlActiveChange(true);
-  }, [keepTerminalFocus, onCtrlActiveChange]);
+    onCtrlActiveChange(!ctrlActive);
+  }, [ctrlActive, keepTerminalFocus, onCtrlActiveChange]);
 
   /**
-   * Release the held Ctrl modifier when the long press ends.
+   * Let keyboard users toggle the virtual Ctrl key without producing a native
+   * button click that would blur the terminal textarea.
    *
-   * @param {PointerEvent<HTMLButtonElement>} event
+   * @param {KeyboardEvent<HTMLButtonElement>} event
    */
-  const handleCtrlPointerRelease = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    keepTerminalFocus(event);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+  const handleCtrlKeyboard = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
     }
-    onCtrlActiveChange(false);
-  }, [keepTerminalFocus, onCtrlActiveChange]);
+
+    event.preventDefault();
+    onCtrlActiveChange(!ctrlActive);
+  }, [ctrlActive, onCtrlActiveChange]);
 
   /**
    * Let keyboard users activate helper keys without producing a native button click.
@@ -111,10 +109,9 @@ export default function ShellMobileKeyBar({
         aria-label="Ctrl"
         aria-pressed={ctrlActive}
         data-testid="shell-mobile-key-ctrl"
-        onPointerDown={handleCtrlPointerDown}
-        onPointerUp={handleCtrlPointerRelease}
-        onPointerCancel={handleCtrlPointerRelease}
-        onLostPointerCapture={() => onCtrlActiveChange(false)}
+        onPointerDown={keepTerminalFocus}
+        onPointerUp={handleCtrlPointerUp}
+        onKeyDown={handleCtrlKeyboard}
         onContextMenu={(event) => event.preventDefault()}
       >
         Ctrl

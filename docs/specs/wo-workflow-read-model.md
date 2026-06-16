@@ -72,6 +72,24 @@
 - **并且** `legacy-core.js` 和 `builder-internals.js/.d.ts` 不得继续声明已迁出的 stage/session/artifact/DAG/summary 实现
 - **剩余风险**：源码边界不能单独证明所有历史 runner state 兼容，必须与后端 workflow 回归和浏览器 workflow detail 回归共同验证
 
+### 需求：工作流 stage/session/provider 推断必须使用统一 resolver
+
+#### 场景：provider、role 和 planner 规则集中在 read model resolver
+
+- **给定** workflow read model 需要从 `state.json.sessions`、runner process、DAG target 和 child session 中推断 provider、stage 和 planner 会话
+- **当** 后端构建状态摘要、DAG review target、child session route 和 project-list workflow-owned session refs
+- **那么** provider session key 解析、sessionId 到 provider 反查、subagent role 到 stage 映射、planner session fallback 必须由 `stage-session-resolver.ts` 承载
+- **并且** `status-summary.ts` 和 `dag-read-model.ts` 不得各自重新定义 `resolveSessionProviderFromState`
+- **并且** sessions-only、`pi:executor`、active review round 和 planner fallback 样例必须由规格测试覆盖
+- **并且** 源码审计必须在 `test-results/23-workflow-stage-session/source-audit.json` 产出可复核证据
+
+#### 场景：统一 resolver 不得破坏真实 workflow 行为
+
+- **给定** oz flow run 可能包含 DAG graph JSON、sparse `stages`、`dag_nodes`、provider-aware session key 和历史 `planning` fallback
+- **当** ozw 构建 workflow DAG、状态摘要和项目列表摘要
+- **那么** DAG target、sessions-only child session、Go runner state 和 TypeScript 类型检查必须保持兼容
+- **并且** read model 分层测试不得通过删除历史兼容断言来规避 provider/stage 规则
+
 ### 需求：ozw 正确展示 oz flow v1.3.0 合并后的计划/验收阶段
 
 #### 场景：v1.3.0 run 不再包含独立 acceptance stage

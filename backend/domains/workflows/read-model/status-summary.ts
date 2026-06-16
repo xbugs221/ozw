@@ -11,7 +11,9 @@ import {
   acceptedProviderFromSessionKey,
   inferSubagentRoleStage,
   isKnownProvider,
-} from './session-refs.js';
+  resolvePlannerSessionRef,
+  resolveSessionProviderFromState,
+} from './stage-session-resolver.js';
 import { pick, type WorkflowArtifactRef, type WorkflowJsonRecord, type WorkflowRunnerProcess, type WorkflowSessionRef, type WorkflowStageStatus, type WorkflowState } from './workflow-state-schema.js';
 import {
   LEGACY_STAGE_ORDER,
@@ -105,92 +107,6 @@ function parseRunnerStage(stage: unknown): { known: boolean; displayable: boolea
     return { known: true, displayable: true, order: fixIteration * 3 };
   }
   return { known: false, displayable: true, order: Number.MAX_SAFE_INTEGER };
-}
-
-/**
- * Resolve the planning session ref from oz flow state.sessions using the current
- * contract with legacy fallback for older runs.
- */
-function resolvePlannerSessionRef(
-  sessions: WorkflowJsonRecord,
-  workflowConfig: WorkflowJsonRecord | undefined,
-  childSessions: SessionRef[],
-  runId: unknown,
-): WorkflowJsonRecord | null {
-  if (!sessions || typeof sessions !== 'object') {
-    return null;
-  }
-
-  const planningStages = pick(workflowConfig, 'stages');
-  const planningTool = String(pick(pick(planningStages, 'planning'), 'tool') || 'codex').trim();
-  const knownProviders = ['codex', 'pi'];
-  const priorityKeys: string[] = [];
-
-  priorityKeys.push(`${planningTool}:planner`);
-  for (const provider of knownProviders) {
-    const key = `${provider}:planner`;
-    if (!priorityKeys.includes(key)) {
-      priorityKeys.push(key);
-    }
-  }
-  priorityKeys.push('planner');
-
-  priorityKeys.push(`${planningTool}:planning`);
-  for (const provider of knownProviders) {
-    const key = `${provider}:planning`;
-    if (!priorityKeys.includes(key)) {
-      priorityKeys.push(key);
-    }
-  }
-  priorityKeys.push('planning');
-
-  for (const key of priorityKeys) {
-    if (sessions[key]) {
-      const sessionId = String(sessions[key]).trim();
-      const parsed = acceptedProviderFromSessionKey(key);
-      if (!parsed.accepted) {
-        continue;
-      }
-      const provider = parsed.provider;
-      const session = (childSessions || []).find((entry) => entry.id === sessionId);
-      if (session) {
-        return {
-          sessionId,
-          provider,
-          role: 'planner',
-          stageKey: 'planning',
-          address: session.address,
-          routePath: session.routePath,
-        };
-      }
-
-      return {
-        sessionId,
-        provider,
-        role: 'planner',
-        stageKey: 'planning',
-        routePath: `/runs/${encodeURIComponent(String(runId || ''))}/sessions/by-id/${encodeURIComponent(sessionId)}`,
-      };
-    }
-  }
-
-  return null;
-}
-
-/**
- * Resolve a session provider by scanning state.sessions.
- */
-function resolveSessionProviderFromState(sessionId: unknown, sessions: WorkflowJsonRecord): string {
-  if (!sessionId) return 'codex';
-  for (const [key, value] of Object.entries(sessions || {})) {
-    if (String(value).trim() === String(sessionId).trim()) {
-      const parsed = acceptedProviderFromSessionKey(key);
-      if (parsed.accepted && parsed.provider) {
-        return parsed.provider;
-      }
-    }
-  }
-  return 'codex';
 }
 
 /**

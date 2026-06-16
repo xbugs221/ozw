@@ -6,7 +6,16 @@
 /**
  * 注册系统维护相关 HTTP route。
  */
-export function registerSystemRoutes(deps: any): void {
+export interface SystemRouteDeps {
+    app: any;
+    authenticateToken: any;
+    installMode: string;
+    PKG_ROOT: string;
+    os: any;
+    spawn: any;
+}
+
+export function registerSystemRoutes(deps: SystemRouteDeps): void {
     /**
      * PURPOSE: Preserve the existing update command behavior while moving the
      * business URL ownership out of server bootstrap.

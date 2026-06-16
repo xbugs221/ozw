@@ -220,15 +220,15 @@ export async function finalizeManualSessionRoute(
     }
     config.chat[draftRecord.routeIndex] = {
       ...draftRecord.record,
-      sessionId: actualSessionId,
+      sessionId: routeSessionId || draftSessionId,
       title: trimmedLabel || draftRecord.record.title,
       provider,
+      providerSessionId: actualSessionId,
       workflowId,
       stageKey,
       origin: workflowOwnedDraft ? deps.constants.sessionOriginWorkflow : deps.constants.sessionOriginManual,
     };
     delete config.chat[draftRecord.routeIndex].routeInitToken;
-    delete config.chat[draftRecord.routeIndex].providerSessionId;
     delete config.chat[draftRecord.routeIndex].routeCancelFlag;
     deps.writeManualSessionRouteCounter(config, resolvedProjectPath, routeIndexNumber);
     for (const [routeIdx, record] of Object.entries(config.chat || {})) {
@@ -236,6 +236,11 @@ export async function finalizeManualSessionRoute(
         delete config.chat[routeIdx];
       }
     }
+    config.chat[actualSessionId] = {
+      sessionId: actualSessionId,
+      provider,
+      origin: workflowOwnedDraft ? deps.constants.sessionOriginWorkflow : deps.constants.sessionOriginManual,
+    };
   }
 
   if (workflowOwnedDraft) {

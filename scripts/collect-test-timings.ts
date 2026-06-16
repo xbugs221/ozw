@@ -10,7 +10,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
-const DEFAULT_OUTPUT_PATH = 'test-results/test-performance/latest.json';
+const DEFAULT_PROFILE = 'default';
+const PROFILE_OUTPUT_DIR = 'test-results/test-performance';
 const DEFAULT_COMMANDS: TimingCommand[] = [
   {
     id: 'typecheck',
@@ -28,6 +29,29 @@ const DEFAULT_COMMANDS: TimingCommand[] = [
     args: ['run', 'test:server:smoke'],
   },
 ];
+const PROFILE_COMMANDS: Record<string, TimingCommand[]> = {
+  fast: [
+    {
+      id: 'test-fast',
+      command: 'pnpm',
+      args: ['run', 'test:fast'],
+    },
+  ],
+  smoke: [
+    {
+      id: 'test-smoke',
+      command: 'pnpm',
+      args: ['run', 'test:smoke'],
+    },
+  ],
+  full: [
+    {
+      id: 'test-full',
+      command: 'pnpm',
+      args: ['run', 'test:full'],
+    },
+  ],
+};
 
 type TimingCommand = {
   id: string;
@@ -47,6 +71,7 @@ type TimingResult = {
 
 type TimingReport = {
   generatedAt: string;
+  profile: string;
   outputPath: string;
   results: TimingResult[];
 };
@@ -55,8 +80,9 @@ type TimingReport = {
  * Run all configured commands and write the timing baseline to disk.
  */
 async function main(): Promise<void> {
-  const outputPath = process.env.CBW_TEST_TIMING_OUTPUT ?? DEFAULT_OUTPUT_PATH;
-  const commands = readConfiguredCommands();
+  const profile = readTimingProfile();
+  const outputPath = process.env.CBW_TEST_TIMING_OUTPUT ?? getProfileOutputPath(profile);
+  const commands = readConfiguredCommands(profile);
   const results: TimingResult[] = [];
 
   for (const command of commands) {
@@ -65,6 +91,7 @@ async function main(): Promise<void> {
 
   const report: TimingReport = {
     generatedAt: new Date().toISOString(),
+    profile,
     outputPath,
     results,
   };
@@ -84,9 +111,9 @@ async function main(): Promise<void> {
  * CBW_TEST_TIMING_COMMANDS is JSON with objects shaped like:
  * [{"id":"fast","command":"pnpm","args":["run","test:fast"]}]
  */
-function readConfiguredCommands(): TimingCommand[] {
+function readConfiguredCommands(profile: string): TimingCommand[] {
   const raw = process.env.CBW_TEST_TIMING_COMMANDS;
-  if (!raw) return DEFAULT_COMMANDS;
+  if (!raw) return PROFILE_COMMANDS[profile] ?? DEFAULT_COMMANDS;
 
   const parsed = JSON.parse(raw) as TimingCommand[];
   if (!Array.isArray(parsed) || parsed.length === 0) {
@@ -99,6 +126,26 @@ function readConfiguredCommands(): TimingCommand[] {
     }
   }
   return parsed;
+}
+
+/**
+ * Read the built-in timing profile requested by the caller.
+ */
+function readTimingProfile(): string {
+  const profile = process.env.CBW_TEST_TIMING_PROFILE?.trim() || DEFAULT_PROFILE;
+  if (profile !== DEFAULT_PROFILE && !PROFILE_COMMANDS[profile]) {
+    throw new Error(`CBW_TEST_TIMING_PROFILE must be one of: ${Object.keys(PROFILE_COMMANDS).join(', ')}`);
+  }
+  return profile;
+}
+
+/**
+ * Build the default report path for one profile.
+ *
+ * Profile runs write to test-results/test-performance/<profile>.json.
+ */
+function getProfileOutputPath(profile: string): string {
+  return path.join(PROFILE_OUTPUT_DIR, `${profile === DEFAULT_PROFILE ? 'latest' : profile}.json`);
 }
 
 /**

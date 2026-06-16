@@ -18,6 +18,7 @@ import {
   buildWorkflowDag,
   runWoStatus,
 } from './dag-read-model.js';
+import { normalizeWorkflowGraphWithWarnings } from './workflow-graph-schema.js';
 import {
   buildStageInspections,
   buildStageStatuses,
@@ -25,13 +26,7 @@ import {
   buildWorkflowRoleSummary,
   buildWorkflowStatusSummary,
 } from './status-summary.js';
-import { normalizeWorkflowStateWithWarnings, pick, type WorkflowState } from './workflow-state-schema.js';
-
-type AnyRecord = Record<string, any>;
-type WorkflowArtifact = AnyRecord;
-type WorkflowSessionRef = AnyRecord;
-type RunnerProcess = AnyRecord;
-type StageStatus = AnyRecord;
+import { normalizeWorkflowStateWithWarnings, pick, type WorkflowJsonRecord, type WorkflowSessionRef, type WorkflowState } from './workflow-state-schema.js';
 type BatchItem = {
   changeName?: string;
   batchIndex: number;
@@ -50,18 +45,18 @@ type BatchReadModel = {
   error?: string;
   displayId: string;
 };
-type BatchContextMap = Record<string, AnyRecord>;
+type BatchContextMap = Record<string, WorkflowJsonRecord>;
 type BatchReadModelInput = {
   projectPath: string;
   batchDirName: string;
-  state: AnyRecord;
+  state: WorkflowJsonRecord;
   statePath: string;
   stateStat: Stats;
 };
 type WorkflowReadModelInput = {
   projectPath: string;
   runDirName: string;
-  state: AnyRecord;
+  state: WorkflowJsonRecord;
   statePath: string;
   stateStat: Stats;
   batchContext?: BatchContextMap;
@@ -90,10 +85,6 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Convert arbitrary runner paths to project-relative slash paths.
- */
-/**
- * Map runner status words/**
  * Map runner status words to the Web workflow state vocabulary.
  */
 function mapRunState(status: unknown): string {
@@ -108,11 +99,6 @@ function mapRunState(status: unknown): string {
 }
 
 /**
- * Return the explicit stage from an oz flow process row, accepting current and
- * historical field spellings.
- */
-/**
- * Normalize oz flow batch run_ids/**
  * Normalize oz flow batch run_ids from the real map contract or legacy arrays.
  */
 function normalizeBatchRunIds(runIds: unknown, changes: string[]): string[] {
@@ -123,7 +109,7 @@ function normalizeBatchRunIds(runIds: unknown, changes: string[]): string[] {
     return [];
   }
   return changes
-    .map((changeName) => (runIds as AnyRecord)[changeName])
+    .map((changeName) => (runIds as WorkflowJsonRecord)[changeName])
     .filter((runId) => runId)
     .map(String);
 }
@@ -138,7 +124,7 @@ function pickBatchRunIdForChange(runIds: unknown, changes: string[], index: numb
   }
   if (runIds && typeof runIds === 'object') {
     const changeName = changes[index];
-    return (runIds as AnyRecord)[changeName] ? String((runIds as AnyRecord)[changeName]) : '';
+    return (runIds as WorkflowJsonRecord)[changeName] ? String((runIds as WorkflowJsonRecord)[changeName]) : '';
   }
   return '';
 }
@@ -192,17 +178,6 @@ function displayBatchCurrentIndex(currentIndex: number, total: number): number {
 }
 
 /**
- * Preserve oz flow state.sessions as provider-aware ids for frontend filtering.
- */
-/**
- * Group DAG review targets/**
- * Group DAG review targets by their owning workflow stage.
- */
-/**
- * Merge run-dir-scanned artifacts with path-based artifacts, deduplicating by label.
- */
-/**
- * Read and build a batch read model/**
  * Read and build a batch read model from a batch state.json file.
  */
 export async function buildBatchReadModel({
@@ -213,7 +188,7 @@ export async function buildBatchReadModel({
   const batchId = String(state?.batch_id || batchDirName || '').trim();
   const status = String(state?.status || '').trim();
   const changes = Array.isArray(state?.changes) ? state.changes.map(String) : [];
-  const currentIndex = Number.isInteger(state?.current_index) ? state.current_index : (changes.length > 0 ? changes.length - 1 : 0);
+  const currentIndex = Number.isInteger(state?.current_index) ? Number(state.current_index) : (changes.length > 0 ? changes.length - 1 : 0);
   const runIds = normalizeBatchRunIds(state?.run_ids, changes);
   const error = String(state?.error || '').trim();
   const total = Math.max(changes.length, runIds.length);
@@ -323,12 +298,12 @@ function mergeRuntimeStatusState(state: WorkflowState, statusState: unknown, war
     ...statusState,
     workflow_config: {
       ...(state?.workflow_config || {}),
-      ...((statusState as AnyRecord).workflow_config || {}),
+      ...((statusState as WorkflowJsonRecord).workflow_config || {}),
     },
-    paths: (statusState as AnyRecord).paths || state?.paths,
-    sessions: (statusState as AnyRecord).sessions || state?.sessions,
-    stages: (statusState as AnyRecord).stages || state?.stages,
-    dag_nodes: (statusState as AnyRecord).dag_nodes || state?.dag_nodes,
+    paths: (statusState as WorkflowJsonRecord).paths || state?.paths,
+    sessions: (statusState as WorkflowJsonRecord).sessions || state?.sessions,
+    stages: (statusState as WorkflowJsonRecord).stages || state?.stages,
+    dag_nodes: (statusState as WorkflowJsonRecord).dag_nodes || state?.dag_nodes,
   });
   warnings.push(...normalized.warnings.map((warning) => `Runtime status ${warning}`));
   return normalized.value;
@@ -344,7 +319,7 @@ export async function buildWorkflowReadModel({
   statePath,
   stateStat,
   batchContext,
-}: WorkflowReadModelInput): Promise<AnyRecord> {
+}: WorkflowReadModelInput): Promise<WorkflowJsonRecord> {
   const warnings: string[] = [];
   const normalizedState = normalizeWorkflowStateWithWarnings(state);
   let workflowState = normalizedState.value;
@@ -407,7 +382,7 @@ export async function buildWorkflowReadModel({
   });
   const stageInspections = buildStageInspections(workflowState, stageStatuses, childSessions, artifacts, runnerError, diagnostics, workflowDag);
 
-  const result: AnyRecord = {
+  const result: WorkflowJsonRecord = {
     id: runId,
     title: changeName || runId,
     objective: changeName || runId,
@@ -451,10 +426,104 @@ export async function buildWorkflowReadModel({
 }
 
 /**
+ * Build a project-overview workflow card from sealed state only.
+ */
+export async function buildWorkflowOverviewReadModel({
+  projectPath,
+  runDirName,
+  state,
+  statePath,
+  stateStat,
+  batchContext,
+}: WorkflowReadModelInput): Promise<WorkflowJsonRecord> {
+  /**
+   * PURPOSE: Keep the project homepage fast by avoiding oz CLI calls and
+   * artifact directory scans that are only needed after a user opens detail.
+   */
+  void statePath;
+  const warnings: string[] = [];
+  const normalizedState = normalizeWorkflowStateWithWarnings(state);
+  const workflowState = normalizedState.value;
+  warnings.push(...normalizedState.warnings);
+  const runId = String(pick(workflowState, 'run_id') || runDirName || '').trim();
+  const changeName = String(pick(workflowState, 'change_name') || '').trim();
+  const rawStatus = String(pick(workflowState, 'status') || '').trim();
+  const rawStage = String(pick(workflowState, 'stage') || '').trim();
+  const updatedAt = String(pick(workflowState, 'updated_at') || stateStat?.mtime?.toISOString?.() || runDirName || '').trim();
+  const stageStatuses = buildStageStatuses(workflowState, rawStage, rawStatus, warnings);
+  const runnerProcesses = buildRunnerProcesses(workflowState, stageStatuses, new Map(), warnings);
+  const childSessions = buildWorkflowChildSessions(runId, runnerProcesses, warnings, stageStatuses, workflowState) as WorkflowSessionRef[];
+  const workflowRoleSummary = buildWorkflowRoleSummary(workflowState, childSessions);
+  const workflowDag = buildWorkflowOverviewDag(workflowState, warnings);
+  const workflowOwnedSessionRefs = buildWorkflowOwnedSessions(workflowState, workflowDag);
+  const runnerError = String(pick(workflowState, 'error') || '').trim();
+
+  const result: WorkflowJsonRecord = {
+    id: runId,
+    title: changeName || runId,
+    objective: changeName || runId,
+    openspecChangeName: changeName,
+    openspecChangeDetected: Boolean(changeName),
+    adoptsExistingOpenSpec: Boolean(changeName),
+    runner: 'go',
+    runnerProvider: 'codex',
+    runId,
+    runnerError,
+    failureReason: runnerError || undefined,
+    stage: rawStage || 'execution',
+    runState: mapRunState(rawStatus),
+    updatedAt,
+    stageStatuses,
+    artifacts: [],
+    childSessions,
+    runnerProcesses,
+    workflowRoleSummary,
+    stageInspections: [],
+    workflowDag,
+    workflowOwnedSessionRefs,
+    hasUnreadActivity: workflowState.hasUnreadActivity === true || mapRunState(rawStatus) === 'running',
+  };
+
+  if (batchContext?.[runId]) {
+    Object.assign(result, batchContext[runId]);
+  }
+
+  return result;
+}
+
+/**
+ * Build the inline DAG subset needed to identify workflow-owned sessions.
+ */
+function buildWorkflowOverviewDag(state: WorkflowState, warnings: string[]): WorkflowJsonRecord {
+  /**
+   * PURPOSE: Preserve state-embedded graph review targets without shelling out
+   * to `oz flow graph` on the overview request path.
+   */
+  const inlineGraph = pick(state, 'workflow_dag');
+  const source = {
+    command: 'state workflow_dag',
+    format: 'state workflow_dag json',
+    available: Boolean(inlineGraph && typeof inlineGraph === 'object'),
+  };
+  if (!inlineGraph || typeof inlineGraph !== 'object') {
+    return { source, nodes: [], edges: [], artifacts: [], gates: [] };
+  }
+  const normalizedGraph = normalizeWorkflowGraphWithWarnings(inlineGraph);
+  warnings.push(...normalizedGraph.warnings);
+  return {
+    source,
+    nodes: normalizedGraph.value.nodes,
+    edges: normalizedGraph.value.edges,
+    artifacts: normalizedGraph.value.artifacts,
+    gates: normalizedGraph.value.gates,
+  };
+}
+
+/**
  * Discover all oz flow state files and convert valid ones without one bad run
  * preventing other runs from rendering.
  */
-export async function listWorkflowReadModels(projectPath: string): Promise<AnyRecord[]> {
+export async function listWorkflowReadModels(projectPath: string): Promise<WorkflowJsonRecord[]> {
   if (!projectPath) {
     return [];
   }
@@ -480,7 +549,7 @@ export async function listWorkflowReadModels(projectPath: string): Promise<AnyRe
     throw error;
   }
 
-  const workflows: AnyRecord[] = [];
+  const workflows: WorkflowJsonRecord[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) {
       continue;
@@ -533,7 +602,88 @@ export async function listWorkflowReadModels(projectPath: string): Promise<AnyRe
   }
 
   return workflows.sort((left, right) => {
-    const timeDelta = Date.parse(right.updatedAt || '') - Date.parse(left.updatedAt || '');
+    const timeDelta = Date.parse(String(right.updatedAt || '')) - Date.parse(String(left.updatedAt || ''));
+    if (Number.isFinite(timeDelta) && timeDelta !== 0) {
+      return timeDelta;
+    }
+    return String(left.title || left.runId || left.id).localeCompare(String(right.title || right.runId || right.id));
+  });
+}
+
+/**
+ * Discover workflow card summaries for the project overview.
+ */
+export async function listWorkflowOverviewReadModels(projectPath: string): Promise<WorkflowJsonRecord[]> {
+  /**
+   * PURPOSE: Serve project homepage workflow cards from local state files only,
+   * leaving oz status/graph and artifact expansion to detail endpoints.
+   */
+  if (!projectPath) {
+    return [];
+  }
+
+  let batchContext: BatchContextMap;
+  try {
+    const batches = await listBatchReadModels(projectPath);
+    batchContext = buildBatchContextMap(batches);
+  } catch (error) {
+    console.error(`Failed to load batch context for ${projectPath}:`, errorMessage(error));
+    batchContext = {};
+  }
+
+  const runsRoot = resolveFlowRunsRoot(projectPath);
+  let entries: Dirent[] = [];
+  try {
+    entries = await fs.readdir(runsRoot, { withFileTypes: true });
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  const workflows: WorkflowJsonRecord[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const statePath = path.join(runsRoot, entry.name, 'state.json');
+    try {
+      const stateStat = await fs.stat(statePath);
+      const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
+      workflows.push(await buildWorkflowOverviewReadModel({
+        projectPath,
+        runDirName: entry.name,
+        state,
+        statePath,
+        stateStat,
+        batchContext,
+      }));
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') {
+        workflows.push({
+          id: entry.name,
+          title: entry.name,
+          objective: entry.name,
+          runner: 'go',
+          runnerProvider: 'codex',
+          runId: entry.name,
+          runnerError: `Unreadable runner state: ${errorMessage(error)}`,
+          stage: 'unknown',
+          runState: 'blocked',
+          updatedAt: entry.name,
+          stageStatuses: [],
+          artifacts: [],
+          childSessions: [],
+          runnerProcesses: [],
+          workflowOwnedSessionRefs: [],
+        });
+      }
+    }
+  }
+
+  return workflows.sort((left, right) => {
+    const timeDelta = Date.parse(String(right.updatedAt || '')) - Date.parse(String(left.updatedAt || ''));
     if (Number.isFinite(timeDelta) && timeDelta !== 0) {
       return timeDelta;
     }

@@ -27,7 +27,7 @@ const c = {
 const API_KEY_PREFIX_LENGTH = 8;
 
 // Use DATABASE_PATH environment variable if set, otherwise use default location
-const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, 'auth.db');
+const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, 'ozw.db');
 const INIT_SQL_PATH = path.join(__dirname, 'init.sql');
 const DATABASE_PATH_DEFAULTED_BY_LOAD_ENV = process.env.OZW_DATABASE_PATH_DEFAULTED === 'true';
 
@@ -46,15 +46,17 @@ if (process.env.DATABASE_PATH) {
   }
 }
 
-// As part of 1.19.2 we are introducing a new location for auth.db. The below handles existing moving legacy database from install directory to new location
-const LEGACY_DB_PATH = path.join(__dirname, 'auth.db');
-if (DATABASE_PATH_DEFAULTED_BY_LOAD_ENV && DB_PATH !== LEGACY_DB_PATH && !fs.existsSync(DB_PATH) && fs.existsSync(LEGACY_DB_PATH)) {
+// Move default installs from the legacy auth.db name/location to ozw.db.
+const LEGACY_INSTALL_DB_PATH = path.join(__dirname, 'auth.db');
+const LEGACY_HOME_DB_PATH = path.join(path.dirname(DB_PATH), 'auth.db');
+const legacyDbPath = fs.existsSync(LEGACY_HOME_DB_PATH) ? LEGACY_HOME_DB_PATH : LEGACY_INSTALL_DB_PATH;
+if (DATABASE_PATH_DEFAULTED_BY_LOAD_ENV && DB_PATH !== legacyDbPath && !fs.existsSync(DB_PATH) && fs.existsSync(legacyDbPath)) {
   try {
-    fs.copyFileSync(LEGACY_DB_PATH, DB_PATH);
-    console.log(`[MIGRATION] Copied database from ${LEGACY_DB_PATH} to ${DB_PATH}`);
+    fs.copyFileSync(legacyDbPath, DB_PATH);
+    console.log(`[MIGRATION] Copied database from ${legacyDbPath} to ${DB_PATH}`);
     for (const suffix of ['-wal', '-shm']) {
-      if (fs.existsSync(LEGACY_DB_PATH + suffix)) {
-        fs.copyFileSync(LEGACY_DB_PATH + suffix, DB_PATH + suffix);
+      if (fs.existsSync(legacyDbPath + suffix)) {
+        fs.copyFileSync(legacyDbPath + suffix, DB_PATH + suffix);
       }
     }
   } catch (err) {

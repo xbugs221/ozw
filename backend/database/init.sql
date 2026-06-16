@@ -80,3 +80,24 @@ CREATE INDEX IF NOT EXISTS idx_provider_session_project_recent
     ON provider_session_index(provider, normalized_project_path, last_activity DESC);
 CREATE INDEX IF NOT EXISTS idx_provider_session_file
     ON provider_session_index(provider, file_path);
+
+-- Project sidebar read model for fast DB-backed /api/projects.
+CREATE TABLE IF NOT EXISTS project_index (
+    project_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    project_path TEXT NOT NULL,
+    normalized_project_path TEXT NOT NULL,
+    route_path TEXT NOT NULL,
+    source TEXT NOT NULL,
+    visible INTEGER NOT NULL DEFAULT 1,
+    visibility_reason TEXT,
+    last_activity TEXT,
+    indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    sync_state TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_index_visible_recent
+    ON project_index(visible, last_activity DESC, indexed_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_index_normalized_path
+    ON project_index(normalized_project_path);

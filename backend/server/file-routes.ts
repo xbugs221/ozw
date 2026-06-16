@@ -6,6 +6,29 @@
 const SKIPPED_TREE_ENTRIES = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
 type LooseRecord = Record<string, any>;
 
+export interface FileRouteDeps {
+    app: any;
+    authenticateToken: any;
+    path: any;
+    fs: any;
+    fsPromises: any;
+    WORKSPACES_ROOT: string;
+    validateWorkspacePath: any;
+    resolveProjectRootWithHint: any;
+    resolveReadableProjectPath: any;
+    resolveProjectPath: any;
+    buildMutationResponse: any;
+    joinProjectChildPath: any;
+    sanitizeEntryName: any;
+    sanitizeUploadRelativePath: any;
+    createDirectoryArchive: any;
+    sendDownload: any;
+    withLoggedFallback: any;
+    classifyProjectFile: any;
+    TEXT_SAMPLE_BYTES: number;
+    mime: any;
+}
+
 /**
  * 判断目录树接口是否应跳过该条目。
  */
@@ -26,7 +49,7 @@ export function permissionBitsToRwx(perm: number): string {
 /**
  * 注册项目文件浏览、读写、上传和下载路由。
  */
-export function registerFileRoutes(deps: any): void {
+export function registerFileRoutes(deps: FileRouteDeps): void {
     const { app, authenticateToken, path, fs, fsPromises, WORKSPACES_ROOT, validateWorkspacePath, resolveProjectRootWithHint, resolveReadableProjectPath, resolveProjectPath, buildMutationResponse, joinProjectChildPath, sanitizeEntryName, sanitizeUploadRelativePath, createDirectoryArchive, sendDownload, withLoggedFallback, classifyProjectFile, TEXT_SAMPLE_BYTES, mime } = deps;
     const expandWorkspacePath = (inputPath: string) => {
         if (!inputPath) return inputPath;

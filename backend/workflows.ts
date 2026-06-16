@@ -12,6 +12,7 @@ import {
 } from './domains/workflows/go-runner-client.js';
 import {
   listBatchReadModels,
+  listWorkflowOverviewReadModels,
   listWorkflowReadModels,
 } from './domains/workflows/workflow-read-model.js';
 
@@ -76,6 +77,20 @@ export async function listProjectWorkflows(projectPath) {
     return [];
   }
   return listWorkflowReadModels(projectPath);
+}
+
+/**
+ * Read workflow summaries for project overview cards.
+ */
+export async function listProjectWorkflowOverviews(projectPath) {
+  /**
+   * PURPOSE: Keep project home loading independent from workflow detail-only
+   * oz CLI calls and artifact expansion.
+   */
+  if (!projectPath) {
+    return [];
+  }
+  return listWorkflowOverviewReadModels(projectPath);
 }
 
 /**
@@ -168,7 +183,7 @@ export async function attachWorkflowMetadata(projects) {
       const projectPath = project.fullPath || project.path || '';
       let workflows = [];
       try {
-        workflows = (await listProjectWorkflows(projectPath)).map(summarizeWorkflowForProjectList);
+        workflows = (await listProjectWorkflowOverviews(projectPath)).map(summarizeWorkflowForProjectList);
       } catch (error) {
         console.error(
           `Failed to load workflows for project ${project.name || projectPath}:`,

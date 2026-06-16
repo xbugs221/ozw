@@ -6,7 +6,20 @@
 /**
  * 注册后端诊断相关 HTTP 路由。
  */
-export function registerDiagnosticsRoutes(deps: any): void {
+export interface DiagnosticsRouteDeps {
+    app: any;
+    authenticateToken: any;
+    buildRuntimeReadinessReport: any;
+    checkCodexCredentials: any;
+    getCodexModelCatalog: any;
+    getPiModelCatalog: any;
+    resolveCodexCliPath: any;
+    fsPromises: any;
+    os: any;
+    path: any;
+}
+
+export function registerDiagnosticsRoutes(deps: DiagnosticsRouteDeps): void {
     const { app, authenticateToken, buildRuntimeReadinessReport, checkCodexCredentials, getCodexModelCatalog, getPiModelCatalog, resolveCodexCliPath, fsPromises, os, path } = deps;
 
     app.get('/api/diagnostics/runtime-dependencies', authenticateToken, async (_req: any, res: any) => {

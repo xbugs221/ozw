@@ -47,6 +47,15 @@
 - **且** 不需要执行 `pi session list --format json`
 - **并且** 不扫描 snapshot、tool-output 或 session_diff 目录
 
+### 场景：Provider 后台同步维护 project_index
+
+- **给定** provider JSONL 新增、修改或删除
+- **当** watcher 或启动 backfill 处理该变化
+- **则** 后台任务必须同步更新 `provider_session_index` 和 `project_index`
+- **且** 影响可见项目清单时必须发送 `project_list_invalidated`
+- **且** 直接位于系统临时目录下的 `ozw-pi-*` 项目不得进入可见项目清单
+- **测试文件**：`tests/specs/project-index-db-backed.spec.ts`
+
 ## 需求：多 Provider 会话概览必须保持身份稳定
 
 项目概览可以使用轻量 session 元数据，但不得改变现有路由和 UI state 契约。
