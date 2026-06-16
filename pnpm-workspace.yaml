@@ -1,7 +1,9 @@
 onlyBuiltDependencies:
+  - '@google/genai'
   - bcrypt
   - better-sqlite3
   - esbuild
   - node-pty
+  - protobufjs
   - sharp
   - sqlite3

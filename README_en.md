@@ -55,6 +55,8 @@ ozw turns your coding tasks into persistent, resumable Web sessions. When combin
 
    ```sh
    pnpm install
+   cp .env.example .env
+   # change JWT_SECRET there
    pnpm start
    ```
 

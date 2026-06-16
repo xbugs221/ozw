@@ -59,6 +59,8 @@
 
    ```sh
    pnpm install
+   cp .env.example .env
+   # 修改其中的 JWT_SECRET
    pnpm start
    ```
 
