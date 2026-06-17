@@ -19,7 +19,7 @@ let goRunnerWatcherDebounceTimer: NodeJS.Timeout | null = null;
  * 创建 provider 与 workflow watcher 控制器。
  */
 export function createProviderWatcherController(deps: any) {
-    const { PROVIDER_WATCH_PATHS, WATCHER_IGNORED_PATTERNS, clearProjectDirectoryCache, deleteProviderSessionIndexFile, getProviderSessionProjectPathForFile, countProviderSessionsForProject, indexProviderSessionFile, upsertProjectIndexFromProviderSession, hideProviderProjectIndex, resolveProviderSessionChange, broadcastSessionChanged, broadcastWorkflowChanged, broadcastProjectListInvalidated, attachWorkflowMetadata, getProjects, ensureGoRunnerWatchersForProjects } = deps;
+    const { PROVIDER_WATCH_PATHS, WATCHER_IGNORED_PATTERNS, clearProjectDirectoryCache, deleteProviderSessionIndexFile, getProviderSessionProjectPathForFile, countProviderSessionsForProject, indexProviderSessionFile, upsertProjectIndexFromProviderSession, hideProviderProjectIndex, resolveProviderSessionChange, broadcastSessionChanged, broadcastWorkflowChanged, broadcastProjectListInvalidated, attachWorkflowMetadata, syncProjectWorkflowOverviewIndex, getProjects, ensureGoRunnerWatchersForProjects } = deps;
     /**
      * Close all provider filesystem watchers and clear any pending debounce work.
      */
@@ -70,8 +70,15 @@ export function createProviderWatcherController(deps: any) {
             clearTimeout(goRunnerWatcherDebounceTimer);
         }
 
-        goRunnerWatcherDebounceTimer = setTimeout(() => {
+        goRunnerWatcherDebounceTimer = setTimeout(async () => {
             goRunnerWatcherDebounceTimer = null;
+            if (projectPath && typeof syncProjectWorkflowOverviewIndex === 'function') {
+                try {
+                    await syncProjectWorkflowOverviewIndex(projectPath);
+                } catch (error: any) {
+                    console.warn('[workflow-watch] Failed to sync workflow overview index:', error?.message || error);
+                }
+            }
             void broadcastWorkflowChanged({
                 changeType: eventType,
                 projectName,

@@ -19,6 +19,7 @@ import {
   isProjectEmpty,
   loadProjectConfig,
 } from '../../backend/projects.ts';
+import { backfillProjectIndex, reconcileProjectIndex } from '../../backend/domains/projects/project-index-sync-service.ts';
 
 let homeIsolationQueue = Promise.resolve();
 
@@ -42,6 +43,11 @@ async function withTemporaryHome(testBody) {
       process.env.PATH = originalPath || '';
       restoreEnvValue('HOME', originalHome);
       await fs.rm(tempHome, { recursive: true, force: true });
+      try {
+        await reconcileProjectIndex();
+      } catch {
+        // Cleanup is best-effort; tests assert the behavior before teardown.
+      }
     }
   };
 
@@ -135,6 +141,7 @@ test('provider-only Codex project deletes by real project path instead of synthe
     await fs.mkdir(projectPath, { recursive: true });
 
     const sessionPath = await createCodexSessionFile(tempHome, projectPath, 'provider-only-delete-session');
+    await backfillProjectIndex();
     const projectsBefore = await getProjects(null, { lightweightList: true });
     const providerOnlyProject = projectsBefore.find((project) => project.fullPath === projectPath);
 

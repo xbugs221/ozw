@@ -4,6 +4,7 @@
  * and OpenCode SQLite rows for project/session overview without deep history reads.
  */
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,7 +21,27 @@ import {
   parseCodexSessionHeader,
 } from '../../backend/projects.ts';
 import { resolveFlowRunsRoot } from '../../backend/domains/workflows/flow-runtime-paths.ts';
+import { reconcileProjectIndex } from '../../backend/domains/projects/project-index-sync-service.ts';
 import { getProjectLocalConfigPath } from '../../backend/project-config-store.ts';
+
+const REPO_ROOT = process.cwd();
+
+/**
+ * Run DB-bound project list checks in a fresh process after env isolation.
+ */
+function runTsxEval(source, env) {
+  /**
+   * PURPOSE: Avoid reusing the parent test worker's already-imported database
+   * connection when a case must validate SQLite-backed project list behavior.
+   */
+  const result = spawnSync('pnpm', ['exec', 'tsx', '-e', source], {
+    cwd: REPO_ROOT,
+    env,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result.stdout.trim();
+}
 
 /**
  * Run provider discovery with an isolated HOME so real user histories are not scanned.
@@ -48,6 +69,11 @@ async function withTemporaryHome(testBody) {
       delete process.env.XDG_STATE_HOME;
     }
     await fs.rm(homeDir, { recursive: true, force: true });
+    try {
+      await reconcileProjectIndex();
+    } catch {
+      // Cleanup is best-effort; individual tests assert their own behavior.
+    }
   }
 }
 
@@ -109,7 +135,7 @@ test('Codex old-format fixture falls back to deep parse for cwd discovery', asyn
   });
 });
 
-test('lightweight getProjects keeps provider-only projects beside manual notes project', async () => {
+test('lightweight getProjects keeps indexed provider-only projects beside manual notes project', async () => {
   await withTemporaryHome(async (homeDir) => {
     const notesPath = path.join(homeDir, 'work', 'notes');
     const providerProjectPath = path.join(homeDir, 'work', 'codex-provider-only');
@@ -131,18 +157,38 @@ test('lightweight getProjects keeps provider-only projects beside manual notes p
       }),
     ]);
 
-    const projects = await getProjects(null, { lightweightList: true });
-    const projectPaths = projects.map((project) => project.fullPath || project.path);
-    const providerProject = projects.find((project) => (project.fullPath || project.path) === providerProjectPath);
+    const output = runTsxEval(`
+      import { addProjectManually, getProjects } from './backend/projects.ts';
+      import { backfillProjectIndex } from './backend/domains/projects/project-index-sync-service.ts';
+      (async () => {
+        await addProjectManually(process.env.NOTES_PATH, 'notes');
+        await backfillProjectIndex();
+        const projects = await getProjects(null, { lightweightList: true });
+        console.log(JSON.stringify(projects.map((project) => ({
+          fullPath: project.fullPath || project.path,
+          hasCodexSessions: 'codexSessions' in project,
+          hasPiSessions: 'piSessions' in project,
+        }))));
+      })();
+    `, {
+      ...process.env,
+      HOME: homeDir,
+      XDG_STATE_HOME: path.join(homeDir, '.local', 'state'),
+      DATABASE_PATH: path.join(homeDir, '.ozw', 'ozw.db'),
+      NOTES_PATH: notesPath,
+    });
+    const projects = JSON.parse(output.split('\n').filter(Boolean).at(-1) || '[]');
+    const projectPaths = projects.map((project) => project.fullPath);
+    const providerProject = projects.find((project) => project.fullPath === providerProjectPath);
 
     assert.equal(projectPaths.includes(notesPath), true);
     assert.equal(projectPaths.includes(providerProjectPath), true);
-    assert.equal('codexSessions' in providerProject, false);
-    assert.equal('piSessions' in providerProject, false);
+    assert.equal(providerProject.hasCodexSessions, false);
+    assert.equal(providerProject.hasPiSessions, false);
   });
 });
 
-test('lightweight getProjects excludes ephemeral ozw-pi temporary projects', async () => {
+test('lightweight getProjects excludes indexed ephemeral ozw-pi temporary projects', async () => {
   await withTemporaryHome(async (homeDir) => {
     const tempPiProjectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-pi-send-'));
     const realProjectPath = path.join(homeDir, 'work', 'real-provider-project');
@@ -182,8 +228,21 @@ test('lightweight getProjects excludes ephemeral ozw-pi temporary projects', asy
     ]);
 
     try {
-      const projects = await getProjects(null, { lightweightList: true });
-      const projectPaths = projects.map((project) => project.fullPath || project.path);
+      const output = runTsxEval(`
+        import { getProjects } from './backend/projects.ts';
+        import { backfillProjectIndex } from './backend/domains/projects/project-index-sync-service.ts';
+        (async () => {
+          await backfillProjectIndex();
+          const projects = await getProjects(null, { lightweightList: true });
+          console.log(JSON.stringify(projects.map((project) => project.fullPath || project.path)));
+        })();
+      `, {
+        ...process.env,
+        HOME: homeDir,
+        XDG_STATE_HOME: path.join(homeDir, '.local', 'state'),
+        DATABASE_PATH: path.join(homeDir, '.ozw', 'ozw.db'),
+      });
+      const projectPaths = JSON.parse(output.split('\n').filter(Boolean).at(-1) || '[]');
 
       assert.equal(projectPaths.includes(tempPiProjectPath), false);
       assert.equal(projectPaths.includes(realProjectPath), true);

@@ -3,6 +3,7 @@
  * 并要求 manual/browser-history 历史测试资产有可复查处置清单。
  *
  * Sources: 2026-06-16-7-历史口径文档与测试资产收敛
+ * Sources: 2026-06-17-28-偿还历史测试与会话债务
  */
 import assert from 'node:assert/strict';
 import { readdir, readFile, stat } from 'node:fs/promises';
@@ -15,6 +16,7 @@ const EVIDENCE_CONTRACTS = [
   'test-asset-audit -> test-results/legacy-wording/test-asset-audit.json',
   'manual-history-inventory -> test-results/legacy-wording/manual-history-inventory.json',
 ];
+const ALLOWED_MANUAL_DISPOSITIONS = ['已迁移', '人工保留', '待删除', '待确认'] as const;
 
 async function readRepoFile(relativePath: string): Promise<string> {
   /**
@@ -119,7 +121,39 @@ test('manual browser-history assets have an explicit disposition inventory', asy
     assert.match(inventory, new RegExp(escaped), `${file} must appear in the inventory`);
     assert.match(inventory, new RegExp(`${escaped}[\\s\\S]{0,160}(迁移|保留|删除|待确认)`), `${file} must have a disposition`);
   }
+
+  const rows = parseManualInventoryRows(inventory);
+  const invalid = rows.filter((row) => !ALLOWED_MANUAL_DISPOSITIONS.includes(row.disposition as typeof ALLOWED_MANUAL_DISPOSITIONS[number]));
+  assert.deepEqual(invalid, [], `manual history disposition must use the durable enum: ${JSON.stringify(invalid)}`);
+
+  const gateCandidates = rows.filter((row) => row.disposition === '默认门禁候选');
+  assert.deepEqual(gateCandidates, [], 'manual browser-history must not leave default gate candidates after debt repayment');
+
+  const weakManualRows = rows.filter((row) => {
+    if (row.disposition !== '人工保留') return false;
+    return !/当前业务价值|业务价值/.test(row.reason) ||
+      !/前置|运行条件|环境/.test(row.reason) ||
+      !/证据|evidence|trace|截图|log|test-results/.test(row.reason);
+  });
+  assert.deepEqual(weakManualRows, [], `manual retention rows need value, prerequisite, and evidence: ${JSON.stringify(weakManualRows)}`);
 });
+
+function parseManualInventoryRows(source: string): Array<{ file: string; disposition: string; reason: string }> {
+  /**
+   * PURPOSE: 解析真实处置清单，确保人工保留不是只有笼统状态。
+   */
+  return source.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('| `tests/manual/browser-history/'))
+    .map((line) => {
+      const cells = line.split('|').map((cell) => cell.trim()).filter(Boolean);
+      return {
+        file: cells[0].replace(/^`|`$/g, ''),
+        disposition: cells[1] ?? '',
+        reason: cells[2] ?? '',
+      };
+    });
+}
 
 test('test documentation explains active spec/e2e/manual boundaries', async () => {
   /**

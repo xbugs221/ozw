@@ -74,7 +74,7 @@ export function summarizeProjectForList(project: LooseRecord = {}): LooseRecord 
 }
 
 /**
- * 组装单项目 overview API 返回体，保持现有会话过滤和 workflow 元数据合并行为。
+ * 组装单项目 overview API 返回体，会话与 workflow 均从 DB 读模型读取。
  */
 export async function buildProjectOverviewReadModel(
   project: LooseRecord,
@@ -94,14 +94,14 @@ export async function buildProjectOverviewReadModel(
       limit: 10,
       includeHidden: true,
       excludeWorkflowChildSessions: true,
-      preferRecentProjectScan: true,
+      skipProviderScan: true,
       workflowOwnedSessionIds: workflowOwnedSessionIdsByProvider.codex || new Set<string>(),
     }),
     dependencies.getPiSessions(projectPath, {
       limit: 10,
       includeHidden: true,
       excludeWorkflowChildSessions: true,
-      preferRecentProjectScan: true,
+      skipProviderScan: true,
       workflowOwnedSessionIds: workflowOwnedSessionIdsByProvider.pi || new Set<string>(),
     }),
   ]);

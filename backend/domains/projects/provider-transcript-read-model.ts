@@ -59,13 +59,16 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
   let model = '';
   let messageCount = 0;
   let firstUserMessage = '';
+  let lastUserMessage = '';
   let sourceSessionId = '';
+  let hasSessionMeta = false;
   for await (const record of readJsonlRecords(filePath)) {
     if (typeof record.timestamp === 'string') {
       firstTimestamp ||= record.timestamp;
       lastTimestamp = record.timestamp;
     }
     if (record.type === 'session_meta' && record.payload) {
+      hasSessionMeta = true;
       cwd = String(record.payload.cwd || cwd || '');
       model = String(record.payload.model || record.payload.model_provider || model || '');
       sourceSessionId ||= String(record.payload.id || '');
@@ -76,6 +79,7 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     if (record.type === 'event_msg' && record.payload?.type === 'user_message') {
       messageCount += 1;
       firstUserMessage ||= stringifyMessageContent(record.payload.message);
+      lastUserMessage = stringifyMessageContent(record.payload.message) || lastUserMessage;
     }
     if (record.type === 'response_item' && record.payload?.type === 'message') {
       messageCount += 1;
@@ -94,8 +98,9 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     createdAt: firstTimestamp || lastTimestamp || new Date().toISOString(),
     lastActivity: lastTimestamp || firstTimestamp || new Date().toISOString(),
     updated_at: lastTimestamp || firstTimestamp || new Date().toISOString(),
-    summary: firstUserMessage ? summarizeText(firstUserMessage) : 'Codex Session',
-    title: firstUserMessage ? summarizeText(firstUserMessage) : 'Codex Session',
+    summary: hasSessionMeta ? 'Codex Session' : (firstUserMessage ? summarizeText(firstUserMessage) : 'Codex Session'),
+    title: hasSessionMeta ? 'Codex Session' : (firstUserMessage ? summarizeText(firstUserMessage) : 'Codex Session'),
+    routeTitle: lastUserMessage ? summarizeText(lastUserMessage, 20, false) : 'Codex Session',
     messageCount,
     messageCountKnown: true,
     filePath,
@@ -168,9 +173,21 @@ export async function getCodexSessionMessages(
     return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextRawLineOffset: 0 };
   }
   const messages: LooseRecord[] = [];
+  const userEchoKeys = new Set<string>();
   const transcript = await readJsonlRecordsForMessages(filePath, afterLine);
   for (const { record, lineNumber } of transcript.records) {
-    messages.push(...codexRecordToMessages(record, String(sessionId), lineNumber));
+    for (const message of codexRecordToMessages(record, String(sessionId), lineNumber)) {
+      if (message.type === 'user') {
+        const content = String(message.message?.content || '').trim();
+        if (content && userEchoKeys.has(content)) {
+          continue;
+        }
+        if (content) {
+          userEchoKeys.add(content);
+        }
+      }
+      messages.push(message);
+    }
   }
   return paginateMessages(messages, limit, offset, transcript.totalLines);
 }
@@ -426,8 +443,101 @@ function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumbe
       provider: 'codex',
       timestamp: record.timestamp,
       messageKey: `codex:${sessionId}:line:${lineNumber}:msg:0`,
-      message: { role: 'assistant', content },
+      message: { role: 'assistant', content, phase: record.payload.phase },
     }] : [];
+  }
+  if (record.type === 'response_item' && record.payload?.type === 'message' && record.payload?.role === 'user') {
+    const content = stringifyMessageContent(record.payload.content);
+    return content ? [{
+      type: 'user',
+      provider: 'codex',
+      timestamp: record.timestamp,
+      messageKey: `codex:${sessionId}:line:${lineNumber}:msg:0`,
+      message: { role: 'user', content },
+    }] : [];
+  }
+  if (record.type === 'response_item' && record.payload?.type === 'update' && record.payload?.update?.type === 'functionCall') {
+    const update = record.payload.update;
+    const callId = String(update.id || update.call_id || update.callId || '');
+    return [{
+      type: 'tool_use',
+      provider: 'codex',
+      timestamp: record.timestamp,
+      messageKey: `codex:${sessionId}:line:${lineNumber}:tool:${callId || 'call'}`,
+      toolName: String(update.name || 'UnknownTool'),
+      toolInput: update.arguments ?? update.input ?? '',
+      toolCallId: callId || undefined,
+      status: update.status,
+    }];
+  }
+  if (record.type === 'response_item' && record.payload?.type === 'command_execution') {
+    const callId = String(record.payload.id || record.payload.call_id || '');
+    return [
+      {
+        type: 'tool_use',
+        provider: 'codex',
+        timestamp: record.timestamp,
+        messageKey: `codex:${sessionId}:line:${lineNumber}:tool:${callId || 'command'}`,
+        toolName: String(record.payload.command || record.payload.name || 'Command'),
+        toolInput: record.payload.arguments ?? record.payload.input ?? '',
+        toolCallId: callId || undefined,
+        status: record.payload.status,
+      },
+      {
+        type: 'tool_result',
+        provider: 'codex',
+        timestamp: record.timestamp,
+        messageKey: `codex:${sessionId}:line:${lineNumber}:tool-result:${callId || 'command'}`,
+        toolCallId: callId || undefined,
+        output: stringifyMessageContent(record.payload.output ?? record.payload.result),
+        exitCode: record.payload.exitCode,
+      },
+    ];
+  }
+  if (record.type === 'response_item' && record.payload?.type === 'file_change') {
+    const callId = String(record.payload.id || '');
+    return [
+      {
+        type: 'tool_use',
+        provider: 'codex',
+        timestamp: record.timestamp,
+        messageKey: `codex:${sessionId}:line:${lineNumber}:tool:${callId || 'file-change'}`,
+        toolName: 'FileChanges',
+        toolInput: { changes: [{ path: record.payload.path, changeType: record.payload.changeType }] },
+        toolCallId: callId || undefined,
+      },
+      {
+        type: 'tool_result',
+        provider: 'codex',
+        timestamp: record.timestamp,
+        messageKey: `codex:${sessionId}:line:${lineNumber}:tool-result:${callId || 'file-change'}`,
+        toolCallId: callId || undefined,
+        output: stringifyMessageContent(record.payload.summary || record.payload.path || ''),
+      },
+    ];
+  }
+  if (record.type === 'response_item' && record.payload?.type === 'mcp_tool_call') {
+    const callId = String(record.payload.id || '');
+    const toolName = `${String(record.payload.server || 'mcp')}:${String(record.payload.name || 'tool')}`;
+    return [
+      {
+        type: 'tool_use',
+        provider: 'codex',
+        timestamp: record.timestamp,
+        messageKey: `codex:${sessionId}:line:${lineNumber}:tool:${callId || 'mcp'}`,
+        toolName,
+        toolInput: record.payload.arguments ?? record.payload.input ?? '',
+        toolCallId: callId || undefined,
+      },
+      {
+        type: 'tool_result',
+        provider: 'codex',
+        timestamp: record.timestamp,
+        messageKey: `codex:${sessionId}:line:${lineNumber}:tool-result:${callId || 'mcp'}`,
+        toolCallId: callId || undefined,
+        output: stringifyMessageContent(record.payload.result ?? record.payload.output),
+      },
+    ];
   }
   if (record.type === 'response_item' && record.payload?.type === 'function_call') {
     const callId = String(record.payload.call_id || record.payload.callId || record.payload.id || '');
@@ -567,12 +677,20 @@ function piAssistantPartsToMessages(content: unknown[], record: LooseRecord, ses
 function paginateMessages(messages: LooseRecord[], limit: unknown, offset: unknown, total: number = messages.length): LooseRecord {
   const normalizedOffset = Math.max(0, Number(offset) || 0);
   const normalizedLimit = limit === null || limit === undefined ? null : Math.max(0, Number(limit) || 0);
-  const offsetMessages = messages.filter((message) => getMessageRawLineNumber(message) > normalizedOffset);
+  const rawWindowStart = normalizedLimit === null
+    ? 0
+    : Math.max(0, total - normalizedOffset - normalizedLimit);
+  const rawWindowEnd = normalizedLimit === null
+    ? total
+    : Math.max(0, total - normalizedOffset);
+  const offsetMessages = messages.filter((message) => {
+    const rawLine = getMessageRawLineNumber(message);
+    return rawLine > rawWindowStart && rawLine <= rawWindowEnd;
+  });
   const page = normalizedLimit === null
     ? offsetMessages
-    : offsetMessages.slice(0, normalizedLimit);
-  const lastPageLine = page.reduce((maxLine, message) => Math.max(maxLine, getMessageRawLineNumber(message)), normalizedOffset);
-  const nextRawLineOffset = page.length > 0 ? lastPageLine : normalizedOffset;
+    : offsetMessages;
+  const nextRawLineOffset = normalizedLimit === null ? total : Math.min(total, normalizedOffset + normalizedLimit);
   return {
     messages: page,
     total,
@@ -600,12 +718,24 @@ function stringifyMessageContent(content: unknown): string {
   }
   if (Array.isArray(content)) {
     return content
-      .map((part) => typeof part === 'string' ? part : String(part?.text || part?.content || part?.thinking || ''))
+      .map((part) => {
+        if (typeof part === 'string') {
+          return part;
+        }
+        if (!part || typeof part !== 'object') {
+          return '';
+        }
+        const record = part as LooseRecord;
+        return String(record.text || record.content || record.thinking || record.message || '');
+      })
       .filter(Boolean)
       .join('\n');
   }
   if (content && typeof content === 'object') {
     const record = content as LooseRecord;
+    if (Array.isArray(record.content)) {
+      return stringifyMessageContent(record.content);
+    }
     return String(record.text || record.content || record.message || '');
   }
   return '';

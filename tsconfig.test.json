@@ -18,6 +18,7 @@
     "types": ["node", "vite/client"]
   },
   "include": [
+    "frontend/types/**/*.d.ts",
     "tests/**/*.ts",
     "tests/**/*.spec.ts"
   ]

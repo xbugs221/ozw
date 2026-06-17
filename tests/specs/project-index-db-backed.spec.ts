@@ -54,7 +54,7 @@ test('默认数据库路径和 CLI status 使用 ~/.ozw/ozw.db', async () => {
    * 或安装目录下的 server/database/ozw.db。
    */
   await withTemporaryHome(async (homeDir) => {
-    const env = { ...process.env, HOME: homeDir };
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir };
     delete env.DATABASE_PATH;
     delete env.OZW_DATABASE_PATH_DEFAULTED;
 
@@ -138,14 +138,15 @@ test('轻量项目清单只从 project_index 返回有界摘要', async () => {
     process.env.HOME = homeDir;
     process.env.DATABASE_PATH = dbPath;
     process.env.OZW_DATABASE_PATH_DEFAULTED = '';
-    fs.readdir = async (...args: Parameters<typeof fs.readdir>) => {
+    const scanGuardReaddir = async (...args: Parameters<typeof fs.readdir>) => {
       const target = String(args[0] || '');
       if (target.includes(`${path.sep}.codex`) || target.includes(`${path.sep}.pi`)) {
         providerDirectoryScanCount += 1;
-        return [];
+        return [] as Awaited<ReturnType<typeof fs.readdir>>;
       }
       return originalReaddir(...args);
     };
+    fs.readdir = scanGuardReaddir as typeof fs.readdir;
 
     try {
       const projectsModule = await import('../../backend/projects.ts');
@@ -187,9 +188,12 @@ test('项目索引同步保留可见性、unlink、rename 和 delete 语义', as
   await withTemporaryHome(async (homeDir) => {
     const dbPath = path.join(homeDir, '.ozw', 'ozw.db');
     const manualProjectPath = path.join(homeDir, 'work', 'rename-delete-project');
+    const staleManualProjectPath = path.join(homeDir, 'work', 'claude-demo');
+    const staleProviderProjectPath = path.join(homeDir, 'missing', 'conf-v2-project');
     const tempProviderPath = path.join(os.tmpdir(), `ozw-pi-spec-${Date.now()}`, 'repo');
     await fs.mkdir(path.dirname(dbPath), { recursive: true });
     await fs.mkdir(manualProjectPath, { recursive: true });
+    await fs.mkdir(staleManualProjectPath, { recursive: true });
     await fs.mkdir(tempProviderPath, { recursive: true });
 
     try {
@@ -197,7 +201,7 @@ test('项目索引同步保留可见性、unlink、rename 和 delete 语义', as
         import { addProjectManually, getProjects } from './backend/projects.ts';
         import { renameProject } from './backend/domains/projects/project-rename-service.ts';
         import { deleteProject } from './backend/domains/projects/project-session-delete-service.ts';
-        import { upsertProjectIndexFromProviderSession } from './backend/domains/projects/project-index-sync-service.ts';
+        import { reconcileProjectIndex, upsertProjectIndexFromProviderSession } from './backend/domains/projects/project-index-sync-service.ts';
         import { projectIndexDb } from './backend/project-index-store.ts';
         import { db } from './backend/database/db.ts';
         (async () => {
@@ -207,12 +211,41 @@ test('项目索引同步保留可见性、unlink、rename 和 delete 语义', as
           });
           const visibleAfterTempProvider = projectIndexDb.listVisible(db).map((project) => project.fullPath);
           const added = await addProjectManually(process.env.MANUAL_PROJECT_PATH, 'Original Name');
+          projectIndexDb.upsert(db, {
+            projectId: process.env.STALE_MANUAL_PROJECT_PATH,
+            name: 'claude-demo',
+            displayName: 'Claude Demo',
+            projectPath: process.env.STALE_MANUAL_PROJECT_PATH,
+            routePath: '/tmp/claude-demo',
+            source: 'manual',
+            visible: true,
+            syncState: 'ready',
+          });
+          projectIndexDb.upsert(db, {
+            projectId: process.env.STALE_PROVIDER_PROJECT_PATH,
+            name: 'conf-v2-project',
+            displayName: 'Conf V2 Project',
+            projectPath: process.env.STALE_PROVIDER_PROJECT_PATH,
+            routePath: '/tmp/conf-v2-project',
+            source: 'provider',
+            visible: true,
+            syncState: 'ready',
+          });
+          const reconcileResult = await reconcileProjectIndex();
+          const hiddenRows = db.prepare(\`
+            SELECT project_path, visibility_reason
+            FROM project_index
+            WHERE visible = 0 AND project_path IN (?, ?)
+            ORDER BY project_path
+          \`).all(process.env.STALE_MANUAL_PROJECT_PATH, process.env.STALE_PROVIDER_PROJECT_PATH);
           await renameProject(added.name, 'Renamed Name', process.env.MANUAL_PROJECT_PATH);
           const afterRename = await getProjects(null, { lightweightList: true });
           await deleteProject(added.name, true, process.env.MANUAL_PROJECT_PATH);
           const afterDelete = await getProjects(null, { lightweightList: true });
           console.log(JSON.stringify({
             visibleAfterTempProvider,
+            reconcileResult,
+            hiddenRows,
             afterRename: afterRename.map((project) => ({
               displayName: project.displayName,
               fullPath: project.fullPath,
@@ -228,11 +261,18 @@ test('项目索引同步保留可见性、unlink、rename 和 delete 语义', as
         HOME: homeDir,
         DATABASE_PATH: dbPath,
         MANUAL_PROJECT_PATH: manualProjectPath,
+        STALE_MANUAL_PROJECT_PATH: staleManualProjectPath,
+        STALE_PROVIDER_PROJECT_PATH: staleProviderProjectPath,
         TEMP_PROVIDER_PATH: tempProviderPath,
       });
 
       const result = JSON.parse(output.split('\n').filter(Boolean).at(-1) || '{}');
       assert.deepEqual(result.visibleAfterTempProvider, []);
+      assert.equal(result.reconcileResult.hiddenCount, 2);
+      assert.deepEqual(result.hiddenRows, [
+        { project_path: staleProviderProjectPath, visibility_reason: 'provider-path-missing' },
+        { project_path: staleManualProjectPath, visibility_reason: 'manual-not-in-config' },
+      ].sort((left, right) => left.project_path.localeCompare(right.project_path)));
       assert.equal(
         result.afterRename.some((project: Record<string, unknown>) => (
           project.fullPath === manualProjectPath && project.displayName === 'Renamed Name'
@@ -246,5 +286,103 @@ test('项目索引同步保留可见性、unlink、rename 和 delete 语义', as
     } finally {
       await fs.rm(path.dirname(tempProviderPath), { recursive: true, force: true });
     }
+  });
+});
+
+test('启动 backfill 同步写入 provider_session_index 和 project_index', async () => {
+  /**
+   * 业务场景：用户在 ozw 离线时直接用 Codex/Pi CLI 创建会话，
+   * 下次启动 backfill 必须让项目清单和项目首页会话列表都能从 DB 读模型恢复。
+   */
+  await withTemporaryHome(async (homeDir) => {
+    const dbPath = path.join(homeDir, '.ozw', 'ozw.db');
+    const projectPath = path.join(homeDir, 'work', 'offline-cli-project');
+    const codexSessionPath = path.join(
+      homeDir,
+      '.codex',
+      'sessions',
+      '2026',
+      '06',
+      '17',
+      'rollout-2026-06-17T03-00-00-codex-backfill-cli.jsonl',
+    );
+    const piSessionPath = path.join(homeDir, '.pi', 'agent', 'sessions', 'offline-cli', 'pi-backfill-cli.jsonl');
+
+    await fs.mkdir(projectPath, { recursive: true });
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    await fs.mkdir(path.dirname(codexSessionPath), { recursive: true });
+    await fs.mkdir(path.dirname(piSessionPath), { recursive: true });
+    await fs.writeFile(
+      codexSessionPath,
+      [
+        JSON.stringify({
+          type: 'session_meta',
+          timestamp: '2026-06-17T03:00:00.000Z',
+          payload: { id: 'source-codex-backfill-cli', cwd: projectPath, model: 'gpt-5-codex' },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-06-17T03:00:01.000Z',
+          payload: { type: 'user_message', message: 'Codex CLI session for startup backfill' },
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+    await fs.writeFile(
+      piSessionPath,
+      [
+        JSON.stringify({
+          type: 'session',
+          id: 'pi-backfill-cli',
+          timestamp: '2026-06-17T03:10:00.000Z',
+          cwd: projectPath,
+        }),
+        JSON.stringify({
+          type: 'message',
+          timestamp: '2026-06-17T03:10:01.000Z',
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'Pi CLI session for startup backfill' }],
+          },
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    const output = runTsxEval(`
+      (async () => {
+        await import('./backend/projects.ts');
+        const { backfillProjectIndex } = await import('./backend/domains/projects/project-index-sync-service.ts');
+        const { db } = await import('./backend/database/db.ts');
+        const result = await backfillProjectIndex();
+        const providerRows = db.prepare(\`
+          SELECT provider, session_id
+          FROM provider_session_index
+          WHERE normalized_project_path = ?
+          ORDER BY provider, session_id
+        \`).all(process.env.PROJECT_PATH);
+        const projectRows = db.prepare(\`
+          SELECT project_path
+          FROM project_index
+          WHERE normalized_project_path = ? AND visible = 1
+        \`).all(process.env.PROJECT_PATH);
+        console.log(JSON.stringify({ result, providerRows, projectRows }));
+      })();
+    `, {
+      ...process.env,
+      HOME: homeDir,
+      DATABASE_PATH: dbPath,
+      PROJECT_PATH: path.resolve(projectPath),
+    });
+
+    const result = JSON.parse(output.split('\n').filter(Boolean).at(-1) || '{}');
+    assert.deepEqual(result.providerRows, [
+      { provider: 'codex', session_id: 'codex-backfill-cli' },
+      { provider: 'pi', session_id: 'pi-backfill-cli' },
+    ]);
+    assert.deepEqual(result.projectRows, [
+      { project_path: path.resolve(projectPath) },
+    ]);
+    assert.equal(result.result.providerCount, 2);
   });
 });

@@ -37,7 +37,9 @@
 - **给定** `tests/manual/browser-history` 中存在历史 browser spec
 - **当** 运行历史资产规格测试
 - **则** 每个当前文件必须出现在 `docs/testing/manual-history-inventory.md`
-- **且** 每个文件必须有迁移、保留、删除或待确认状态
+- **且** 每个文件必须有 `已迁移`、`人工保留`、`待删除` 或 `待确认` 状态
+- **且** 人工保留项必须说明当前业务价值、运行前置条件和证据路径
+- **且** 执行完成后不得残留默认门禁候选
 - **且** `tests/README.md` 必须说明 manual/browser-history 不作为默认门禁
 - **测试文件**：`tests/specs/historical-provider-wording-assets.spec.ts`
 - **真实数据来源**：真实测试目录、README 和 inventory 文档

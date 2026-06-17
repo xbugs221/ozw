@@ -86,6 +86,8 @@
 - **当** ToolRenderer 查找工具配置
 - **则** 必须通过首字母大写化后进行大小写不敏感匹配
 - **且** getToolConfig 和 getToolCategory 均支持小写输入
+- **且** 默认 Vitest 回归必须覆盖 `Bash`/`bash` fallback、context-mode MCP 前缀归一、隐藏结果规则和 exec result 内容提取
+- **测试文件**：`tests/unit/chat-tool-runtime.test.ts`
 
 ### 场景：工具卡配置按业务 family 拆分
 

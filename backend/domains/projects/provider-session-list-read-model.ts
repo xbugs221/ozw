@@ -81,7 +81,10 @@ export function buildProviderSessionListReadModel(input: ProviderSessionListInpu
     if (!session?.id) {
       return false;
     }
-    if (!getBoundProviderSessionId(session) && session.origin === 'manual') {
+    if (session.origin === 'workflow' || session.workflowId || session.stageKey) {
+      return false;
+    }
+    if (input.provider === 'pi' && !getBoundProviderSessionId(session) && session.origin === 'manual') {
       return false;
     }
     if (!excludeWorkflowChildSessions) {

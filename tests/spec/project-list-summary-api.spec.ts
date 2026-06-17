@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { resolveFlowRunStatePath, resolveFlowRunsRoot } from '../../backend/domains/workflows/flow-runtime-paths.ts';
+import { resolveFlowRunStatePath } from '../../backend/domains/workflows/flow-runtime-paths.ts';
 import {
   authHeaders,
   authenticatePage,
@@ -17,80 +17,9 @@ import {
 import { ensurePlaywrightFixture } from '../e2e/helpers/playwright-fixture.ts';
 
 const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results', 'project-list-summary-api');
-const CONTRACT_SESSION_ID = 'spec-project-summary-codex-session';
-const CONTRACT_SESSION_TITLE = '首页轻量化合同-Codex会话';
-const CONTRACT_WORKFLOW_CHANGE = '首页轻量化合同工作流';
-const LIVE_REFRESH_RUN_ID = 'run-project-summary-live-refresh';
-const LIVE_REFRESH_WORKFLOW_CHANGE = '首页轻量化停留刷新工作流';
-
-/**
- * Return the isolated Playwright HOME that owns provider JSONL history.
- */
-function fixtureHomeDir() {
-  /**
-   * PURPOSE: Derive HOME from the fixture project path so the test uses the
-   * same provider-history root as the local Playwright server.
-   */
-  return path.dirname(path.dirname(PRIMARY_FIXTURE_PROJECT_PATH));
-}
-
-/**
- * Write one real Codex JSONL transcript for the project overview contract.
- */
-async function writeCodexSessionFixture() {
-  /**
-   * PURPOSE: Exercise the real Codex history discovery path instead of
-   * injecting fake project JSON into the API response.
-   */
-  const sessionDir = path.join(fixtureHomeDir(), '.codex', 'sessions', '2026', '06', '11');
-  const lines = [
-    {
-      type: 'session_meta',
-      timestamp: '2026-06-11T08:00:00.000Z',
-      payload: {
-        id: CONTRACT_SESSION_ID,
-        cwd: PRIMARY_FIXTURE_PROJECT_PATH,
-        model: 'gpt-5-codex',
-      },
-    },
-    {
-      type: 'event_msg',
-      timestamp: '2026-06-11T08:00:01.000Z',
-      payload: {
-        type: 'user_message',
-        message: CONTRACT_SESSION_TITLE,
-      },
-    },
-    {
-      type: 'response_item',
-      timestamp: '2026-06-11T08:00:02.000Z',
-      payload: {
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'output_text', text: '合同会话响应' }],
-      },
-    },
-  ];
-
-  await fs.mkdir(sessionDir, { recursive: true });
-  await fs.writeFile(
-    path.join(sessionDir, `${CONTRACT_SESSION_ID}.jsonl`),
-    `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`,
-    'utf8',
-  );
-}
-
-/**
- * Write one real wo state.json run for the overview workflow contract.
- */
-async function writeWorkflowFixture() {
-  /**
-   * PURPOSE: Make the overview endpoint prove it still loads workflow data,
-   * while the default project summary proves it no longer embeds that data.
-   */
-  await fs.rm(resolveFlowRunsRoot(PRIMARY_FIXTURE_PROJECT_PATH), { recursive: true, force: true });
-  await writeWorkflowState('run-project-summary-api', CONTRACT_WORKFLOW_CHANGE, 'running', 'execution', '2026-06-11T08:05:00.000Z');
-}
+const FIXTURE_SESSION_ID = 'fixture-project-manual-session';
+const FIXTURE_WORKFLOW_RUN_ID = 'run-fixture';
+const FIXTURE_WORKFLOW_TITLE = '登录升级';
 
 /**
  * Persist the workflow runner state used by overview and live refresh tests.
@@ -127,8 +56,6 @@ async function prepareProjectSummaryFixture() {
    */
   ensurePlaywrightFixture({ preserveAuthDatabase: true });
   await fs.mkdir(EVIDENCE_DIR, { recursive: true });
-  await writeCodexSessionFixture();
-  await writeWorkflowFixture();
 }
 
 /**
@@ -243,32 +170,24 @@ test('单项目 overview 按需返回最近会话和 workflow 概览', async ({ 
   expect(Array.isArray(overview.json?.codexSessions), 'overview 必须按需返回 Codex 最近会话').toBe(true);
   expect(Array.isArray(overview.json?.workflows), 'overview 必须按需返回 workflow 概览').toBe(true);
   expect(
-    overview.json.codexSessions.some((session) => session.id === CONTRACT_SESSION_ID),
-    'overview 必须包含写入的真实 Codex 合同会话记录',
+    overview.json.codexSessions.some((session) => session.id === FIXTURE_SESSION_ID),
+    'overview 必须包含启动 backfill 写入 DB 的真实 Codex fixture 会话',
   ).toBe(true);
   expect(
-    overview.json.workflows.some((workflow) => String(workflow.title || workflow.objective || '').includes(CONTRACT_WORKFLOW_CHANGE)),
-    'overview 必须包含写入的真实 wo 合同工作流',
+    overview.json.workflows.some((workflow) => String(workflow.title || workflow.objective || '').includes(FIXTURE_WORKFLOW_TITLE)),
+    'overview 必须包含启动 workflow 索引写入 DB 的真实 wo fixture 工作流',
   ).toBe(true);
 });
 
 test('workflow 详情停留时响应 runner state 文件变化', async ({ page }) => {
-  await writeWorkflowState(
-    LIVE_REFRESH_RUN_ID,
-    LIVE_REFRESH_WORKFLOW_CHANGE,
-    'running',
-    'execution',
-    '2026-06-11T08:05:00.000Z',
-  );
-
   const projectList = await fetchJson(page.request, '/api/projects');
   expect(projectList.response.ok()).toBe(true);
   const project = projectList.json.find((entry) => entry.fullPath === PRIMARY_FIXTURE_PROJECT_PATH || entry.path === PRIMARY_FIXTURE_PROJECT_PATH);
   expect(project, '需要先从轻量项目清单中获得项目路由').toBeTruthy();
 
   const routePrefix = project.routePath || project.fullPath || project.path;
-  await page.goto(`${routePrefix}/runs/${LIVE_REFRESH_RUN_ID}`, { waitUntil: 'networkidle' });
-  await expect(page.getByRole('heading', { name: LIVE_REFRESH_WORKFLOW_CHANGE })).toBeVisible();
+  await page.goto(`${routePrefix}/runs/${FIXTURE_WORKFLOW_RUN_ID}`, { waitUntil: 'networkidle' });
+  await expect(page.getByRole('heading', { name: FIXTURE_WORKFLOW_TITLE })).toBeVisible();
 
   await page.screenshot({
     path: path.join(EVIDENCE_DIR, 'workflow-detail-before-refresh.png'),
@@ -277,14 +196,14 @@ test('workflow 详情停留时响应 runner state 文件变化', async ({ page }
 
   await page.waitForTimeout(1200);
   await writeWorkflowState(
-    LIVE_REFRESH_RUN_ID,
-    LIVE_REFRESH_WORKFLOW_CHANGE,
+    FIXTURE_WORKFLOW_RUN_ID,
+    FIXTURE_WORKFLOW_TITLE,
     'done',
     'done',
     '2026-06-11T08:06:00.000Z',
   );
 
-  await expect(page.getByRole('heading', { name: LIVE_REFRESH_WORKFLOW_CHANGE })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { name: FIXTURE_WORKFLOW_TITLE })).toBeVisible({ timeout: 10_000 });
   await page.screenshot({
     path: path.join(EVIDENCE_DIR, 'workflow-detail-after-refresh.png'),
     fullPage: true,

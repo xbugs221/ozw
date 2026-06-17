@@ -32,6 +32,10 @@ type ProjectIndexRow = {
   sync_state: string | null;
 };
 
+type ProjectIndexListOptions = {
+  visibleOnly?: boolean;
+};
+
 const schemaReadyDbs = new WeakSet<object>();
 
 /**
@@ -133,6 +137,30 @@ function rowToProject(row: ProjectIndexRow): Record<string, unknown> {
 }
 
 /**
+ * Convert a DB row to the maintenance shape used by background sync jobs.
+ */
+function rowToProjectIndexRecord(row: ProjectIndexRow): Record<string, unknown> {
+  /**
+   * PURPOSE: Keep reconciliation logic outside SQL string parsing while still
+   * exposing the visibility/source fields that lightweight API rows hide.
+   */
+  return {
+    projectId: row.project_id,
+    name: row.name,
+    displayName: row.display_name,
+    projectPath: row.project_path,
+    normalizedProjectPath: row.normalized_project_path,
+    routePath: row.route_path,
+    source: row.source,
+    visible: row.visible === 1,
+    visibilityReason: row.visibility_reason || undefined,
+    lastActivity: row.last_activity || undefined,
+    indexedAt: row.indexed_at || undefined,
+    syncState: row.sync_state || undefined,
+  };
+}
+
+/**
  * Upsert one project row into the sidebar read model.
  */
 function upsertProjectIndex(db: any, record: ProjectIndexRecord): void {
@@ -224,6 +252,37 @@ function listVisibleProjects(db: any, limit = 200): Record<string, unknown>[] {
 }
 
 /**
+ * Return project index rows for background reconciliation.
+ */
+function listProjectIndexRecords(db: any, options: ProjectIndexListOptions = {}): Record<string, unknown>[] {
+  /**
+   * PURPOSE: Let background jobs clean stale DB rows without forcing request
+   * handlers to stat project paths or inspect provider session files.
+   */
+  ensureProjectIndexSchema(db);
+  const visibleOnly = options.visibleOnly === true;
+  const rows = db.prepare(`
+    SELECT
+      project_id,
+      name,
+      display_name,
+      project_path,
+      normalized_project_path,
+      route_path,
+      source,
+      visible,
+      visibility_reason,
+      last_activity,
+      indexed_at,
+      sync_state
+    FROM project_index
+    WHERE ? = 0 OR visible = 1
+    ORDER BY COALESCE(last_activity, indexed_at) DESC, display_name COLLATE NOCASE ASC
+  `).all(visibleOnly ? 1 : 0) as ProjectIndexRow[];
+  return rows.map(rowToProjectIndexRecord);
+}
+
+/**
  * Mark one project as hidden without deleting its sync metadata.
  */
 function setProjectVisibility(db: any, projectPath: string, visible: boolean, reason = ''): void {
@@ -300,6 +359,7 @@ function deleteProjectIndex(db: any, projectPath: string): void {
 const projectIndexDb = {
   upsert: upsertProjectIndex,
   listVisible: listVisibleProjects,
+  listRecords: listProjectIndexRecords,
   updateDisplayName: updateProjectDisplayName,
   setVisibility: setProjectVisibility,
   setProviderVisibility: setProviderProjectVisibility,

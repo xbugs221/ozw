@@ -77,6 +77,7 @@ export async function createManualSessionDraft(
     {},
     manualDrafts[draftId],
   );
+  writeSessionSummaryOverride(config, draftId, label || `会话${routeIndex}`);
   writeManualSessionRouteCounter(config, resolvedProjectPath, routeIndex);
   await saveProjectConfig(config, resolvedProjectPath);
   clearProjectDirectoryCache();

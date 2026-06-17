@@ -39,6 +39,8 @@
 - **并且** continue、resume、abort 状态必须由 workflow detail view model 统一生成
 - **并且** artifact 路径选择和 provider-aware child session route 选项不得重新堆回详情页组件
 - **并且** 阶段表格和阶段树必须同时保留当前轮次 artifact 与 session 跳转能力
+- **并且** 默认 Vitest 回归必须覆盖 visual progress、continue state、stage table columns、role artifact 选择和 artifact path 解析
+- **测试文件**：`tests/unit/workflow-detail-view-model.test.ts`
 
 ### 需求：Workflow 详情页必须区分 runner process 与 child session
 

@@ -3,6 +3,7 @@
  * browser harness 保持为可复用基础设施，避免后续回归重新复制局部 mock。
  *
  * Sources: 4-测试基线与Fixture真实化
+ * Sources: 2026-06-17-28-偿还历史测试与会话债务
  */
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
@@ -16,6 +17,7 @@ const EVIDENCE_CONTRACTS = [
   'codex-fixture-browser-trace -> test-results/codex-fixture-discovery/browser-trace.zip',
   'provider-harness-source-audit -> test-results/provider-runtime-harness/source-audit.json',
 ];
+const FORBIDDEN_TEST_SHORTCUTS = /\b(?:test|describe)\.skip\s*\(|\.only\s*\(|\btodo\s*\(/;
 
 async function readRepoFile(relativePath: string): Promise<string> {
   /**
@@ -30,6 +32,20 @@ function exposesHelper(source: string, symbol: string): boolean {
    */
   const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`export\\s+(?:async\\s+)?(?:function|const|class)\\s+${escaped}\\b`).test(source);
+}
+
+async function collectFiles(relativeDir: string): Promise<string[]> {
+  /**
+   * PURPOSE: 递归收集默认门禁测试文件，确保防绕过检查覆盖真实测试目录。
+   */
+  const absoluteDir = path.join(REPO_ROOT, relativeDir);
+  const entries = await fs.readdir(absoluteDir, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const relativePath = path.posix.join(relativeDir, entry.name);
+    if (entry.isDirectory()) return collectFiles(relativePath);
+    return [relativePath];
+  }));
+  return nested.flat().sort();
 }
 
 test('测试类型检查入口仍是根 typecheck 的合并门禁', async () => {
@@ -48,6 +64,36 @@ test('测试类型检查入口仍是根 typecheck 的合并门禁', async () => 
   assert.ok(Array.isArray(tsconfig.include), 'tsconfig.test.json 必须显式列出测试源码');
   assert.ok(JSON.stringify(tsconfig).includes('tests'), 'test typecheck 必须覆盖仓库测试');
   assert.notEqual(tsconfig.compilerOptions?.noImplicitAny, false, 'test typecheck 不得全局关闭 implicit-any');
+});
+
+test('历史债务门禁没有通过缩短脚本或跳过测试绕过', async () => {
+  /**
+   * 业务场景：28 号偿还的历史失败必须留在默认门禁里，后续不能用 skip、only 或缩短脚本隐藏。
+   */
+  const packageJson = JSON.parse(await readRepoFile('package.json')) as { scripts?: Record<string, string> };
+  const scripts = packageJson.scripts ?? {};
+
+  assert.match(scripts.typecheck ?? '', /typecheck:test/);
+  assert.equal(scripts['test:server'], 'tsx --test tests/backend/*.test.ts');
+  assert.match(scripts['test:spec:node'] ?? '', /scripts\/list-node-spec-tests\.mjs/);
+
+  const listScript = await readRepoFile('scripts/list-node-spec-tests.mjs');
+  for (const historicalFile of ['project_chat_config_v2', 'codex_project_discovery_conf_v2', 'layered_quality_gates']) {
+    assert.doesNotMatch(listScript, new RegExp(`${historicalFile}[\\s\\S]{0,120}(exclude|filter|skip|ignore)`, 'i'));
+  }
+
+  const testFiles = [
+    ...(await collectFiles('tests/backend')).filter((file) => file.endsWith('.test.ts')),
+    ...(await collectFiles('tests/spec')).filter((file) => /\.(test|spec|ts)$/.test(file)),
+    ...(await collectFiles('tests/specs')).filter((file) => /\.(test|spec)\.(ts|tsx)$/.test(file)),
+  ];
+  const offenders: string[] = [];
+  for (const file of testFiles) {
+    const source = await readRepoFile(file);
+    if (FORBIDDEN_TEST_SHORTCUTS.test(source)) offenders.push(file);
+  }
+
+  assert.deepEqual(offenders, [], `默认测试不得新增 skip/only/todo 绕过债务: ${offenders.join(', ')}`);
 });
 
 test('共享 Codex JSONL 和 discovery helper 定义真实 fixture 合同', async () => {

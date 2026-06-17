@@ -5,6 +5,7 @@
  * oz flow's user-state run path, not from a local workflow mirror.
  */
 import { listOpenSpecChanges } from './domains/openspec/oz-client.js';
+import { db } from './database/db.js';
 import {
   abortGoWorkflowRun,
   resumeGoWorkflowRun,
@@ -15,6 +16,7 @@ import {
   listWorkflowOverviewReadModels,
   listWorkflowReadModels,
 } from './domains/workflows/workflow-read-model.js';
+import { workflowOverviewIndexDb } from './workflow-overview-index-store.js';
 
 /**
  * Read active OpenSpec changes through the CLI so ozw follows OpenSpec's own discovery rules.
@@ -91,6 +93,56 @@ export async function listProjectWorkflowOverviews(projectPath) {
     return [];
   }
   return listWorkflowOverviewReadModels(projectPath);
+}
+
+/**
+ * Refresh the DB-backed workflow overview index for one project.
+ */
+export async function syncProjectWorkflowOverviewIndex(projectPath) {
+  /**
+   * PURPOSE: Move runner state parsing to background synchronization so the
+   * project overview HTTP route can stay SQLite-only and fast.
+   */
+  if (!projectPath) {
+    return [];
+  }
+  const [workflowOverviews, batches] = await Promise.all([
+    listProjectWorkflowOverviews(projectPath),
+    listProjectBatches(projectPath),
+  ]);
+  const workflows = workflowOverviews.map(summarizeWorkflowForProjectList);
+  workflowOverviewIndexDb.replaceForProject(db, projectPath, workflows);
+  workflowOverviewIndexDb.replaceBatchesForProject(db, projectPath, batches);
+  return workflows;
+}
+
+/**
+ * Refresh workflow overview indexes for a bounded visible project list.
+ */
+export async function syncWorkflowOverviewIndexesForProjects(projects: any[] = []) {
+  /**
+   * PURPOSE: Let startup and sidebar refreshes warm workflow overview rows in
+   * the background without coupling HTTP reads to state-file traversal.
+   */
+  let projectCount = 0;
+  let workflowCount = 0;
+  for (const project of projects || []) {
+    const projectPath = project?.fullPath || project?.path || '';
+    if (!projectPath) {
+      continue;
+    }
+    try {
+      const workflows = await syncProjectWorkflowOverviewIndex(projectPath);
+      projectCount += 1;
+      workflowCount += workflows.length;
+    } catch (error) {
+      console.error(
+        `Failed to sync workflow overview index for project ${project?.name || projectPath}:`,
+        error,
+      );
+    }
+  }
+  return { projectCount, workflowCount };
 }
 
 /**
@@ -209,6 +261,45 @@ export async function attachWorkflowMetadata(projects) {
   );
 }
 
+/**
+ * Attach workflow metadata from the SQLite overview index only.
+ */
+export async function attachIndexedWorkflowMetadata(projects) {
+  /**
+   * PURPOSE: Serve project overview without parsing workflow state files or
+   * batch directories on the request path.
+   */
+  return Promise.all(
+    projects.map(async (project) => {
+      const projectPath = project.fullPath || project.path || '';
+      let workflows = [];
+      try {
+        workflows = workflowOverviewIndexDb.listForProject(db, projectPath).map(summarizeWorkflowForProjectList);
+      } catch (error) {
+        console.error(
+          `Failed to load indexed workflows for project ${project.name || projectPath}:`,
+          error,
+        );
+      }
+      let batches = [];
+      try {
+        batches = workflowOverviewIndexDb.listBatchesForProject(db, projectPath);
+      } catch (error) {
+        console.error(
+          `Failed to load indexed workflow batches for project ${project.name || projectPath}:`,
+          error,
+        );
+      }
+      return {
+        ...project,
+        workflows,
+        batches,
+        hasUnreadActivity: workflows.some((workflow) => workflow.hasUnreadActivity === true),
+      };
+    }),
+  );
+}
+
 export function findProjectByName(projects, projectName) {
   return projects.find((project) => project.name === projectName) || null;
 }
@@ -232,6 +323,9 @@ export async function createProjectWorkflow(project, payload = {}) {
   if (!workflow) {
     throw new Error(`Go runner state not found for new workflow run ${runId}`);
   }
+  void syncProjectWorkflowOverviewIndex(projectPath).catch((error) => {
+    console.warn('[WorkflowIndex] Failed to sync after workflow creation:', error?.message || error);
+  });
   return {
     ...workflow,
     runnerPid: Number.isInteger(runResult?.pid) ? runResult.pid : undefined,
@@ -277,7 +371,11 @@ export async function resumeWorkflowRun(project, workflowId) {
   }
 
   await resumeGoWorkflowRun(projectPath, workflow.runId);
-  return getProjectWorkflow(project, workflowId);
+  const resumedWorkflow = await getProjectWorkflow(project, workflowId);
+  void syncProjectWorkflowOverviewIndex(projectPath).catch((error) => {
+    console.warn('[WorkflowIndex] Failed to sync after workflow resume:', error?.message || error);
+  });
+  return resumedWorkflow;
 }
 
 export async function abortWorkflowRun(project, workflowId) {
@@ -301,5 +399,9 @@ export async function abortWorkflowRun(project, workflowId) {
   }
 
   await abortGoWorkflowRun(projectPath, workflow.runId);
-  return getProjectWorkflow(project, workflowId);
+  const abortedWorkflow = await getProjectWorkflow(project, workflowId);
+  void syncProjectWorkflowOverviewIndex(projectPath).catch((error) => {
+    console.warn('[WorkflowIndex] Failed to sync after workflow abort:', error?.message || error);
+  });
+  return abortedWorkflow;
 }

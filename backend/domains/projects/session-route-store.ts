@@ -79,6 +79,7 @@ export async function initManualSessionRoute(
   const updatedRecord = {
     ...draftRecord.record,
     provider,
+    routeStarted: true,
   };
   delete updatedRecord.routeCancelFlag;
   if (draftRecord.scope === 'workflow') {
@@ -87,7 +88,9 @@ export async function initManualSessionRoute(
   config.chat[draftRecord.routeIndex] = updatedRecord;
   await deps.saveProjectConfig(config, resolvedProjectPath);
   deps.clearProjectDirectoryCache();
-  return { started: true, record: updatedRecord };
+  const responseRecord = { ...updatedRecord };
+  delete responseRecord.routeStarted;
+  return { started: true, record: responseRecord };
 }
 
 /**
@@ -220,7 +223,7 @@ export async function finalizeManualSessionRoute(
     }
     config.chat[draftRecord.routeIndex] = {
       ...draftRecord.record,
-      sessionId: routeSessionId || draftSessionId,
+      sessionId: provider === 'pi' ? (routeSessionId || draftSessionId) : actualSessionId,
       title: trimmedLabel || draftRecord.record.title,
       provider,
       providerSessionId: actualSessionId,
@@ -236,11 +239,13 @@ export async function finalizeManualSessionRoute(
         delete config.chat[routeIdx];
       }
     }
-    config.chat[actualSessionId] = {
-      sessionId: actualSessionId,
-      provider,
-      origin: workflowOwnedDraft ? deps.constants.sessionOriginWorkflow : deps.constants.sessionOriginManual,
-    };
+    if (provider === 'pi') {
+      config.chat[actualSessionId] = {
+        sessionId: actualSessionId,
+        provider,
+        origin: workflowOwnedDraft ? deps.constants.sessionOriginWorkflow : deps.constants.sessionOriginManual,
+      };
+    }
   }
 
   if (workflowOwnedDraft) {

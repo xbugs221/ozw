@@ -3,6 +3,7 @@
  * config and provider transcript headers.
  */
 import crypto from 'crypto';
+import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
@@ -22,11 +23,32 @@ import {
   parseCodexSessionHeader,
   parsePiSessionHeader,
 } from './provider-transcript-read-model.js';
+import { providerSessionIndexDb } from '../../provider-session-index-store.js';
 
 const BACKFILL_FILE_LIMIT = (() => {
   const parsed = Number.parseInt(process.env.PROJECT_INDEX_BACKFILL_FILE_LIMIT || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 2000;
 })();
+
+type ProjectIndexReconcileResult = {
+  hiddenCount: number;
+};
+
+/**
+ * Return whether a project path currently points at a directory.
+ */
+async function projectDirectoryExists(projectPath: string): Promise<boolean> {
+  /**
+   * PURPOSE: Keep stale provider/manual rows out of DB-backed navigation
+   * without doing filesystem checks during HTTP project list reads.
+   */
+  try {
+    const stat = await fs.stat(projectPath);
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Detect transient ozw-pi workspaces directly under the system temp directory.
@@ -77,6 +99,78 @@ function getDisplayName(projectPath: string, config: LooseRecord): string {
 }
 
 /**
+ * Collect currently configured manual project paths from global config.
+ */
+function collectConfiguredManualProjectPaths(config: LooseRecord): Set<string> {
+  /**
+   * PURPOSE: Detect manual rows left behind after tests, config edits, or
+   * project deletion without parsing config inside request handlers.
+   */
+  const paths = new Set<string>();
+  for (const [projectName, projectConfig] of Object.entries(config)) {
+    if (!isPlainRecord(projectConfig) || projectConfig.manuallyAdded !== true) {
+      continue;
+    }
+    const projectPath = normalizeProjectPath(typeof projectConfig.originalPath === 'string'
+      ? projectConfig.originalPath
+      : projectName.replace(/-/g, '/'));
+    if (projectPath) {
+      paths.add(projectPath);
+    }
+  }
+  return paths;
+}
+
+/**
+ * Hide visible project_index rows that no longer match disk/config/session truth.
+ */
+export async function reconcileProjectIndex(config: LooseRecord | null = null): Promise<ProjectIndexReconcileResult> {
+  /**
+   * PURPOSE: Make project_index an eventually consistent read model instead of
+   * an append-only cache that can keep showing deleted test or provider paths.
+   */
+  const effectiveConfig = config || await loadProjectConfig();
+  const configuredManualPaths = collectConfiguredManualProjectPaths(effectiveConfig);
+  const rows = projectIndexDb.listRecords(db, { visibleOnly: true });
+  let hiddenCount = 0;
+
+  for (const row of rows) {
+    const projectPath = normalizeProjectPath(String(row.projectPath || ''));
+    if (!projectPath) {
+      continue;
+    }
+
+    const source = String(row.source || '');
+    let hiddenReason = '';
+    if (source === 'manual') {
+      if (!configuredManualPaths.has(projectPath)) {
+        hiddenReason = 'manual-not-in-config';
+      } else if (!await projectDirectoryExists(projectPath)) {
+        hiddenReason = 'manual-path-missing';
+      }
+    } else if (source === 'provider') {
+      if (isEphemeralProviderProjectPath(projectPath)) {
+        hiddenReason = 'ephemeral-ozw-pi-temp';
+      } else if (!await projectDirectoryExists(projectPath)) {
+        hiddenReason = 'provider-path-missing';
+      } else if (providerSessionIndexDb.countForProject(db, projectPath) === 0) {
+        hiddenReason = 'provider-session-missing';
+      }
+    } else if (!await projectDirectoryExists(projectPath)) {
+      hiddenReason = 'project-path-missing';
+    }
+
+    if (!hiddenReason) {
+      continue;
+    }
+    projectIndexDb.setVisibility(db, projectPath, false, hiddenReason);
+    hiddenCount += 1;
+  }
+
+  return { hiddenCount };
+}
+
+/**
  * Upsert one project row derived from a provider session header.
  */
 export async function upsertProjectIndexFromProviderSession(session: LooseRecord | null | undefined): Promise<string> {
@@ -87,11 +181,12 @@ export async function upsertProjectIndexFromProviderSession(session: LooseRecord
   if (!projectPath) {
     return '';
   }
+  const name = createProjectName(projectPath);
   if (isEphemeralProviderProjectPath(projectPath)) {
     projectIndexDb.upsert(db, {
       projectId: projectPath,
-      name: createProjectName(projectPath),
-      displayName: path.basename(projectPath) || createProjectName(projectPath),
+      name,
+      displayName: path.basename(projectPath) || name,
       projectPath,
       routePath: buildProjectRoutePath(projectPath),
       source: 'provider',
@@ -102,8 +197,22 @@ export async function upsertProjectIndexFromProviderSession(session: LooseRecord
     });
     return '';
   }
+  if (!await projectDirectoryExists(projectPath)) {
+    projectIndexDb.upsert(db, {
+      projectId: projectPath,
+      name,
+      displayName: path.basename(projectPath) || name,
+      projectPath,
+      routePath: buildProjectRoutePath(projectPath),
+      source: 'provider',
+      visible: false,
+      visibilityReason: 'provider-path-missing',
+      lastActivity: session?.lastActivity || session?.updated_at || session?.createdAt || session?.timestamp || null,
+      syncState: 'hidden',
+    });
+    return '';
+  }
   const config = await loadProjectConfig();
-  const name = createProjectName(projectPath);
   projectIndexDb.upsert(db, {
     projectId: projectPath,
     name,
@@ -130,6 +239,37 @@ export function hideProviderProjectIndex(projectPath: string, reason = 'provider
 }
 
 /**
+ * Upsert one provider session header into the provider-session read model.
+ */
+function upsertProviderSessionIndexFromHeader(provider: 'codex' | 'pi', session: LooseRecord | null | undefined): void {
+  /**
+   * PURPOSE: Keep startup backfill self-contained instead of depending on the
+   * project-domain facade to configure provider-session read-model helpers.
+   */
+  if (!session?.id || !session.filePath) {
+    return;
+  }
+  providerSessionIndexDb.upsert(db, {
+    provider,
+    id: session.id,
+    sourceSessionId: session.sourceSessionId || session.source_session_id || null,
+    origin: session.origin || null,
+    projectPath: session.projectPath || session.cwd || '',
+    summary: session.summary || session.title || null,
+    title: session.title || session.summary || null,
+    model: session.model || null,
+    thread: session.thread || null,
+    sessionFileName: session.sessionFileName || session.session_file_name || null,
+    filePath: session.filePath,
+    createdAt: session.createdAt || session.created_at || null,
+    lastActivity: session.lastActivity || session.updated_at || session.updatedAt || null,
+    messageCount: typeof session.messageCount === 'number' ? session.messageCount : null,
+    messageCountKnown: session.messageCountKnown === true,
+    fileMtimeMs: typeof session.fileMtimeMs === 'number' ? session.fileMtimeMs : null,
+  });
+}
+
+/**
  * Upsert manually configured projects into the DB read model.
  */
 async function backfillManualProjects(config: LooseRecord): Promise<number> {
@@ -148,6 +288,7 @@ async function backfillManualProjects(config: LooseRecord): Promise<number> {
     if (!projectPath) {
       continue;
     }
+    const visible = await projectDirectoryExists(projectPath);
     projectIndexDb.upsert(db, {
       projectId: projectPath,
       name: projectName,
@@ -155,10 +296,13 @@ async function backfillManualProjects(config: LooseRecord): Promise<number> {
       projectPath,
       routePath: buildProjectRoutePath(projectPath),
       source: 'manual',
-      visible: true,
-      syncState: 'ready',
+      visible,
+      visibilityReason: visible ? null : 'manual-path-missing',
+      syncState: visible ? 'ready' : 'hidden',
     });
-    count += 1;
+    if (visible) {
+      count += 1;
+    }
   }
   return count;
 }
@@ -166,10 +310,10 @@ async function backfillManualProjects(config: LooseRecord): Promise<number> {
 /**
  * Backfill project_index from existing provider transcript headers.
  */
-export async function backfillProjectIndex(): Promise<{ manualCount: number; providerCount: number }> {
+export async function backfillProjectIndex(): Promise<{ manualCount: number; providerCount: number; hiddenCount: number }> {
   /**
-   * PURPOSE: Populate the DB read model at startup so /api/projects can stay
-   * DB-only during request handling.
+   * PURPOSE: Populate project and provider-session DB read models at startup so
+   * CLI transcripts written while ozw was offline become visible again.
    */
   const config = await loadProjectConfig();
   const manualCount = await backfillManualProjects(config);
@@ -183,6 +327,7 @@ export async function backfillProjectIndex(): Promise<{ manualCount: number; pro
       const session = provider === 'codex'
         ? await parseCodexSessionHeader(filePath)
         : await parsePiSessionHeader(filePath);
+      upsertProviderSessionIndexFromHeader(provider, session);
       const projectPath = await upsertProjectIndexFromProviderSession(session);
       if (projectPath) {
         providerCount += 1;
@@ -191,6 +336,7 @@ export async function backfillProjectIndex(): Promise<{ manualCount: number; pro
       console.warn(`[ProjectIndex] Could not backfill ${provider} file ${filePath}:`, error);
     }
   }
-  console.info(`[ProjectIndex] Backfill complete: manual=${manualCount}, provider=${providerCount}`);
-  return { manualCount, providerCount };
+  const reconcileResult = await reconcileProjectIndex(config);
+  console.info(`[ProjectIndex] Backfill complete: manual=${manualCount}, provider=${providerCount}, hidden=${reconcileResult.hiddenCount}`);
+  return { manualCount, providerCount, hiddenCount: reconcileResult.hiddenCount };
 }

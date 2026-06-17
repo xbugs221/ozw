@@ -2,6 +2,7 @@
  * PURPOSE: Typed project overview service for provider session lists,
  * transcript messages, and project-local session summaries.
  */
+import { promises as fs } from 'fs';
 import path from 'path';
 
 import { buildProjectOverviewReadModel } from './project-overview-read-model.js';
@@ -13,6 +14,7 @@ import {
   isPlainRecord,
   loadProjectConfig,
   normalizeProjectPath,
+  saveProjectConfig,
   type LooseRecord,
 } from './project-config-read-model.js';
 import {
@@ -35,6 +37,11 @@ import {
   readJsonlFirstRecord,
   sessionBelongsToProject,
 } from './provider-transcript-read-model.js';
+
+const RECENT_PROJECT_SCAN_FILE_LIMIT = (() => {
+  const parsed = Number.parseInt(process.env.PROVIDER_RECENT_PROJECT_SCAN_FILE_LIMIT || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 500;
+})();
 
 export { buildProjectOverviewReadModel } from './project-overview-read-model.js';
 export { buildProviderSessionListReadModel } from './provider-session-list-read-model.js';
@@ -81,7 +88,11 @@ export async function getSessionMessages(
   if (codexMessages.total > 0) {
     return codexMessages;
   }
-  return getPiSessionMessages(sessionId, limit, offset, afterLine);
+  const piMessages = await getPiSessionMessages(sessionId, limit, offset, afterLine);
+  if (piMessages.total > 0) {
+    return piMessages;
+  }
+  throw new Error('Claude session history is no longer supported');
 }
 
 /**
@@ -100,6 +111,7 @@ export async function parseJsonlSessions(filePath = '') {
  */
 export async function getCodexSessions(projectPath: unknown = '', options: LooseRecord = {}): Promise<LooseRecord[]> {
   const sessions = await readProviderSessions('codex', String(projectPath || ''), options);
+  await ensureCodexRouteRecords(String(projectPath || ''), sessions);
   return mergeProviderSessionsWithRoutes('codex', String(projectPath || ''), sessions, options);
 }
 
@@ -175,13 +187,32 @@ export async function countProviderSessionsForProject(projectPath: unknown = '')
  * Read raw provider session headers from transcript files.
  */
 async function readProviderSessions(provider: 'codex' | 'pi', projectPath: string, options: LooseRecord = {}): Promise<LooseRecord[]> {
+  /**
+   * PURPOSE: Prefer the SQLite read model; optional provider scans are reserved
+   * for explicit repair paths and are disabled by project overview.
+   */
+  if (options.providerSessionIndex instanceof Map) {
+    const indexedSessions = options.providerSessionIndex.get(normalizeProjectPath(projectPath)) || [];
+    return indexedSessions.sort(sortByLastActivityDesc);
+  }
   const indexedSessions = await listIndexedProviderSessionsForProject(
     provider,
     projectPath,
     getProviderSessionReadLimit(options.limit),
   );
   if (indexedSessions.length > 0) {
+    if (options.preferRecentProjectScan === true) {
+      const recentSessions = await scanRecentProviderSessionsForProject(
+        provider,
+        projectPath,
+        getRecentProjectScanFileLimit(),
+      );
+      return mergeProviderSessionHeaders(indexedSessions, recentSessions).sort(sortByLastActivityDesc);
+    }
     return indexedSessions.sort(sortByLastActivityDesc);
+  }
+  if (options.skipProviderScan === true) {
+    return [];
   }
 
   const files = provider === 'codex' ? await listCodexSessionFiles() : await listPiSessionFiles();
@@ -198,6 +229,100 @@ async function readProviderSessions(provider: 'codex' | 'pi', projectPath: strin
     await upsertProviderSessionIndex(provider, normalizedSession);
   }
   return sessions.sort(sortByLastActivityDesc);
+}
+
+/**
+ * Scan a bounded set of newest provider JSONL files and persist matching
+ * sessions for the current project back into the SQLite read model.
+ */
+async function scanRecentProviderSessionsForProject(
+  provider: 'codex' | 'pi',
+  projectPath: string,
+  fileLimit: number,
+): Promise<LooseRecord[]> {
+  /**
+   * PURPOSE: Repair stale indexes without returning to full HOME scans on every
+   * project overview request.
+   */
+  if (fileLimit <= 0) {
+    return [];
+  }
+  const files = provider === 'codex' ? await listCodexSessionFiles() : await listPiSessionFiles();
+  const recentFiles = await selectRecentJsonlFiles(files, fileLimit);
+  const sessions: LooseRecord[] = [];
+  for (const filePath of recentFiles) {
+    let session: LooseRecord | null = null;
+    try {
+      session = provider === 'codex'
+        ? await parseCodexSessionHeader(filePath)
+        : await parsePiSessionHeader(filePath);
+    } catch (error) {
+      console.warn(`[Projects] Could not inspect recent ${provider} session ${filePath}:`, error);
+      continue;
+    }
+    if (!session || !sessionBelongsToProject(session, projectPath)) {
+      continue;
+    }
+    const normalizedSession = { ...session, provider };
+    sessions.push(normalizedSession);
+    await upsertProviderSessionIndex(provider, normalizedSession);
+  }
+  return sessions;
+}
+
+/**
+ * Return newest JSONL files by filesystem mtime.
+ */
+async function selectRecentJsonlFiles(files: string[], limit: number): Promise<string[]> {
+  /**
+   * PURPOSE: Pi groups files by encoded project directory, so lexical path
+   * ordering is not a reliable proxy for global recency.
+   */
+  const boundedLimit = Math.max(0, Math.floor(limit));
+  if (boundedLimit === 0 || files.length === 0) {
+    return [];
+  }
+  const entries: Array<{ filePath: string; mtimeMs: number }> = [];
+  await Promise.all(files.map(async (filePath) => {
+    try {
+      const stat = await fs.stat(filePath);
+      entries.push({ filePath, mtimeMs: stat.mtimeMs });
+    } catch {
+      // Files can disappear while provider CLIs rotate transcripts.
+    }
+  }));
+  return entries
+    .sort((entryA, entryB) => entryB.mtimeMs - entryA.mtimeMs || entryB.filePath.localeCompare(entryA.filePath))
+    .slice(0, boundedLimit)
+    .map((entry) => entry.filePath);
+}
+
+/**
+ * Merge indexed and freshly scanned provider headers by stable provider id.
+ */
+function mergeProviderSessionHeaders(indexedSessions: LooseRecord[], scannedSessions: LooseRecord[]): LooseRecord[] {
+  /**
+   * PURPOSE: Keep routed metadata from existing rows while letting fresh JSONL
+   * headers update activity, title, and file path for newly discovered sessions.
+   */
+  const sessionsById = new Map<string, LooseRecord>();
+  for (const session of indexedSessions) {
+    const sessionId = String(session?.id || '').trim();
+    if (sessionId) {
+      sessionsById.set(sessionId, session);
+    }
+  }
+  for (const session of scannedSessions) {
+    const sessionId = String(session?.id || '').trim();
+    if (!sessionId) {
+      continue;
+    }
+    sessionsById.set(sessionId, {
+      ...(sessionsById.get(sessionId) || {}),
+      ...session,
+    });
+  }
+  return [...sessionsById.values()];
 }
 
 /**
@@ -237,6 +362,41 @@ async function mergeProviderSessionsWithRoutes(
 }
 
 /**
+ * Persist stable route numbers for discovered Codex sessions by creation time.
+ */
+async function ensureCodexRouteRecords(projectPath: string, providerSessions: LooseRecord[]): Promise<void> {
+  const config = await loadProjectConfig(projectPath);
+  const chat = isPlainRecord(config.chat) ? { ...config.chat } : {};
+  const existingSessionIds = new Set(Object.values(chat).flatMap((record) => [
+    String((record as LooseRecord)?.sessionId || ''),
+    String((record as LooseRecord)?.providerSessionId || ''),
+  ]).filter(Boolean));
+  let changed = false;
+  const sortedSessions = [...providerSessions]
+    .filter((session) => session?.id && !existingSessionIds.has(String(session.id)))
+    .sort((a, b) => new Date(a.createdAt || a.updated_at || a.lastActivity || 0).getTime()
+      - new Date(b.createdAt || b.updated_at || b.lastActivity || 0).getTime());
+  for (const session of sortedSessions) {
+    const usedIndexes = Object.keys(chat).map((key) => Number(key)).filter((value) => Number.isInteger(value) && value > 0);
+    const nextIndex = usedIndexes.length > 0 ? Math.max(...usedIndexes) + 1 : 1;
+    chat[String(nextIndex)] = {
+      sessionId: session.id,
+      provider: 'codex',
+      title: session.routeTitle || session.summary || session.title || `会话${nextIndex}`,
+      titleSource: 'auto-import',
+      summary: session.summary,
+      origin: session.origin,
+    };
+    existingSessionIds.add(String(session.id));
+    changed = true;
+  }
+  if (changed) {
+    config.chat = chat;
+    await saveProjectConfig(config, projectPath);
+  }
+}
+
+/**
  * Read enough indexed rows so filtering workflow children still leaves recent
  * manual sessions for the overview card limit.
  */
@@ -250,6 +410,17 @@ function getProviderSessionReadLimit(limitValue: unknown): number {
     return Math.max(50, Math.floor(limit) * 5);
   }
   return 200;
+}
+
+/**
+ * Return how many provider files overview may inspect to repair stale indexes.
+ */
+function getRecentProjectScanFileLimit(): number {
+  /**
+   * PURPOSE: Keep repair scans bounded while covering more than the visible
+   * card count because workflow filtering can remove many newest sessions.
+   */
+  return Math.max(50, RECENT_PROJECT_SCAN_FILE_LIMIT);
 }
 
 /**
@@ -351,6 +522,14 @@ function collectConfigWorkflowOwnedProviderSessionIds(
   }
 
   const configWorkflows = isPlainRecord(config.workflows) ? config.workflows : {};
+  const configChat = isPlainRecord(config.chat) ? config.chat : {};
+  for (const route of Object.values(configChat)) {
+    if (!isPlainRecord(route) || route.origin !== 'workflow') {
+      continue;
+    }
+    addIfProviderMatches(route.sessionId, route.provider);
+    addIfProviderMatches(route.providerSessionId, route.provider);
+  }
   for (const workflow of Object.values(configWorkflows)) {
     const workflowChat = isPlainRecord(workflow) && isPlainRecord(workflow.chat) ? workflow.chat : {};
     for (const route of Object.values(workflowChat)) {
@@ -426,6 +605,7 @@ function routeRecordToSession(routeIndex: string, record: LooseRecord, projectPa
     id: record.sessionId,
     routeIndex: Number(routeIndex),
     title: record.title || record.summary || record.sessionId,
+    routeTitle: record.routeTitle || record.title || record.summary || record.sessionId,
     summary: record.summary || record.title || record.sessionId,
     provider: record.provider || 'codex',
     projectPath,
@@ -453,14 +633,15 @@ function routeRecordToProviderSession(routeIndex: string, record: LooseRecord, p
   const routeSessionId = `c${numericRouteIndex}`;
   const rawSessionId = String(record.sessionId || '');
   const providerSessionId = record.providerSessionId || (rawSessionId === routeSessionId ? '' : rawSessionId);
-  if (!providerSessionId && rawSessionId === routeSessionId) {
+  if (!providerSessionId && rawSessionId === routeSessionId && provider !== 'codex') {
     return null;
   }
   return {
     ...routeRecordToSession(routeIndex, record, projectPath),
-    id: routeSessionId,
+    id: provider === 'pi' && record.origin === 'manual' ? routeSessionId : (rawSessionId === routeSessionId ? routeSessionId : rawSessionId),
     provider,
     providerSessionId,
+    status: !providerSessionId && rawSessionId === routeSessionId ? 'draft' : record.status,
     projectPath,
   };
 }
@@ -477,6 +658,7 @@ function draftToSession(draft: LooseRecord, projectPath: string): LooseRecord {
     summary: draft.label || draft.summary || draft.id,
     provider: draft.provider || 'codex',
     providerSessionId: draft.providerSessionId,
+    status: 'draft',
     projectPath: draft.projectPath || projectPath,
     lastActivity: draft.updatedAt || draft.createdAt || now,
     updated_at: draft.updatedAt || draft.createdAt || now,

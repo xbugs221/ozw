@@ -10,9 +10,12 @@ import { promises as fs } from 'fs';
 import {
   buildProjectRoutePath,
   DISPLAY_NAME_BY_PATH_KEY,
+  evaluateProjectArchival,
   isPlainRecord,
+  loadProjectArchiveIndex,
   loadProjectConfig,
   normalizeProjectPath,
+  saveProjectArchiveIndex,
   saveProjectConfig,
   type LooseRecord,
 } from './project-config-read-model.js';
@@ -34,6 +37,7 @@ import {
 } from './provider-transcript-read-model.js';
 import { db } from '../../database/db.js';
 import { projectIndexDb } from '../../project-index-store.js';
+import { reconcileProjectIndex } from './project-index-sync-service.js';
 
 let projectDirectoryCache = new Map<string, string>();
 const PROVIDER_ONLY_PROJECT_LIMIT = 50;
@@ -48,7 +52,7 @@ const PROVIDER_INDEX_HOME_BUDGET_MS = (() => {
  */
 export const __projectDiscoveryForTest = {
   filterAndDisambiguateProjects(projects: LooseRecord[]): LooseRecord[] {
-    return projects;
+    return filterAndDisambiguateProjects(projects);
   },
   isGoTestTempProjectPath(projectPath = ''): boolean {
     return /[/\\]Test[^/\\]+[/\\]\d+/.test(projectPath);
@@ -81,9 +85,17 @@ export function clearProjectDirectoryCache(): void {
 /**
  * Re-scan missing project paths so session visibility reflects disk state.
  */
-export async function refreshMissingProjectPathCache(_options = {}): Promise<LooseRecord> {
+export async function refreshMissingProjectPathCache(options: LooseRecord = {}): Promise<LooseRecord> {
+  /**
+   * PURPOSE: Reconcile the SQLite project read model during startup/periodic
+   * maintenance instead of leaving stale manual/provider rows visible forever.
+   */
   clearProjectDirectoryCache();
-  return { refreshed: true };
+  const result = await reconcileProjectIndex();
+  if (result.hiddenCount > 0 && options?.logger?.info) {
+    options.logger.info(`[SessionVisibility] Hidden ${result.hiddenCount} stale project index rows`);
+  }
+  return { refreshed: true, ...result };
 }
 
 /**
@@ -91,13 +103,24 @@ export async function refreshMissingProjectPathCache(_options = {}): Promise<Loo
  */
 export async function getProjects(_progress: unknown = null, options: LooseRecord = {}): Promise<LooseRecord[]> {
   const lightweightList = options?.lightweightList === true;
+  const projects: LooseRecord[] = lightweightList
+    ? projectIndexDb.listVisible(db).map((project) => ({
+      ...project,
+      path: project.fullPath || project.path,
+      fullPath: project.fullPath || project.path,
+      source: project.source || 'db',
+    }))
+    : [];
   if (lightweightList) {
-    return projectIndexDb.listVisible(db).map(summarizeProjectForList);
+    return filterAndDisambiguateProjects(projects.map(summarizeProjectForList));
   }
   const config = await loadProjectConfig();
-  const projects: LooseRecord[] = [];
+  const archiveIndex = await loadProjectArchiveIndex();
   const usedNames = new Set<string>();
-  const knownPaths = new Set<string>();
+  const knownPaths = new Set(projects.map((project) => normalizeProjectPath(project.fullPath || project.path || '')));
+  for (const project of projects) {
+    usedNames.add(String(project.name || ''));
+  }
   const hydratedIndexes = lightweightList
     ? null
     : await resolveProviderIndexesWithinHomeBudget();
@@ -111,20 +134,37 @@ export async function getProjects(_progress: unknown = null, options: LooseRecor
       : projectName.replace(/-/g, '/');
     const project = buildProjectSummary(projectName, projectPath, config, true);
     if (!lightweightList) {
-      project.codexSessions = getIndexedProjectSessions(hydratedIndexes?.codex, projectPath);
+      project.codexSessions = await getCodexSessions(projectPath, {
+        includeHidden: true,
+        providerSessionIndex: hydratedIndexes?.codex,
+        skipProviderScan: true,
+      });
       project.piSessions = await readProviderSessionsWithinHomeBudget(() => getPiSessions(projectPath, {
         includeHidden: true,
         excludeWorkflowChildSessions: true,
+        providerSessionIndex: hydratedIndexes?.pi,
+        skipProviderScan: true,
       }));
     }
-    projects.push(project);
+    const archival = await evaluateProjectArchival({
+      projectPath,
+      path: projectPath,
+      source: 'manual',
+      archiveIndex,
+    });
+    if (archival.archiveUpdated) {
+      await saveProjectArchiveIndex(archiveIndex);
+    }
+    if (!archival.excludeFromList) {
+      projects.push(project);
+    }
     usedNames.add(project.name);
     knownPaths.add(normalizeProjectPath(projectPath));
   }
 
   await appendProviderOnlyProjects(projects, usedNames, knownPaths, config, lightweightList, hydratedIndexes);
 
-  return lightweightList ? projects.map(summarizeProjectForList) : projects;
+  return filterAndDisambiguateProjects(lightweightList ? projects.map(summarizeProjectForList) : projects);
 }
 
 /**
@@ -189,16 +229,26 @@ async function appendProviderOnlyProjects(
       continue;
     }
     if (!await shouldIncludeProviderOnlyProject(normalizedPath)) {
+      await maybeArchiveMissingProviderProject(normalizedPath, candidate.provider);
       continue;
     }
+    await maybeClearRestoredProviderProjectArchive(normalizedPath, candidate.provider);
     const projectName = createProjectName(normalizedPath, config, usedNames);
     const project = buildProjectSummary(projectName, normalizedPath, config, false);
     if (!lightweightList) {
-      project.codexSessions = candidate.provider === 'codex' ? candidate.providerSessions : [];
+      project.codexSessions = candidate.provider === 'codex'
+        ? await getCodexSessions(normalizedPath, {
+          includeHidden: true,
+          providerSessionIndex: hydratedIndexes?.codex,
+          skipProviderScan: true,
+        })
+        : [];
       project.piSessions = candidate.provider === 'pi'
         ? await readProviderSessionsWithinHomeBudget(() => getPiSessions(normalizedPath, {
           includeHidden: true,
           excludeWorkflowChildSessions: true,
+          providerSessionIndex: hydratedIndexes?.pi,
+          skipProviderScan: true,
         }))
         : [];
     }
@@ -206,6 +256,38 @@ async function appendProviderOnlyProjects(
     usedNames.add(projectName);
     knownPaths.add(normalizedPath);
     providerOnlyProjectCount += 1;
+  }
+}
+
+/**
+ * Clear stale archive records once a provider-only cwd exists again.
+ */
+async function maybeClearRestoredProviderProjectArchive(projectPath: string, source: unknown): Promise<void> {
+  const archiveIndex = await loadProjectArchiveIndex();
+  const archival = await evaluateProjectArchival({
+    projectPath,
+    path: projectPath,
+    source: String(source || 'provider'),
+    archiveIndex,
+  });
+  if (archival.archiveUpdated) {
+    await saveProjectArchiveIndex(archiveIndex);
+  }
+}
+
+/**
+ * Archive provider-only projects whose transcript cwd no longer exists.
+ */
+async function maybeArchiveMissingProviderProject(projectPath: string, source: unknown): Promise<void> {
+  const archiveIndex = await loadProjectArchiveIndex();
+  const archival = await evaluateProjectArchival({
+    projectPath,
+    path: projectPath,
+    source: String(source || 'provider'),
+    archiveIndex,
+  });
+  if (archival.archiveUpdated) {
+    await saveProjectArchiveIndex(archiveIndex);
   }
 }
 
@@ -235,7 +317,37 @@ function isEphemeralProviderProjectPath(projectPath: string): boolean {
   }
   const relativeToTmp = path.relative(normalizedTmp, normalizedPath);
   const firstSegment = relativeToTmp.split(path.sep).filter(Boolean)[0] || '';
-  return /^ozw-pi-/i.test(firstSegment);
+  return /^ozw-pi-/i.test(firstSegment) || (/^Test/i.test(firstSegment) && /[/\\]\d+$/.test(normalizedPath));
+}
+
+/**
+ * Remove obvious transient projects and disambiguate duplicate display names.
+ */
+function filterAndDisambiguateProjects(projects: LooseRecord[]): LooseRecord[] {
+  const filtered = projects.filter((project) => !isEmptyGoTestProject(project));
+  const displayNameCounts = new Map<string, number>();
+  for (const project of filtered) {
+    const displayName = String(project.displayName || project.name || '');
+    displayNameCounts.set(displayName, (displayNameCounts.get(displayName) || 0) + 1);
+  }
+  return filtered.map((project) => {
+    const displayName = String(project.displayName || project.name || '');
+    if ((displayNameCounts.get(displayName) || 0) <= 1) {
+      return project;
+    }
+    const parentName = path.basename(path.dirname(String(project.fullPath || project.path || '')));
+    return { ...project, displayName: `${displayName} - ${parentName}` };
+  });
+}
+
+/**
+ * Detect empty Go test temp project stubs that should never reach navigation.
+ */
+function isEmptyGoTestProject(project: LooseRecord): boolean {
+  const projectPath = String(project.fullPath || project.path || '');
+  const hasSessions = ['sessions', 'codexSessions', 'piSessions', 'opencodeSessions']
+    .some((key) => Array.isArray(project[key]) && project[key].length > 0);
+  return !hasSessions && __projectDiscoveryForTest.isGoTestTempProjectPath(projectPath);
 }
 
 /**

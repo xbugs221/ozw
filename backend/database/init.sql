@@ -101,3 +101,32 @@ CREATE INDEX IF NOT EXISTS idx_project_index_visible_recent
     ON project_index(visible, last_activity DESC, indexed_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_project_index_normalized_path
     ON project_index(normalized_project_path);
+
+-- Workflow overview read model for fast DB-backed project overview cards.
+CREATE TABLE IF NOT EXISTS workflow_overview_index (
+    normalized_project_path TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    project_path TEXT NOT NULL,
+    workflow_json TEXT NOT NULL,
+    updated_at TEXT,
+    indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    visible INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (normalized_project_path, run_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_overview_project_recent
+    ON workflow_overview_index(normalized_project_path, visible, updated_at DESC, indexed_at DESC);
+
+-- Workflow batch overview read model for project overview grouping.
+CREATE TABLE IF NOT EXISTS workflow_batch_index (
+    normalized_project_path TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    project_path TEXT NOT NULL,
+    batch_json TEXT NOT NULL,
+    indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    visible INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (normalized_project_path, batch_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_batch_project_recent
+    ON workflow_batch_index(normalized_project_path, visible, batch_id DESC, indexed_at DESC);

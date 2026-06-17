@@ -48,16 +48,20 @@ export async function renameSession(projectName = '', sessionId = '', newSummary
   const config = await loadProjectConfig(resolvedPath);
   const record = findProjectChatRecord(config, sessionId);
   const trimmedSummary = String(newSummary || '').trim();
+  if (!trimmedSummary) {
+    throw new Error('Session summary is required');
+  }
+  if (!record?.record) {
+    throw new Error('Claude sessions are no longer supported');
+  }
   if (record?.record && record.scope === 'chat') {
     config.chat[record.routeIndex] = {
       ...record.record,
-      title: trimmedSummary || record.record.title,
-      summary: trimmedSummary || record.record.summary,
+      title: trimmedSummary,
+      summary: trimmedSummary,
     };
   }
-  if (trimmedSummary) {
-    writeSessionSummaryOverride(config, sessionId, trimmedSummary);
-  }
+  writeSessionSummaryOverride(config, sessionId, trimmedSummary);
   await saveProjectConfig(config, resolvedPath);
   clearProjectDirectoryCache();
   return { projectName, projectPath: resolvedPath, sessionId, summary: trimmedSummary };

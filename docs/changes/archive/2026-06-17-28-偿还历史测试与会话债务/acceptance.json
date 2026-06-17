@@ -1,0 +1,98 @@
+{
+  "summary": "本次变更必须把 27 号提案执行时遗留的类型、后端、Node spec 和 manual 历史资产债务变成硬门禁；执行器不得通过 skip、排除测试或违背最新提案意图来通过。",
+  "coverage": [
+    {
+      "spec": "需求：完整类型与 Node 门禁必须转绿 / 场景：类型、后端和 Node spec 历史失败全部修复",
+      "tests": ["historical-debt-gates-pass"],
+      "evidence": ["historical-debt-command-log"],
+      "risk": "不覆盖浏览器像素布局；浏览器风险由 manual 资产处置和现有 e2e/spec 入口补充。"
+    },
+    {
+      "spec": "需求：执行器不得用跳过或排除测试偿债 / 场景：默认脚本和测试源码不得新增偷懒绕过",
+      "tests": ["no-debt-shortcuts"],
+      "evidence": [],
+      "risk": "静态检查不能证明所有断言语义充分，但能阻止明显绕过。"
+    },
+    {
+      "spec": "需求：manual browser-history 资产必须处置 / 场景：自动化、人工保留和删除状态必须可复查",
+      "tests": ["manual-history-disposition"],
+      "evidence": ["manual-history-disposition-snapshot"],
+      "risk": "真实 Provider 长链路可能仍保留为人工，但必须有可复查说明。"
+    },
+    {
+      "spec": "需求：不得违背 27 号最新边界意图 / 场景：高风险模块拆分合同继续有效",
+      "tests": ["latest-intent-precedence"],
+      "evidence": [],
+      "risk": "不单独验证真实浏览器 WebSocket 时序，只保护最新提案的结构意图。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "historical-debt-gates-pass",
+      "source": "change_contract",
+      "path": "docs/changes/28-偿还历史测试与会话债务/tests/historical-debt-gates-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/28-偿还历史测试与会话债务/tests/historical-debt-gates-contract.test.ts",
+      "purpose": "证明 typecheck、test:server 和 test:spec:node 这些历史失败入口已经全部转绿。",
+      "assertions": [
+        "pnpm run typecheck 退出码为 0",
+        "pnpm run test:server 退出码为 0",
+        "pnpm run test:spec:node 退出码为 0",
+        "命令结果写入 test-results/historical-debt/command-results.json"
+      ],
+      "expected_initial_failure": "创建阶段应失败于当前历史债务入口仍未通过。"
+    },
+    {
+      "id": "no-debt-shortcuts",
+      "source": "change_contract",
+      "path": "docs/changes/28-偿还历史测试与会话债务/tests/historical-debt-gates-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/28-偿还历史测试与会话债务/tests/historical-debt-gates-contract.test.ts",
+      "purpose": "证明执行器没有通过 skip、only、排除脚本或移除默认入口来绕过历史债务。",
+      "assertions": [
+        "package.json 保留 typecheck、test:server 和 test:spec:node 入口",
+        "默认测试目录没有新增 test.skip、describe.skip、.only 或 todo",
+        "Node spec 列表脚本没有专门排除当前历史失败文件"
+      ],
+      "expected_initial_failure": "若执行器绕过测试，应失败于源码静态检查。"
+    },
+    {
+      "id": "manual-history-disposition",
+      "source": "change_contract",
+      "path": "docs/changes/28-偿还历史测试与会话债务/tests/manual-history-disposition-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/28-偿还历史测试与会话债务/tests/manual-history-disposition-contract.test.ts",
+      "purpose": "证明 manual browser-history 历史资产已经被迁移、明确人工保留或删除，不再只有笼统保留。",
+      "assertions": [
+        "每个 tests/manual/browser-history 文件都有处置行",
+        "人工保留项必须说明当前业务价值、运行前置条件和证据路径",
+        "执行完成后不得残留 默认门禁候选"
+      ],
+      "expected_initial_failure": "创建阶段应失败于现有人工保留项缺少前置条件或证据路径。"
+    },
+    {
+      "id": "latest-intent-precedence",
+      "source": "change_contract",
+      "path": "docs/changes/28-偿还历史测试与会话债务/tests/latest-intent-precedence-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/28-偿还历史测试与会话债务/tests/latest-intent-precedence-contract.test.ts",
+      "purpose": "证明 28 号偿债提案遵守编号更大的最新意图优先，并保持 27 号拆分边界。",
+      "assertions": [
+        "28 号文档写明编号更大的提案意图优先",
+        "当前源码仍委托 27 号拆出的 Project overview、Chat runtime 和 Backend server 模块",
+        "27 号 change contract 路径仍存在"
+      ],
+      "expected_initial_failure": "若偿债时回退 27 号拆分边界，应失败于源码边界断言。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "historical-debt-command-log",
+      "kind": "runtime_log",
+      "path": "test-results/historical-debt/command-results.json",
+      "purpose": "记录 typecheck、test:server、test:spec:node 的退出码和输出摘要；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "manual-history-disposition-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/historical-debt/manual-history-disposition.json",
+      "purpose": "记录 manual browser-history 文件与处置状态的对应关系；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

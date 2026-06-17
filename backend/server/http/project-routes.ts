@@ -17,6 +17,7 @@ export interface ProjectRouteDeps {
     resolveProjectOverviewTarget: any;
     buildProjectOverviewReadModel: any;
     attachWorkflowMetadata: any;
+    attachProjectOverviewWorkflowMetadata?: any;
     getCodexSessions: any;
     getPiSessions: any;
     extractProjectDirectory: any;
@@ -30,7 +31,7 @@ export interface ProjectRouteDeps {
  * 注册项目相关 HTTP 路由。
  */
 export function registerProjectRoutes(deps: ProjectRouteDeps): void {
-    const { app, authenticateToken, heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList, ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget, buildProjectOverviewReadModel, attachWorkflowMetadata, getCodexSessions, getPiSessions, extractProjectDirectory, renameProject, deleteProject, addProjectManually, broadcastProjectListInvalidated } = deps;
+    const { app, authenticateToken, heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList, ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget, buildProjectOverviewReadModel, attachWorkflowMetadata, attachProjectOverviewWorkflowMetadata, getCodexSessions, getPiSessions, extractProjectDirectory, renameProject, deleteProject, addProjectManually, broadcastProjectListInvalidated } = deps;
 
 const listProjectsHandler = async (req: any, res: any) => {
     try {
@@ -62,7 +63,7 @@ const getProjectOverviewHandler = async (req: any, res: any) => {
 
             return buildProjectOverviewReadModel(project, {
                 summarizeProjectForList,
-                attachWorkflowMetadata,
+                attachWorkflowMetadata: attachProjectOverviewWorkflowMetadata || attachWorkflowMetadata,
                 getCodexSessions,
                 getPiSessions,
             });

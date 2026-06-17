@@ -93,7 +93,19 @@ export function buildManualSessionId(routeIndex: number): string {
 export function normalizeProjectConfig(rawConfig: unknown): LooseRecord {
   const config = isPlainRecord(rawConfig) ? { ...rawConfig } : {};
   config.schemaVersion = PROJECT_CONFIG_SCHEMA_VERSION;
-  config.chat = isPlainRecord(config.chat) ? { ...config.chat } : {};
+  if (isPlainRecord(config.chat)) {
+    config.chat = { ...config.chat };
+  } else {
+    delete config.chat;
+  }
+  mergeLegacySessionStateIntoChat(config);
+  delete config[MANUAL_SESSION_DRAFTS_KEY];
+  delete config[SESSION_UI_STATE_BY_PATH_KEY];
+  delete config[SESSION_MODEL_STATE_BY_ID_KEY];
+  delete config[SESSION_WORKFLOW_METADATA_BY_ID_KEY];
+  if (isPlainRecord(config.chat) && Object.keys(config.chat).length === 0) {
+    delete config.chat;
+  }
   return config;
 }
 
@@ -211,17 +223,25 @@ export async function updateSessionModelState(projectPath = '', sessionId = '', 
     throw new Error('Session id is required');
   }
   const config = await loadProjectConfig(projectPath);
-  const allState = isPlainRecord(config[SESSION_MODEL_STATE_BY_ID_KEY])
-    ? { ...config[SESSION_MODEL_STATE_BY_ID_KEY] }
-    : {};
-  allState[sessionId] = {
-    ...normalizeSessionModelState(allState[sessionId]),
+  const record = findProjectChatRecord(config, sessionId);
+  const nextState = {
+    ...normalizeSessionModelState(record?.record || {}),
     ...normalizeSessionModelState(patch),
-    updatedAt: new Date().toISOString(),
   };
-  config[SESSION_MODEL_STATE_BY_ID_KEY] = allState;
+  if (record?.scope === 'chat') {
+    config.chat[record.routeIndex] = {
+      ...record.record,
+      ...nextState,
+    };
+  } else {
+    const allState = isPlainRecord(config[SESSION_MODEL_STATE_BY_ID_KEY])
+      ? { ...config[SESSION_MODEL_STATE_BY_ID_KEY] }
+      : {};
+    allState[sessionId] = { ...nextState, updatedAt: new Date().toISOString() };
+    config[SESSION_MODEL_STATE_BY_ID_KEY] = allState;
+  }
   await saveProjectConfig(config, projectPath);
-  return allState[sessionId];
+  return nextState;
 }
 
 /**
@@ -234,16 +254,68 @@ export async function updateSessionUiState(
   uiState: LooseRecord = {},
   projectPathOverride = '',
 ): Promise<LooseRecord> {
-  const projectPath = projectPathOverride || projectName;
+  const projectPath = projectPathOverride || await resolveProjectPathForConfigName(projectName);
   const config = await loadProjectConfig(projectPath);
-  const key = `${provider}:${normalizeProjectPath(projectPath)}:${sessionId}`;
-  const allState = isPlainRecord(config[SESSION_UI_STATE_BY_PATH_KEY])
-    ? { ...config[SESSION_UI_STATE_BY_PATH_KEY] }
-    : {};
-  allState[key] = normalizeSessionUiState(uiState);
-  config[SESSION_UI_STATE_BY_PATH_KEY] = allState;
+  const normalizedProvider = provider || 'codex';
+  const nextUi = normalizeSessionUiState(uiState);
+  const record = findProjectChatRecord(config, sessionId, normalizedProvider);
+  if (record?.scope === 'chat') {
+    config.chat[record.routeIndex] = {
+      ...record.record,
+      provider: record.record.provider || normalizedProvider,
+      ui: nextUi,
+    };
+  } else {
+    const key = `${normalizedProvider}:${normalizeProjectPath(projectPath)}:${sessionId}`;
+    const allState = isPlainRecord(config[SESSION_UI_STATE_BY_PATH_KEY])
+      ? { ...config[SESSION_UI_STATE_BY_PATH_KEY] }
+      : {};
+    allState[key] = nextUi;
+    config[SESSION_UI_STATE_BY_PATH_KEY] = allState;
+  }
   await saveProjectConfig(config, projectPath);
-  return allState[key];
+  return nextUi;
+}
+
+/**
+ * Merge legacy per-session maps into v2 chat route records.
+ */
+function mergeLegacySessionStateIntoChat(config: LooseRecord): void {
+  const chat = isPlainRecord(config.chat) ? config.chat : {};
+  const modelStateById = isPlainRecord(config[SESSION_MODEL_STATE_BY_ID_KEY]) ? config[SESSION_MODEL_STATE_BY_ID_KEY] : {};
+  const uiStateByPath = isPlainRecord(config[SESSION_UI_STATE_BY_PATH_KEY]) ? config[SESSION_UI_STATE_BY_PATH_KEY] : {};
+  for (const [routeIndex, record] of Object.entries(chat)) {
+    if (!isPlainRecord(record)) {
+      continue;
+    }
+    const sessionId = String(record.sessionId || '');
+    const provider = String(record.provider || 'codex');
+    const modelState = normalizeSessionModelState(modelStateById[sessionId]);
+    const uiKeySuffix = `:${sessionId}`;
+    const uiEntry = Object.entries(uiStateByPath).find(([key]) => key.startsWith(`${provider}:`) && key.endsWith(uiKeySuffix))
+      || Object.entries(uiStateByPath).find(([key]) => key.endsWith(uiKeySuffix));
+    const uiState = normalizeSessionUiState(uiEntry?.[1]);
+    chat[routeIndex] = {
+      ...record,
+      ...(record.provider ? {} : { provider }),
+      ...modelState,
+      ...(Object.keys(uiState).length > 0 ? { ui: uiState } : {}),
+    };
+  }
+}
+
+/**
+ * Resolve a configured project name back to its project-local config path.
+ */
+async function resolveProjectPathForConfigName(projectName: string): Promise<string> {
+  if (projectName.includes('/') || projectName.startsWith('~')) {
+    return projectName;
+  }
+  const globalConfig = await loadProjectConfig('');
+  const configured = globalConfig[projectName];
+  return isPlainRecord(configured) && typeof configured.originalPath === 'string'
+    ? configured.originalPath
+    : projectName;
 }
 
 /**
@@ -279,10 +351,20 @@ export async function validateProjectPathAvailability(projectPath = '', options:
  * Evaluate archive state for a project summary.
  */
 export async function evaluateProjectArchival(project: LooseRecord = {}) {
-  const projectPath = String(project.fullPath || project.path || '');
+  const projectPath = String(project.projectPath || project.fullPath || project.path || '');
   const archiveIndex = normalizeProjectArchiveIndex(project.archiveIndex || {});
   const validation = await validateProjectPathAvailability(projectPath, project.options || {});
   const normalizedPath = projectPath ? normalizeProjectPath(projectPath) : '';
+  if (normalizedPath && validation.exists && archiveIndex.archivedProjects[normalizedPath]) {
+    delete archiveIndex.archivedProjects[normalizedPath];
+    return {
+      excludeFromList: false,
+      archiveUpdated: true,
+      reason: 'archive-cleared-path-exists',
+      normalizedPath,
+      archiveIndex,
+    };
+  }
   if (!normalizedPath || validation.exists || !validation.shouldArchive) {
     return {
       excludeFromList: false,
@@ -296,8 +378,8 @@ export async function evaluateProjectArchival(project: LooseRecord = {}) {
     path: projectPath,
     source: project.source || 'project',
     reason: 'path-missing',
-    archivedAt: new Date().toISOString(),
-    lastCheckedAt: new Date().toISOString(),
+    archivedAt: project.options?.now instanceof Date ? project.options.now.toISOString() : new Date().toISOString(),
+    lastCheckedAt: project.options?.now instanceof Date ? project.options.now.toISOString() : new Date().toISOString(),
     errorCode: validation.errorCode,
   };
   return {

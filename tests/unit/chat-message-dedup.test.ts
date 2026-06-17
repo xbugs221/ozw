@@ -276,7 +276,7 @@ test('mergePersistedAndOptimisticMessages drops live assistant prefix after JSON
       },
       {
         type: 'assistant',
-        content: '我会先检查 WebSocket live 行，再用 read model 做一次最终校准。',
+        content: '我会先检查 live transcript 行，再用 read model 做一次最终校准。',
         timestamp: '2026-06-12T08:12:33.000Z',
         messageKey: 'codex:c33:line:10:msg:0',
       },
@@ -284,7 +284,7 @@ test('mergePersistedAndOptimisticMessages drops live assistant prefix after JSON
     [
       {
         type: 'assistant',
-        content: '我会先检查 WebSocket live 行',
+        content: '我会先检查 live transcript 行',
         timestamp: '2026-06-12T08:12:31.000Z',
         messageKey: 'codex-live:item-delta-33',
         source: 'codex-live',
@@ -296,7 +296,7 @@ test('mergePersistedAndOptimisticMessages drops live assistant prefix after JSON
     mergedMessages.map((message) => `${message.type}:${message.content}`),
     [
       'user:动态推送不要把运行中片段和落盘最终回复渲染两遍',
-      'assistant:我会先检查 WebSocket live 行，再用 read model 做一次最终校准。',
+      'assistant:我会先检查 live transcript 行，再用 read model 做一次最终校准。',
     ],
   );
 });

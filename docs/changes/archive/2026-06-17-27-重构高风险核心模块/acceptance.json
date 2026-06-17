@@ -1,0 +1,84 @@
+{
+  "summary": "将 project overview、chat runtime hooks 和 backend server 边界中的高风险巨型模块拆分为可测试控制器、视图模型和装配层，并同步默认测试与 durable docs。",
+  "coverage": [
+    {
+      "spec": "需求：P0 Project overview 组合层必须瘦身 / 场景：总览页面拆成 view model、workflow groups、session cards 和 actions",
+      "tests": ["change-project-overview-refactor"],
+      "evidence": [],
+      "risk": "不验证真实浏览器布局，仍需依赖现有项目页 e2e。"
+    },
+    {
+      "spec": "需求：P0 Chat runtime hook 必须拆出可单测控制器 / 场景：session、composer、realtime 业务规则迁到控制器",
+      "tests": ["change-chat-runtime-refactor"],
+      "evidence": [],
+      "risk": "不模拟真实浏览器 WebSocket 时序。"
+    },
+    {
+      "spec": "需求：P1 Backend server 边界必须降为装配层 / 场景：bootstrap、dispatcher、file routes 降为装配层",
+      "tests": ["change-backend-boundary-refactor"],
+      "evidence": [],
+      "risk": "不启动真实 HTTP/WebSocket 服务。"
+    },
+    {
+      "spec": "需求：P1 测试和文档必须同步更新 / 场景：默认测试和 durable docs 覆盖新边界",
+      "tests": ["change-refactor-tests-docs"],
+      "evidence": [],
+      "risk": "不要求执行完整 e2e；执行阶段按影响面判断是否补充浏览器回归。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "change-project-overview-refactor",
+      "source": "change_contract",
+      "path": "docs/changes/27-重构高风险核心模块/tests/project-overview-refactor-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/27-重构高风险核心模块/tests/project-overview-refactor-contract.test.ts",
+      "purpose": "证明 project overview 巨型组件已拆成组合层、视图模型和子组件。",
+      "assertions": [
+        "ProjectOverviewPanel.tsx 不超过 700 行",
+        "project overview 子模块存在、说明业务目的并由页面组合层导入",
+        "页面文件不再内联定义 SVG icon 组件"
+      ],
+      "expected_initial_failure": "创建阶段应失败于目标模块尚未存在或 ProjectOverviewPanel.tsx 超预算。"
+    },
+    {
+      "id": "change-chat-runtime-refactor",
+      "source": "change_contract",
+      "path": "docs/changes/27-重构高风险核心模块/tests/chat-runtime-refactor-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/27-重构高风险核心模块/tests/chat-runtime-refactor-contract.test.ts",
+      "purpose": "证明聊天核心 hook 已拆出 session、composer、realtime 和 streaming 控制器。",
+      "assertions": [
+        "三个核心 hook 低于行数预算",
+        "控制器模块存在并导出稳定业务入口",
+        "hook 文件导入控制器且不再私有承载重逻辑"
+      ],
+      "expected_initial_failure": "创建阶段应失败于控制器模块尚未存在或 hook 超预算。"
+    },
+    {
+      "id": "change-backend-boundary-refactor",
+      "source": "change_contract",
+      "path": "docs/changes/27-重构高风险核心模块/tests/backend-boundary-refactor-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/27-重构高风险核心模块/tests/backend-boundary-refactor-contract.test.ts",
+      "purpose": "证明后端启动、realtime 和文件 API 边界已拆成装配层和子模块。",
+      "assertions": [
+        "server-bootstrap.ts、chat-command-dispatcher.ts、file-routes.ts 低于行数预算",
+        "chat scope store、command router、file route 子模块存在",
+        "server-bootstrap.ts 不再私有承载重业务 helper"
+      ],
+      "expected_initial_failure": "创建阶段应失败于后端子模块尚未存在或边界文件超预算。"
+    },
+    {
+      "id": "change-refactor-tests-docs",
+      "source": "change_contract",
+      "path": "docs/changes/27-重构高风险核心模块/tests/refactor-tests-docs-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/27-重构高风险核心模块/tests/refactor-tests-docs-contract.test.ts",
+      "purpose": "证明重构同步补齐默认测试和 durable docs。",
+      "assertions": [
+        "新增 unit/backend/specs 默认测试文件",
+        "新增 docs/specs/high-risk-module-refactor.md",
+        "文档说明用户风险、模块边界和验证命令"
+      ],
+      "expected_initial_failure": "创建阶段应失败于默认测试或 durable docs 尚未新增。"
+    }
+  ],
+  "required_evidence": []
+}

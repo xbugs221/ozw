@@ -48,3 +48,24 @@ Codex app-server、SDK runtime 和 CLI fallback 的默认 sandbox/approval polic
 - **且** 旧明文或旧密文凭据读取后必须兼容迁移
 
 对应规格测试：`tests/specs/backend-security-boundary.spec.ts`。
+
+## 需求：后端命令和文件边界 helper 必须有默认回归
+
+命令解析、路径安全、输出清理、项目文件树过滤和权限文本转换属于安全边界的低状态核心规则，必须进入默认 Node 后端测试入口。
+
+### 场景：命令 allowlist 与输出清理默认回归
+
+- **给定** 用户触发后端命令 helper 处理命令字符串、参数和输出
+- **当** 命令包含 shell operator、非 allowlist 命令、危险参数或越界路径
+- **则** helper 必须拒绝该命令或路径
+- **且** allowlist 中的安全命令必须能解析出 command 和 args
+- **且** 输出清理必须移除控制字符但保留换行
+- **测试文件**：`tests/backend/command-parser.test.ts`
+
+### 场景：文件树跳过项和权限文本默认回归
+
+- **给定** 项目文件树包含 `node_modules`、`dist`、`.git` 和普通业务目录
+- **当** 后端构建文件树 helper 判断是否跳过目录
+- **则** 重目录必须被跳过，普通业务目录不得被误跳过
+- **且** Unix permission bit 必须转换成用户可读 rwx 文本
+- **测试文件**：`tests/backend/file-routes-boundary.test.ts`

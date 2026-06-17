@@ -11,6 +11,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 const DEFAULT_PROFILE = 'default';
+// Default evidence path: test-results/test-performance/latest.json
 const PROFILE_OUTPUT_DIR = 'test-results/test-performance';
 const DEFAULT_COMMANDS: TimingCommand[] = [
   {
