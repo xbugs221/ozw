@@ -10,6 +10,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { writeFakeWorkflowTools } from './helpers/workflow-tools.ts';
 
 const REPO_ROOT = process.cwd();
 const DIST_RUNTIME_COMPAT_PATH = path.join(
@@ -91,6 +92,9 @@ test('compiled backend entrypoint starts after build', async () => {
   assert.equal(fs.existsSync(DIST_RUNTIME_COMPAT_PATH), false);
 
   const tempHome = await mkdtemp(path.join(os.tmpdir(), 'ozw-dist-start-'));
+  const binDir = path.join(tempHome, 'bin');
+  await writeFakeWorkflowTools(binDir);
+
   const port = await getFreePort();
   let stdout = '';
   let stderr = '';
@@ -105,6 +109,7 @@ test('compiled backend entrypoint starts after build', async () => {
       CCFLOW_FAKE_RUNNER: '1',
       CCFLOW_FAKE_RUNNER_DELAY_MS: '50',
       CCFLOW_FAKE_CO_DELAY_MS: '50',
+      PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`,
       XDG_STATE_HOME: path.join(tempHome, '.local', 'state'),
     },
     stdio: ['ignore', 'pipe', 'pipe'],

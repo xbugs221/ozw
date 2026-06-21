@@ -34,6 +34,8 @@ const SERVER_SMOKE_TEST_FILES = [
   'tests/backend/provider-session-change.test.ts',
   'tests/backend/sessions.test.ts',
 ] as const;
+const SERVER_TEST_COMMAND = `rm -rf .tmp/test-db/server && DATABASE_PATH=.tmp/test-db/server/ozw.db tsx --test ${BACKEND_TEST_GLOB}`;
+const SPEC_NODE_TEST_COMMAND = 'rm -rf .tmp/test-db/spec-node && DATABASE_PATH=.tmp/test-db/spec-node/ozw.db tsx --test $(node scripts/list-node-spec-tests.mjs)';
 const ACTIVE_PATH_CONTRACT_ROOTS = ['backend', 'frontend', 'tests', 'scripts'];
 const CATEGORY_GUIDES = [
   {
@@ -314,8 +316,8 @@ test('服务端测试 README 和 package 脚本指向同一个真实后端目录
 
   assert.equal(
     packageJson.scripts?.['test:server'],
-    `tsx --test ${BACKEND_TEST_GLOB}`,
-    'pnpm run test:server 必须运行当前后端测试目录',
+    SERVER_TEST_COMMAND,
+    'pnpm run test:server 必须使用隔离数据库运行当前后端测试目录',
   );
   assert.match(readme, /tests\/backend\/\*\.test\.ts/);
   assert.ok(backendTestCount > 0, 'tests/backend 必须存在可执行后端测试，不能只更新文档路径');
@@ -332,16 +334,16 @@ test('Node 测试入口区分快速 smoke、完整回归和发布构建', async 
   };
 
   const scripts = packageJson.scripts ?? {};
-  const smokeCommand = `tsx --test ${SERVER_SMOKE_TEST_FILES.join(' ')}`;
+  const smokeCommand = `rm -rf .tmp/test-db/server-smoke && DATABASE_PATH=.tmp/test-db/server-smoke/ozw.db tsx --test ${SERVER_SMOKE_TEST_FILES.join(' ')}`;
 
   // 业务场景：维护者需要快速 smoke、完整 Node 回归和发布构建三个清楚入口，避免一次规格测试重复构建服务端。
   // 失败含义：入口重新混在一起会让本地验证变慢，且审阅者无法判断失败属于 smoke、完整回归还是发布构建。
   assert.match(scripts['build:server'] ?? '', /^tsc -p tsconfig\.build\.json\b/);
   assert.doesNotMatch(scripts['build:server'] ?? '', /copy-build-runtime-js\.mjs/);
   assert.equal(scripts['test:server:smoke'], smokeCommand);
-  assert.equal(scripts['test:server'], `tsx --test ${BACKEND_TEST_GLOB}`);
+  assert.equal(scripts['test:server'], SERVER_TEST_COMMAND);
   assert.equal(scripts['test:node'], 'pnpm run test:server && pnpm run test:spec:node');
-  assert.equal(scripts['test:spec:node'], 'tsx --test $(node scripts/list-node-spec-tests.mjs)');
+  assert.equal(scripts['test:spec:node'], SPEC_NODE_TEST_COMMAND);
   assert.doesNotMatch(scripts['test:spec:node'] ?? '', /build:server/);
   assert.match(scripts['test:unit'] ?? '', /test:server:smoke/);
   assert.match(backendReadme, /test:server:smoke/);
@@ -435,8 +437,8 @@ test('运行和构建配置指向重命名后的源码根目录', async () => {
   assert.equal(packageJson.bin?.ozw, 'dist-node/backend/cli.js');
   assert.equal(packageJson.scripts?.server, 'tsx backend/index.ts');
   assert.equal(packageJson.scripts?.['dev:watch'], './scripts/dev-watch.sh');
-  assert.equal(packageJson.scripts?.['test:server'], `tsx --test ${BACKEND_TEST_GLOB}`);
-  assert.equal(packageJson.scripts?.['test:spec:node'], 'tsx --test $(node scripts/list-node-spec-tests.mjs)');
+  assert.equal(packageJson.scripts?.['test:server'], SERVER_TEST_COMMAND);
+  assert.equal(packageJson.scripts?.['test:spec:node'], SPEC_NODE_TEST_COMMAND);
   assert.ok(packageJson.files?.includes('backend/'), 'npm package files 必须包含 backend/');
   assert.equal(packageJson.files?.includes('server/'), false, 'npm package files 不应包含 server/');
   assert.ok(devWatch.includes('pnpm exec tsx watch backend/index.ts'));

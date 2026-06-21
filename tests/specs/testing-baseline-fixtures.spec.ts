@@ -74,7 +74,8 @@ test('历史债务门禁没有通过缩短脚本或跳过测试绕过', async ()
   const scripts = packageJson.scripts ?? {};
 
   assert.match(scripts.typecheck ?? '', /typecheck:test/);
-  assert.equal(scripts['test:server'], 'tsx --test tests/backend/*.test.ts');
+  assert.match(scripts['test:server'], /DATABASE_PATH=\.tmp\/test-db\/server\/ozw\.db/);
+  assert.match(scripts['test:server'], /tsx --test tests\/backend\/\*\.test\.ts/);
   assert.match(scripts['test:spec:node'] ?? '', /scripts\/list-node-spec-tests\.mjs/);
 
   const listScript = await readRepoFile('scripts/list-node-spec-tests.mjs');

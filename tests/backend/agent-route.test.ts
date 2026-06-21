@@ -19,6 +19,9 @@ const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-agent-route-test-'
 process.env.HOME = tempHome;
 process.env.DATABASE_PATH = path.join(tempHome, 'auth.db');
 
+const { initializeDatabase } = await import('../../backend/database/db.ts');
+await initializeDatabase();
+
 const {
   default: agentRouter,
   __agentRouteInternalsForTest: {

@@ -124,7 +124,7 @@ test('project-home session cards are wired to production activity rendering', as
    * helpers directly, not leave them as isolated acceptance-test utilities.
    */
   const overviewSource = await readFile(
-    new URL('../../frontend/components/main-content/view/subcomponents/ProjectOverviewPanelRuntime.tsx', import.meta.url),
+    new URL('../../frontend/components/main-content/project-overview/ProjectOverviewPanelRuntime.impl.tsx', import.meta.url),
     'utf8',
   );
   const actionMenuSource = await readFile(
@@ -148,7 +148,7 @@ test('project-home cards expose business sort choices while sidebar stays naviga
    * or provider.
    */
   const overviewSource = await readFile(
-    new URL('../../frontend/components/main-content/view/subcomponents/ProjectOverviewPanelRuntime.tsx', import.meta.url),
+    new URL('../../frontend/components/main-content/project-overview/ProjectOverviewPanelRuntime.impl.tsx', import.meta.url),
     'utf8',
   );
   const sidebarProjectItemSource = await readFile(
@@ -174,7 +174,7 @@ test('project-home manual sessions collapse after ten cards and show request-pre
    * the first-request prefix as the visible card title.
    */
   const overviewSource = await readFile(
-    new URL('../../frontend/components/main-content/view/subcomponents/ProjectOverviewPanelRuntime.tsx', import.meta.url),
+    new URL('../../frontend/components/main-content/project-overview/ProjectOverviewPanelRuntime.impl.tsx', import.meta.url),
     'utf8',
   );
 
@@ -192,7 +192,7 @@ test('manual session cards share compact route number metadata', async () => {
    * before updated time and provider identity, so users can match cards to URLs.
    */
   const overviewSource = await readFile(
-    new URL('../../frontend/components/main-content/view/subcomponents/ProjectOverviewPanelRuntime.tsx', import.meta.url),
+    new URL('../../frontend/components/main-content/project-overview/ProjectOverviewPanelRuntime.impl.tsx', import.meta.url),
     'utf8',
   );
   const workspaceNavSource = await readFile(

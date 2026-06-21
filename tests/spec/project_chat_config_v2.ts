@@ -9,6 +9,13 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
+  cleanupConfV2ProjectApi,
+  loadConfV2ProjectApi,
+  readProjectConf,
+  withIsolatedProject,
+} from './helpers/conf-v2-fixtures.ts';
+
+const {
   addProjectManually,
   createManualSessionDraft,
   deleteCodexSession,
@@ -18,12 +25,12 @@ import {
   saveProjectConfig,
   updateSessionModelState,
   updateSessionUiState,
-} from '../../backend/projects.ts';
-import { getProjectLocalConfigPath } from '../../backend/project-config-store.ts';
-import {
-  readProjectConf,
-  withIsolatedProject,
-} from './helpers/conf-v2-fixtures.ts';
+} = await loadConfV2ProjectApi();
+const { getProjectLocalConfigPath } = await import('../../backend/project-config-store.ts');
+
+test.after(async () => {
+  await cleanupConfV2ProjectApi();
+});
 
 test('Scenario: 保存项目配置时写入 v2 分组结构', async () => {
   await withIsolatedProject(async ({ projectPath }) => {
@@ -116,7 +123,15 @@ test('Scenario: 单条普通会话聚合所有展示状态', async () => {
     await updateSessionUiState(project.name, draft.id, 'codex', { favorite: true });
 
     const persisted = await readProjectConf(projectPath);
-    assert.deepEqual(persisted.chat['1'], {
+    const {
+      createdAt,
+      updatedAt,
+      ...displayState
+    } = persisted.chat['1'];
+
+    assert.match(createdAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.match(updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.deepEqual(displayState, {
       sessionId: draft.id,
       title: '会话1',
       provider: 'codex',

@@ -35,7 +35,8 @@ test('Vitest quick layer keeps broad low-state business coverage without replaci
   const importedRoots = new Set<string>();
 
   assert.match(scripts['test:vitest'] ?? '', /vitest/);
-  assert.equal(scripts['test:server'], 'tsx --test tests/backend/*.test.ts');
+  assert.match(scripts['test:server'] ?? '', /DATABASE_PATH=\.tmp\/test-db\/server\/ozw\.db/);
+  assert.match(scripts['test:server'] ?? '', /tsx --test tests\/backend\/\*\.test\.ts/);
   assert.ok(testFiles.length >= 5, `tests/unit 至少需要 5 个 Vitest 业务测试，当前只有 ${testFiles.length} 个`);
 
   for (const filePath of testFiles) {

@@ -6,11 +6,45 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import {
-  clearProjectDirectoryCache,
-} from '../../../backend/projects.ts';
-
 let homeIsolationQueue = Promise.resolve();
+let projectApiPromise = null;
+let originalDatabasePath;
+let originalDatabasePathDefaulted;
+let isolatedDatabaseDir = '';
+
+/**
+ * Load project-domain APIs only after DATABASE_PATH points at an isolated DB.
+ */
+export async function loadConfV2ProjectApi() {
+  if (!projectApiPromise) {
+    originalDatabasePath = process.env.DATABASE_PATH;
+    originalDatabasePathDefaulted = process.env.OZW_DATABASE_PATH_DEFAULTED;
+    isolatedDatabaseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-conf-v2-db-'));
+    process.env.DATABASE_PATH = path.join(isolatedDatabaseDir, 'ozw.db');
+    delete process.env.OZW_DATABASE_PATH_DEFAULTED;
+    projectApiPromise = import(`../../../backend/projects.ts?conf-v2=${Date.now()}-${Math.random()}`);
+  }
+  return projectApiPromise;
+}
+
+/**
+ * Restore process environment after this spec's isolated project API is done.
+ */
+export async function cleanupConfV2ProjectApi() {
+  if (originalDatabasePath) {
+    process.env.DATABASE_PATH = originalDatabasePath;
+  } else {
+    delete process.env.DATABASE_PATH;
+  }
+  if (originalDatabasePathDefaulted) {
+    process.env.OZW_DATABASE_PATH_DEFAULTED = originalDatabasePathDefaulted;
+  } else {
+    delete process.env.OZW_DATABASE_PATH_DEFAULTED;
+  }
+  if (isolatedDatabaseDir) {
+    await fs.rm(isolatedDatabaseDir, { recursive: true, force: true });
+  }
+}
 
 /**
  * Run one acceptance test with an isolated HOME and project directory.
@@ -29,6 +63,7 @@ export async function withIsolatedProject(testBody) {
     process.env.HOME = homeDir;
     process.env.XDG_STATE_HOME = path.join(homeDir, 'state');
     process.env.PATH = `${binDir}${path.delimiter}${originalPath || ''}`;
+    const { clearProjectDirectoryCache } = await loadConfV2ProjectApi();
     clearProjectDirectoryCache();
     await fs.mkdir(projectPath, { recursive: true });
     await writeFakeGoWorkflowTools(binDir);
