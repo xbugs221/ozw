@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { authenticatedFetch } from '../../../../utils/api';
 import { formatPathRelativeToProject } from '../../../../utils/pathDisplay';
+import ZoomableImagePreview from '../../../image-preview/ZoomableImagePreview';
 
 type CodeEditorImagePreviewProps = {
   projectName: string;
@@ -13,6 +14,13 @@ type CodeEditorImagePreviewProps = {
   projectPath?: string;
   loadingLabel: string;
   errorLabel: string;
+  labels: {
+    zoomIn: string;
+    zoomOut: string;
+    resetZoom: string;
+    enterFullscreen: string;
+    exitFullscreen: string;
+  };
 };
 
 export default function CodeEditorImagePreview({
@@ -22,6 +30,7 @@ export default function CodeEditorImagePreview({
   projectPath,
   loadingLabel,
   errorLabel,
+  labels,
 }: CodeEditorImagePreviewProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,12 +102,12 @@ export default function CodeEditorImagePreview({
   }
 
   return (
-    <div className="flex h-full items-center justify-center overflow-auto bg-muted/30 p-6">
-      <img
-        src={imageUrl}
-        alt={fileName}
-        className="max-h-full max-w-full object-contain"
-      />
-    </div>
+    <ZoomableImagePreview
+      src={imageUrl}
+      alt={fileName}
+      className="h-full"
+      imageClassName="rounded-md shadow-sm"
+      labels={labels}
+    />
   );
 }

@@ -17,6 +17,7 @@ import { parseWorkspaceFileReference } from '../../utils/workspaceLinks';
 import { api } from '../../../../utils/api';
 import type { ProjectFileNode } from '../../utils/fileMentionTree';
 import { isImageFile } from '../../../file-tree/utils/fileTreeUtils';
+import MarkdownMermaidBlock from '../../../code-editor/view/subcomponents/markdown/MarkdownMermaidBlock';
 
 type MarkdownProps = {
   children: React.ReactNode;
@@ -97,9 +98,13 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   }
 
   const match = /language-(\w+)/.exec(className || '');
-  const language = match ? match[1] : 'text';
+  const language = match ? match[1].toLowerCase() : 'text';
   const lines = raw.split(/\r?\n/);
   const isLargeCodeBlock = lines.length > LARGE_CODE_BLOCK_LINE_THRESHOLD || raw.length > LARGE_CODE_BLOCK_CHAR_THRESHOLD;
+
+  if (language === 'mermaid') {
+    return <MarkdownMermaidBlock source={raw} isDarkMode={false} />;
+  }
 
   if (isLargeCodeBlock && !expanded) {
     const preview = lines.slice(0, LARGE_CODE_BLOCK_PREVIEW_LINES).join('\n');

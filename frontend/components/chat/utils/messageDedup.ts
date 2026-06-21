@@ -103,6 +103,10 @@ function hasConflictingReliableSendIdentity(previousMessage: ChatMessage, nextMe
  * Treat two persisted provider rows with different read-model keys as real turns.
  */
 function hasConflictingPersistedMessageKey(previousMessage: ChatMessage, nextMessage: ChatMessage): boolean {
+  if (previousMessage.type === 'assistant' && nextMessage.type === 'assistant') {
+    return false;
+  }
+
   return previousMessage.deliveryStatus === 'persisted'
     && nextMessage.deliveryStatus === 'persisted'
     && typeof previousMessage.messageKey === 'string'
@@ -123,8 +127,7 @@ function isPlainTranscriptMessage(message: ChatMessage): boolean {
   return !message.isToolUse
     && !message.isStreaming
     && !message.isInteractivePrompt
-    && !message.isThinking
-    && !message.isTaskNotification;
+    && !message.isThinking;
 }
 
 /**
@@ -218,6 +221,13 @@ function getDeliveryStatusRank(status: string | undefined): number {
  * Preserve the stronger user delivery status when dropping a duplicate row.
  */
 function mergeDuplicateMessage(previousMessage: ChatMessage, nextMessage: ChatMessage): ChatMessage {
+  if (previousMessage.type === 'assistant') {
+    if (previousMessage.isTaskNotification && !nextMessage.isTaskNotification) {
+      return nextMessage;
+    }
+    return previousMessage;
+  }
+
   if (previousMessage.type !== 'user') {
     return previousMessage;
   }

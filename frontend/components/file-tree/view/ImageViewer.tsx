@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 const X = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
 import { Button } from '../../ui/button';
+import ZoomableImagePreview from '../../image-preview/ZoomableImagePreview';
 import { authenticatedFetch } from '../../../utils/api';
 import type { FileTreeImageSelection } from '../types/types';
 
@@ -71,17 +72,18 @@ export default function ImageViewer({ file, onClose }: ImageViewerProps) {
           </Button>
         </div>
 
-        <div className="p-4 flex justify-center items-center bg-gray-50 dark:bg-gray-900 min-h-[400px]">
+        <div className="flex min-h-[400px] items-center justify-center bg-gray-50 dark:bg-gray-900">
           {loading && (
             <div className="text-center text-gray-500 dark:text-gray-400">
               <p>Loading image...</p>
             </div>
           )}
           {!loading && imageUrl && (
-            <img
+            <ZoomableImagePreview
               src={imageUrl}
               alt={file.name}
-              className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-md"
+              className="h-[70vh] w-full"
+              imageClassName="rounded-lg shadow-md"
             />
           )}
           {!loading && !imageUrl && (

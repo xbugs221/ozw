@@ -278,6 +278,13 @@ export default function CodeEditor({
                 projectPath={effectiveProjectPath}
                 loadingLabel={t('image.loading')}
                 errorLabel={t('image.error')}
+                labels={{
+                  zoomIn: t('image.zoomIn'),
+                  zoomOut: t('image.zoomOut'),
+                  resetZoom: t('image.resetZoom'),
+                  enterFullscreen: t('image.enterFullscreen'),
+                  exitFullscreen: t('image.exitFullscreen'),
+                }}
               />
             ) : (
               <CodeEditorSurface

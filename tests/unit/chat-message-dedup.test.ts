@@ -61,6 +61,99 @@ test('dedupeAdjacentChatMessages keeps repeated user messages that are meaningfu
   assert.deepEqual(dedupedMessages.map((message) => message.content), ['继续', '好的', '继续']);
 });
 
+test('dedupeAdjacentChatMessages collapses adjacent persisted assistant text duplicates with different keys', () => {
+  const messages = [
+    {
+      type: 'assistant',
+      content: '我会再跑一次生产构建，覆盖 Vite/Tailwind 打包路径，确认新组件的样式类和导入都能过构建。',
+      timestamp: '2026-06-21T08:10:00.000Z',
+      messageKey: 'codex:c1:line:120:msg:0',
+      deliveryStatus: 'persisted' as const,
+    },
+    {
+      type: 'assistant',
+      content: '我会再跑一次生产构建，覆盖 Vite/Tailwind 打包路径，确认新组件的样式类和导入都能过构建。',
+      timestamp: '2026-06-21T08:10:00.500Z',
+      messageKey: 'codex:c1:line:121:msg:0',
+      deliveryStatus: 'persisted' as const,
+    },
+    {
+      type: 'assistant',
+      content: '生产构建也通过了。最后确认一下工作区状态，避免构建产物或无关文件被误认为本次修改。',
+      timestamp: '2026-06-21T08:10:05.000Z',
+      messageKey: 'codex:c1:line:122:msg:0',
+      deliveryStatus: 'persisted' as const,
+    },
+  ];
+
+  const dedupedMessages = dedupeAdjacentChatMessages(messages);
+
+  assert.deepEqual(
+    dedupedMessages.map((message) => message.content),
+    [
+      '我会再跑一次生产构建，覆盖 Vite/Tailwind 打包路径，确认新组件的样式类和导入都能过构建。',
+      '生产构建也通过了。最后确认一下工作区状态，避免构建产物或无关文件被误认为本次修改。',
+    ],
+  );
+  assert.equal(dedupedMessages[0].messageKey, 'codex:c1:line:120:msg:0');
+});
+
+test('dedupeAdjacentChatMessages keeps markdown assistant row over duplicate raw task notification', () => {
+  const content = '我现在创建一个小型架构 Mermaid 源文件，然后用 headless Chromium 把它渲染成 PNG。输出会放在 `docs/mermaid-preview.*`，方便你在应用文件树里直接打开图片测试。';
+  const messages = [
+    {
+      type: 'assistant',
+      content,
+      timestamp: '2026-06-21T08:20:00.000Z',
+      messageKey: 'codex-live:agent-message-1',
+      source: 'codex-live',
+    },
+    {
+      type: 'assistant',
+      content,
+      timestamp: '2026-06-21T08:20:00.300Z',
+      messageKey: 'codex:c1:line:130:msg:0',
+      deliveryStatus: 'persisted' as const,
+      isTaskNotification: true,
+      taskStatus: 'in_progress',
+    },
+  ];
+
+  const dedupedMessages = dedupeAdjacentChatMessages(messages);
+
+  assert.equal(dedupedMessages.length, 1);
+  assert.equal(dedupedMessages[0].content, content);
+  assert.equal(dedupedMessages[0].isTaskNotification, undefined);
+});
+
+test('dedupeAdjacentChatMessages replaces duplicate raw task notification with markdown assistant row', () => {
+  const content = '我现在创建一个小型架构 Mermaid 源文件，然后用 headless Chromium 把它渲染成 PNG。输出会放在 `docs/mermaid-preview.*`，方便你在应用文件树里直接打开图片测试。';
+  const messages = [
+    {
+      type: 'assistant',
+      content,
+      timestamp: '2026-06-21T08:20:00.000Z',
+      messageKey: 'codex:c1:line:130:msg:0',
+      deliveryStatus: 'persisted' as const,
+      isTaskNotification: true,
+      taskStatus: 'in_progress',
+    },
+    {
+      type: 'assistant',
+      content,
+      timestamp: '2026-06-21T08:20:00.300Z',
+      messageKey: 'codex-live:agent-message-1',
+      source: 'codex-live',
+    },
+  ];
+
+  const dedupedMessages = dedupeAdjacentChatMessages(messages);
+
+  assert.equal(dedupedMessages.length, 1);
+  assert.equal(dedupedMessages[0].content, content);
+  assert.equal(dedupedMessages[0].isTaskNotification, undefined);
+});
+
 test('dedupeAdjacentChatMessages collapses non-adjacent same-timestamp user echoes', () => {
   const messages = [
     {

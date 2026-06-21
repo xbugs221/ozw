@@ -41,7 +41,12 @@
   },
   "image": {
     "loading": "Loading image preview...",
-    "error": "Unable to load image preview."
+    "error": "Unable to load image preview.",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetZoom": "Reset zoom",
+    "enterFullscreen": "View fullscreen",
+    "exitFullscreen": "Exit fullscreen"
   },
   "footer": {
     "lines": "Lines:",
