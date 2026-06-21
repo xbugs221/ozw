@@ -21,8 +21,7 @@
     "workflows": "工作流",
     "chat": "消息",
     "shell": "终端",
-    "files": "文件",
-    "tasks": "任务"
+    "files": "文件"
   },
   "status": {
     "loading": "加载中...",

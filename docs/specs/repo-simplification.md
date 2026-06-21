@@ -1,67 +1,11 @@
 # 规格：仓库精简与历史残余清理
 
-约束 TaskMaster、lucide、public assets、薄层、历史兼容和脚本资源清理。
+约束 lucide、public assets、薄层、历史兼容和脚本资源清理。
 
 ## 测试入口
 
 - `pnpm exec tsx --test tests/manual/node-history/repo-simplification-boundary.ts`
 - `pnpm exec tsx --test tests/spec/test_suite_taxonomy.ts`
-
-## 需求：系统不得包含 TaskMaster 后端能力
-
-系统不得继续暴露 TaskMaster API、项目探测或 WebSocket 事件分支。
-
-### 场景：后端不注册 TaskMaster 路由
-
-- **当** 开发者阅读后端入口
-- **则** 不得存在 `/api/taskmaster` 路由注册
-- **且** 不得导入 `backend/routes/taskmaster.js`
-
-### 场景：项目 read model 不再包含 TaskMaster metadata
-
-- **当** 客户端请求项目列表或项目详情
-- **则** 返回项目对象不得包含 `taskmaster` 专属字段
-- **且** 后端不得扫描项目目录中的 `.taskmaster` 来生成 ozw 项目状态
-
-### 场景：WebSocket 不再广播 TaskMaster 事件
-
-- **当** 后端处理实时消息
-- **则** 不得生成或转发 `taskmaster-*` 专属事件
-- **且** 前端聊天实时处理不得把 `taskmaster-*` 作为全局项目刷新事件
-
-## 需求：系统不得包含 TaskMaster 前端入口
-
-用户界面不得再出现 tasks tab、TaskMaster 设置、TaskMaster banner 或侧边栏 TaskMaster 指示器。
-
-### 场景：应用启动不再挂载 TaskMaster providers
-
-- **当** 前端应用渲染根组件
-- **则** provider 树中不得包含 `TaskMasterProvider`
-- **且** 不得包含 `TasksSettingsProvider`
-
-### 场景：工作区不显示 tasks tab
-
-- **当** 用户进入任意项目工作区
-- **则** tab 列表只显示保留的核心工作区入口
-- **且** 不得显示 TaskMaster 或 tasks 入口
-
-### 场景：旧 tasks 状态不会导致空白主视图
-
-- **当** 历史本地状态或旧链接要求打开 `activeTab=tasks`
-- **则** 应回落到保留的可用视图
-- **且** 主内容区不得因为已删除面板而空白
-
-### 场景：聊天空态不显示 NextTaskBanner
-
-- **当** 用户在项目中打开聊天空态
-- **则** 页面不得出现初始化 TaskMaster、下一任务或生成任务的提示
-- **且** 聊天输入和 provider 选择仍可正常使用
-
-### 场景：设置页不显示 tasks 设置
-
-- **当** 用户打开设置页
-- **则** 不得出现 TaskMaster 安装状态、启用 TaskMaster 集成或 tasks 设置入口
-- **且** 历史调用 `initialTab=tasks` 时必须落到现有保留设置页
 
 ## 需求：系统不得依赖 lucide-react 图标库
 
@@ -117,7 +61,7 @@
 
 - **当** 开发者查看本变更的文件列表
 - **则** 所有新增、修改、删除路径都必须来自 `git ls-files` 或将要新增的 tracked 源码/测试/文档路径
-- **且** 不得包含 `node_modules/`、`dist/`、`.wo/`、`.taskmaster/`、`.agents/cache/`、`.openspec/cache/`、`tests/test-results/`、`authdb/`、数据库文件或日志文件
+- **且** 不得包含 `node_modules/`、`dist/`、`.wo/`、`.agents/cache/`、`.openspec/cache/`、`tests/test-results/`、`authdb/`、数据库文件或日志文件
 
 ### 场景：ignored 文件只报告不处理
 
@@ -150,8 +94,8 @@
 
 ### 场景：上一份提案的残余入口被清理
 
-- **当** TaskMaster 和 lucide 依赖已经移除
-- **则** 前端不得保留空的 TaskMaster/tasks i18n key、props 透传、tab 类型或图标 adapter
+- **当** lucide 依赖已经移除
+- **则** 前端不得保留空的退役 i18n key、props 透传、tab 类型或图标 adapter
 - **且** 不得保留只为已删除 public asset 服务的 UI 入口
 
 ## 需求：后端源码必须收敛历史兼容和重复 helper
@@ -162,7 +106,7 @@
 
 - **当** 客户端请求项目列表或项目详情
 - **则** 项目名称、路径、会话集合、workflow 集合、provider 状态和可见性规则保持兼容
-- **且** 不得重新引入上一份提案已删除的 TaskMaster metadata
+- **且** 不得重新引入上一份提案已删除的项目 metadata
 
 ### 场景：会话路由 helper 不重复实现
 

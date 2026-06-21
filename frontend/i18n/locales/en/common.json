@@ -21,8 +21,7 @@
     "workflows": "Workflows",
     "chat": "Messages",
     "shell": "Shell",
-    "files": "Files",
-    "tasks": "Tasks"
+    "files": "Files"
   },
   "status": {
     "loading": "Loading...",

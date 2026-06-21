@@ -76,14 +76,11 @@ Thumbs.db
 .claude/
 .cursor/
 .roo/
-.taskmaster/
 .cline/
 .windsurf/
 .serena/
 .mcp.json
 CLAUDE.md
-tasks.json
-tasks/
 tests/test-results/
 test-results/
 /.playwright-cli/

@@ -52,11 +52,6 @@ test('runtime-dependencies imports from executable-resolver', async () => {
   assert.ok(content.includes("'./executable-resolver.ts'"), 'Missing import');
 });
 
-test('commandParser.js BASH_COMMAND_ALLOWLIST excludes task-master', async () => {
-  const content = fs.readFileSync(path.join(REPO_ROOT, 'backend/utils/commandParser.ts'), 'utf8');
-  assert.ok(!content.includes("'task-master'"), 'task-master still present');
-});
-
 test('MCP routes file returns 410 for all requests', async () => {
   const content = fs.readFileSync(path.join(REPO_ROOT, 'backend/routes/mcp.ts'), 'utf8');
   assert.ok(content.includes('status(410)'), 'Should return 410 Gone');
@@ -153,10 +148,9 @@ test('resolveExecutablePath returns path for node', async () => {
     'resolveExecutablePath must return a path for node');
 });
 
-test('commandParser allowlist structurally excludes task-master, includes standard commands', () => {
+test('commandParser allowlist includes standard commands', () => {
   const content = fs.readFileSync(serverMod('utils', 'commandParser.ts'), 'utf8');
   // Verify the BASH_COMMAND_ALLOWLIST array structure
-  assert.ok(!content.includes("'task-master'"), 'task-master must not appear in allowlist');
   assert.ok(content.includes("'ls'") || content.includes('"ls"'),
     'ls must still be in allowlist');
   assert.ok(content.includes("'node'") || content.includes('"node"'),

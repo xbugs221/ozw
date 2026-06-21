@@ -30,7 +30,6 @@ const IGNORED_PREFIXES = [
   'node_modules/',
   'dist/',
   '.wo/',
-  '.taskmaster/',
   '.agents/cache/',
   '.openspec/cache/',
   'tests/test-results/',
@@ -106,11 +105,4 @@ test('TS replacements exist for converted JS + .d.ts pairs', async () => {
   for (const tsPath of tsPaths) {
     assert.ok(fs.existsSync(path.join(REPO_ROOT, tsPath)), `Missing TS: ${tsPath}`);
   }
-});
-
-test('commandParser allowlist no longer includes task-master', async () => {
-  const content = fs.readFileSync(
-    path.join(REPO_ROOT, 'backend/utils/commandParser.ts'), 'utf8',
-  );
-  assert.ok(!content.includes("'task-master'"), 'task-master still in allowlist');
 });

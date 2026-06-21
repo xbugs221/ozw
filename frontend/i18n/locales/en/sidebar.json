@@ -57,8 +57,7 @@
     "chat": "Chat",
     "files": "Files",
     "git": "Git",
-    "terminal": "Terminal",
-    "tasks": "Tasks"
+    "terminal": "Terminal"
   },
   "actions": {
     "refresh": "Refresh",

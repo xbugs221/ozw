@@ -1,7 +1,7 @@
 // @ts-nocheck -- strict:true enabled; incremental tightening tracked.
 /**
  * PURPOSE: Contract test verifying lucide-react dependency and stale asset references are removed.
- * Change: 2026-05-16-29-移除TaskMaster和lucide图标依赖
+ * Change: 2026-05-16-29-移除lucide图标依赖
  *
  * Verifies:
  * - package.json does not depend on lucide-react
@@ -73,7 +73,7 @@ test('index.html does not reference deleted PWA icons or manifest', async () => 
 
 test('index.html still loads the app entry script', async () => {
   const content = await readRepoFile('index.html');
-  assert.match(content, /src\/main\.jsx/);
+  assert.match(content, /frontend\/main\.tsx/);
 });
 
 test('manifest.json is removed — no PWA manifest entry in index.html', async () => {

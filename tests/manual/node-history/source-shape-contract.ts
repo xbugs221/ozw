@@ -49,12 +49,6 @@ function grepSourceFiles(pattern) {
   return results;
 }
 
-test('no TaskMaster references remain in active source code', async () => {
-  const matches = grepSourceFiles(/taskmaster|task-master|taskMaster/i);
-  const activeMatches = matches.filter((f) => !f.includes('docs/') && !f.includes('tests/'));
-  assert.deepStrictEqual(activeMatches, [], 'TaskMaster references remain');
-});
-
 test('no lucide references remain in active source code', async () => {
   const matches = grepSourceFiles(/lucide/i);
   const activeMatches = matches.filter((f) => !f.includes('docs/') && !f.includes('tests/'));

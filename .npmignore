@@ -57,17 +57,11 @@ Thumbs.db
 .claude/
 .cursor/
 .roo/
-.taskmaster/
 .cline/
 .windsurf/
 .serena/
 CLAUDE.md
 .mcp.json
-
-
-# Task files
-tasks.json
-tasks/
 
 # Environment variables
 .env
