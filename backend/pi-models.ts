@@ -22,7 +22,7 @@ function shouldUseFakePiCatalog() {
   /**
    * Keep browser e2e isolated from the developer machine's real Pi auth state.
    */
-  return process.env.CCFLOW_FAKE_RUNNER === '1' || process.env.CBW_FAKE_PI_RUNTIME === '1';
+  return process.env.CCFLOW_FAKE_RUNNER === '1' || process.env.OZW_FAKE_PI_RUNTIME === '1';
 }
 
 /**

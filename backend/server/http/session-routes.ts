@@ -3,10 +3,38 @@
  * 业务意义：route module 直接声明自身依赖，避免通过宽泛依赖隐藏权限边界。
  */
 
-type LooseRecord = Record<string, any>;
+import type {
+    AuthMiddleware,
+    HeavyReadCoalescer,
+    HttpRouteApp,
+    ProjectInvalidationEvent,
+    ProjectLike,
+} from './route-deps.js';
 
 export interface SessionRouteDeps {
-    app: any; authenticateToken: any; handleGetSessionMessages: any; searchChatHistory: any; heavyReadCoalescer: any; renameSession: any; updateSessionUiState: any; getSessionModelState: any; updateSessionModelState: any; broadcastSessionModelStateUpdated: any; normalizeManualProvider: any; createManualSessionDraft: any; finalizeManualSessionRoute: any; deleteSession: any; extractProjectDirectory: any; broadcastProjectListInvalidated: any;
+    app: HttpRouteApp;
+    authenticateToken: AuthMiddleware;
+    handleGetSessionMessages: unknown;
+    searchChatHistory: (query: string, mode: 'jsonl' | 'content') => Promise<unknown[]>;
+    heavyReadCoalescer: HeavyReadCoalescer;
+    renameSession: (projectName: string, sessionId: string, summary: string, projectPath: string) => Promise<unknown>;
+    updateSessionUiState: (projectName: string, sessionId: string, provider: string, state: { favorite: boolean; pending: boolean; hidden: boolean }, projectPath: string) => Promise<unknown>;
+    getSessionModelState: (projectPath: string, sessionId: string) => Promise<unknown>;
+    updateSessionModelState: (projectPath: string, sessionId: string, state: { model: string; reasoningEffort: string; thinkingLevel: string; thinkingMode: string }) => Promise<unknown>;
+    broadcastSessionModelStateUpdated: (event: {
+        sourceUserId: number | null;
+        projectName: string;
+        projectPath: string;
+        sessionId: string;
+        provider: string;
+        state: unknown;
+    }) => unknown;
+    normalizeManualProvider: (provider: unknown) => string;
+    createManualSessionDraft: (projectName: string, projectPath: string, provider: string, label: string, context: { workflowId: string; stageKey: string }) => Promise<unknown>;
+    finalizeManualSessionRoute: (projectName: string, draftSessionId: string, actualSessionId: string, provider: string, projectPath: string) => Promise<unknown>;
+    deleteSession: (projectName: string, sessionId: string, provider: string | null) => Promise<unknown>;
+    extractProjectDirectory: (projectName: string) => Promise<string>;
+    broadcastProjectListInvalidated: (event: ProjectInvalidationEvent) => unknown;
 }
 
 /**
@@ -20,7 +48,7 @@ const listLegacySessionsHandler = async (_req: any, res: any) => {
 };
 
 // Get messages for a specific session
-const getSessionMessagesHandler = handleGetSessionMessages;
+const getSessionMessagesHandler = handleGetSessionMessages as AuthMiddleware;
 
 // Search across visible chat history messages for supported provider sessions.
 const searchChatHistoryHandler = async (req: any, res: any) => {

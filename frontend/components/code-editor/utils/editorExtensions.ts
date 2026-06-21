@@ -1,3 +1,7 @@
+/**
+ * PURPOSE: Build CodeMirror language, minimap, and diff positioning extensions
+ * used by the workspace text editor.
+ */
 import { css } from '@codemirror/lang-css';
 import { html } from '@codemirror/lang-html';
 import { javascript } from '@codemirror/lang-javascript';
@@ -9,6 +13,7 @@ import { getChunks } from '@codemirror/merge';
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import { showMinimap } from '@replit/codemirror-minimap';
 import type { CodeEditorFile } from '../types/types';
+import { focusDiffPosition, getDiffPosition } from './diffNavigation';
 
 // Lightweight lexer for `.env` files (including `.env.*` variants).
 const envLanguage = StreamLanguage.define({
@@ -119,23 +124,39 @@ export const createScrollToFirstChunkExtension = ({
 
   return [
     ViewPlugin.fromClass(class {
-      constructor(view: EditorView) {
-        // Wait for merge decorations so the first chunk location is stable.
-        setTimeout(() => {
-          const chunksData = getChunks(view.state);
-          const firstChunk = chunksData?.chunks?.[0];
+      private disposed = false;
 
-          if (firstChunk) {
-            view.dispatch({
-              effects: EditorView.scrollIntoView(firstChunk.fromB, { y: 'center' }),
-            });
+      private didFocus = false;
+
+      constructor(view: EditorView) {
+        this.focusFirstDiff(view);
+      }
+
+      /**
+       * Focus the first changed region once CodeMirror has mounted and drawn.
+       */
+      private focusFirstDiff(view: EditorView) {
+        window.setTimeout(() => {
+          if (this.disposed || this.didFocus) {
+            return;
           }
+
+          const position = getDiffPosition(view, file);
+
+          if (position === null) {
+            return;
+          }
+
+          this.didFocus = true;
+          focusDiffPosition(view, position);
         }, 100);
       }
 
       update() {}
 
-      destroy() {}
+      destroy() {
+        this.disposed = true;
+      }
     }),
   ];
 };

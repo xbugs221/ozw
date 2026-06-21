@@ -18,14 +18,14 @@
 
 `pnpm run qa:test:timing` 运行 `scripts/collect-test-timings.ts`，默认采集 `typecheck`、`test:vitest` 和 `test:server:smoke` 的真实耗时与退出码，并写入 `test-results/test-performance/latest.json`。
 
-`pnpm run qa:test:timing:fast`、`pnpm run qa:test:timing:smoke` 和 `pnpm run qa:test:timing:full` 分别采集 fast/smoke/full profile，并写入 `test-results/test-performance/fast.json`、`test-results/test-performance/smoke.json` 和 `test-results/test-performance/full.json`。这些 profile 通过 `CBW_TEST_TIMING_PROFILE` 选择内置命令集合；`CBW_TEST_TIMING_OUTPUT` 仍可覆盖输出路径。
+`pnpm run qa:test:timing:fast`、`pnpm run qa:test:timing:smoke` 和 `pnpm run qa:test:timing:full` 分别采集 fast/smoke/full profile，并写入 `test-results/test-performance/fast.json`、`test-results/test-performance/smoke.json` 和 `test-results/test-performance/full.json`。这些 profile 通过 `OZW_TEST_TIMING_PROFILE` 选择内置命令集合；`OZW_TEST_TIMING_OUTPUT` 仍可覆盖输出路径。
 
 JSON 中每条结果包含命令 id、命令文本、`durationMs`、`exitCode`、`startedAt` 和 `finishedAt`。如果某个命令失败，脚本会保留非零退出码并以失败状态结束，避免把坏基线记录成成功。
 
-需要临时采集其他入口时，可以设置 `CBW_TEST_TIMING_COMMANDS` 为 JSON 数组，例如：
+需要临时采集其他入口时，可以设置 `OZW_TEST_TIMING_COMMANDS` 为 JSON 数组，例如：
 
 ```bash
-CBW_TEST_TIMING_COMMANDS='[{"id":"fast","command":"pnpm","args":["run","test:fast"]}]' pnpm run qa:test:timing
+OZW_TEST_TIMING_COMMANDS='[{"id":"fast","command":"pnpm","args":["run","test:fast"]}]' pnpm run qa:test:timing
 ```
 
 ## 使用建议

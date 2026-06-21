@@ -55,7 +55,6 @@ const {
 const { validateWorkspacePath } = await import('../../backend/workspace-paths.ts');
 const { sendCodexAppServerMessage } = await import('../../backend/codex-app-server-runtime.ts');
 const { createGitCredentialEnvironment } = await import('../../backend/git-credential-env.ts');
-const { __mapPermissionModeToCodexOptionsForTest } = await import('../../backend/openai-codex.ts');
 const { getWebSocketAuthToken } = await import('../../backend/websocket-auth.ts');
 const { __nativeAgentRuntimeInternalsForTest } = await import('../../backend/native-agent-runtime.ts');
 
@@ -330,27 +329,29 @@ test('Codex app-server default and bypass permissions stay in YOLO mode', async 
   });
 });
 
-test('Codex CLI fallback permission modes inherit YOLO server policy', async () => {
-  const defaultPolicy = __mapPermissionModeToCodexOptionsForTest('default');
-  const acceptEditsPolicy = __mapPermissionModeToCodexOptionsForTest('acceptEdits');
-  const bypassPolicy = __mapPermissionModeToCodexOptionsForTest('bypassPermissions');
+test('Codex app-server and native runtime permission modes inherit YOLO server policy', async () => {
+  const { __codexAppServerRuntimeInternalsForTest } = await import('../../backend/codex-app-server-runtime.ts');
+  const defaultPolicy = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('default');
+  const acceptEditsPolicy = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('acceptEdits');
+  const bypassPolicy = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('bypassPermissions');
   const nativeDefaultPolicy = __nativeAgentRuntimeInternalsForTest.resolveCodexPermissionPolicy('default');
   const nativeBypassPolicy = __nativeAgentRuntimeInternalsForTest.resolveCodexPermissionPolicy('bypassPermissions');
 
-  assert.equal(defaultPolicy.sandboxMode, 'danger-full-access');
+  assert.equal(defaultPolicy.sandbox, 'danger-full-access');
   assert.equal(defaultPolicy.approvalPolicy, 'never');
-  assert.equal(acceptEditsPolicy.sandboxMode, 'danger-full-access');
+  assert.equal(acceptEditsPolicy.sandbox, 'danger-full-access');
   assert.equal(acceptEditsPolicy.approvalPolicy, 'never');
-  assert.equal(bypassPolicy.sandboxMode, 'danger-full-access');
+  assert.equal(bypassPolicy.sandbox, 'danger-full-access');
   assert.equal(bypassPolicy.approvalPolicy, 'never');
-  assert.deepEqual(nativeDefaultPolicy, defaultPolicy);
+  assert.equal(nativeDefaultPolicy.sandboxMode, defaultPolicy.sandbox);
+  assert.equal(nativeDefaultPolicy.approvalPolicy, defaultPolicy.approvalPolicy);
   assert.equal(nativeBypassPolicy.sandboxMode, 'danger-full-access');
   assert.equal(nativeBypassPolicy.approvalPolicy, 'never');
-  assert.equal(bypassPolicy.sandboxMode, nativeBypassPolicy.sandboxMode);
+  assert.equal(bypassPolicy.sandbox, nativeBypassPolicy.sandboxMode);
   assert.equal(bypassPolicy.approvalPolicy, nativeBypassPolicy.approvalPolicy);
 
   evidenceRows.push({
-    id: 'codex-cli-fallback-policy',
+    id: 'codex-app-server-native-policy',
     passed: true,
     defaultPolicy,
     acceptEditsPolicy,

@@ -171,12 +171,55 @@ export function buildProjectChatRecord(
   if (typeof metadata.stageKey === 'string') {
     record.stageKey = metadata.stageKey;
   }
+  const createdAt = readConfigTimestamp(
+    metadata.createdAt,
+    metadata.created_at,
+    metadata.timestamp,
+    metadata.lastActivity,
+    metadata.updated_at,
+    metadata.updatedAt,
+  );
+  const updatedAt = readConfigTimestamp(
+    metadata.updatedAt,
+    metadata.updated_at,
+    metadata.lastActivity,
+    metadata.timestamp,
+    createdAt,
+  );
+  if (createdAt) {
+    record.createdAt = createdAt;
+  }
+  if (updatedAt) {
+    record.updatedAt = updatedAt;
+  }
   Object.assign(record, normalizeSessionModelState(modelState));
   const normalizedUi = normalizeSessionUiState(uiState);
   if (Object.keys(normalizedUi).length > 0) {
     record.ui = normalizedUi;
   }
   return record;
+}
+
+/**
+ * Read the first persistable timestamp from route metadata.
+ */
+function readConfigTimestamp(...values: unknown[]): string {
+  /**
+   * PURPOSE: Preserve route creation/activity time without writing transient
+   * request time into project-local config.
+   */
+  for (const value of values) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value.toISOString();
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
 }
 
 /**

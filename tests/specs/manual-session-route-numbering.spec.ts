@@ -1,6 +1,6 @@
 // Sources: 114-统一会话路由编号与真实会话创建
 /**
- * 文件目的：验证 CBW 手动会话 cN 路由编号和真实 provider session 绑定的稳定业务规格。
+ * 文件目的：验证 OZW 手动会话 cN 路由编号和真实 provider session 绑定的稳定业务规格。
  * 业务意义：防止新建会话时复用旧 cN，或把 cN 当成真实 provider session 导致无法创建新会话。
  */
 import assert from 'node:assert/strict';

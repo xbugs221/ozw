@@ -23,7 +23,6 @@ const CORE_BACKEND_FILES = [
   'backend/server/provider-watchers.ts',
   'backend/server/server-runtime-context.ts',
   'backend/native-agent-runtime.ts',
-  'backend/openai-codex.ts',
   'backend/codex-app-server-runtime.ts',
   'backend/session-messages-handler.ts',
 ];
@@ -355,7 +354,6 @@ test('legacy server delegates routes websockets and watchers to server modules',
 
 test('Codex event transform has a single backend implementation source', async () => {
   const sources = await Promise.all([
-    readRepoFile('backend/openai-codex.ts'),
     readRepoFile('backend/native-agent-runtime.ts'),
     readRepoFile('backend/codex-app-server-runtime.ts'),
     readRepoFile('shared/codex-message-normalizer.ts'),

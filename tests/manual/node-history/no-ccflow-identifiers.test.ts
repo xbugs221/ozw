@@ -93,7 +93,7 @@ test('frontend/, backend/, shared/ must not contain active ccflow identifiers', 
   );
 });
 
-test('environment variable names must use CBW_ prefix, not CCFLOW_', () => {
+test('environment variable names must use OZW_ prefix, not CCFLOW_', () => {
   const envVarPatterns = [/CCFLOW_[A-Z_]+/];
   const violations: Array<{ file: string; line: number; text: string }> = [];
 
@@ -122,6 +122,6 @@ test('environment variable names must use CBW_ prefix, not CCFLOW_', () => {
   assert.deepStrictEqual(
     violations,
     [],
-    `CCFLOW_ environment variable references must be renamed to CBW_: ${JSON.stringify(violations, null, 2)}`,
+    `CCFLOW_ environment variable references must be renamed to OZW_: ${JSON.stringify(violations, null, 2)}`,
   );
 });

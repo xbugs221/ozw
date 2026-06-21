@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
 import { dedupeAdjacentChatMessages } from '../../frontend/components/chat/utils/messageDedup';
+import { mergeSessionMessagesByIdentityPreservingOrder } from '../../frontend/components/chat/utils/sessionMessageDedup';
 import { mergePersistedAndOptimisticMessages } from '../../frontend/components/chat/utils/sessionMessageMerge';
 import { reduceNativeRuntimeEvent } from '../../frontend/components/chat/utils/nativeRuntimeTranscript';
 
@@ -392,6 +393,63 @@ test('mergePersistedAndOptimisticMessages drops live assistant prefix after JSON
       'assistant:我会先检查 live transcript 行，再用 read model 做一次最终校准。',
     ],
   );
+});
+
+test('mergeSessionMessagesByIdentityPreservingOrder skips cN active overlay assistant already loaded from JSONL', () => {
+  const persistedText = '我会把这次决策同步到 ~/.matx 里的 skill/subagent，保留显式触发和宽泛搜索。';
+  const mergedMessages = mergeSessionMessagesByIdentityPreservingOrder(
+    [
+      {
+        type: 'assistant',
+        timestamp: '2026-06-18T06:02:28.879Z',
+        provider: 'codex',
+        messageKey: 'codex:provider-session:line:253:msg:0',
+        message: { role: 'assistant', content: persistedText },
+      },
+    ],
+    [
+      {
+        type: 'assistant',
+        timestamp: '2026-06-18T06:02:28.900Z',
+        provider: 'codex',
+        messageKey: 'codex:msg_live_overlay_1',
+        message: { role: 'assistant', content: persistedText },
+      },
+    ],
+  );
+
+  assert.equal(mergedMessages.length, 1);
+  assert.equal(mergedMessages[0].messageKey, 'codex:provider-session:line:253:msg:0');
+  assert.equal(mergedMessages[0].message?.content, persistedText);
+});
+
+test('mergeSessionMessagesByIdentityPreservingOrder extends loaded JSONL assistant with longer active overlay text', () => {
+  const persistedPrefix = '我会保持两个文件都是说明层，不新增 skill.runtime.yaml';
+  const liveExpanded = '我会保持两个文件都是说明层，不新增 skill.runtime.yaml 或 workflow 节点；这符合自动触发先不做、JSON 约定先不做的范围。';
+  const mergedMessages = mergeSessionMessagesByIdentityPreservingOrder(
+    [
+      {
+        type: 'assistant',
+        timestamp: '2026-06-18T06:02:37.986Z',
+        provider: 'codex',
+        messageKey: 'codex:provider-session:line:256:msg:0',
+        message: { role: 'assistant', content: persistedPrefix },
+      },
+    ],
+    [
+      {
+        type: 'assistant',
+        timestamp: '2026-06-18T06:02:38.100Z',
+        provider: 'codex',
+        messageKey: 'codex:msg_live_overlay_2',
+        message: { role: 'assistant', content: liveExpanded },
+      },
+    ],
+  );
+
+  assert.equal(mergedMessages.length, 1);
+  assert.equal(mergedMessages[0].messageKey, 'codex:provider-session:line:256:msg:0');
+  assert.equal(mergedMessages[0].message?.content, liveExpanded);
 });
 
 test('mergePersistedAndOptimisticMessages drops live tool card once JSONL contains the same tool call', () => {

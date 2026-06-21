@@ -2,9 +2,16 @@
  * PURPOSE: Keep project refresh merge rules outside the React hook so sidebar
  * updates preserve loaded overview details while accepting fresh list data.
  */
-import type { Project, ProjectSession } from '../../types/app';
+import type { Project, ProjectSession, ProjectWorkflow } from '../../types/app';
 
-export const serialize = (value: unknown) => JSON.stringify(value ?? null);
+type RefreshComparableProject = Pick<Project, 'name' | 'displayName' | 'fullPath' | 'sessionMeta' | 'hasUnreadActivity'>;
+
+export const serialize = (value: unknown): string => {
+  /** Preserve legacy primitive comparisons without using deep JSON serialization. */
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return String(value);
+  return String(value);
+};
 
 export const isTemporarySessionId = (sessionId: string | null | undefined): boolean =>
   Boolean(sessionId && (sessionId.startsWith('new-session-') || /^c\d+$/.test(sessionId)));
@@ -19,39 +26,6 @@ export function isInterruptedFetch(error: unknown): boolean {
   const message = String((error as { message?: string } | null)?.message || error || '');
   return message.includes('Failed to fetch') || message.includes('aborted') || message.includes('AbortError');
 }
-
-/**
- * Compare project arrays, including provider sessions when requested.
- */
-export const projectsHaveChanges = (
-  prevProjects: Project[],
-  nextProjects: Project[],
-  includeExternalSessions: boolean,
-): boolean => {
-  if (prevProjects.length !== nextProjects.length) return true;
-
-  return nextProjects.some((nextProject, index) => {
-    const prevProject = prevProjects[index];
-    if (!prevProject) return true;
-
-    const baseChanged =
-      nextProject.name !== prevProject.name ||
-      nextProject.displayName !== prevProject.displayName ||
-      nextProject.fullPath !== prevProject.fullPath ||
-      serialize(nextProject.sessionMeta) !== serialize(prevProject.sessionMeta) ||
-      serialize(nextProject.sessions) !== serialize(prevProject.sessions) ||
-      serialize(nextProject.workflows) !== serialize(prevProject.workflows) ||
-      serialize(nextProject.hasUnreadActivity) !== serialize(prevProject.hasUnreadActivity);
-
-    if (baseChanged) return true;
-    if (!includeExternalSessions) return false;
-
-    return (
-      serialize(nextProject.codexSessions) !== serialize(prevProject.codexSessions) ||
-      serialize(nextProject.piSessions) !== serialize(prevProject.piSessions)
-    );
-  });
-};
 
 /**
  * Merge a detail overview into its matching lightweight project summary.
@@ -126,4 +100,80 @@ export const findRefreshedSelectedSession = (
       : (project.sessions || []);
 
   return providerSessions.find((session) => session.routeIndex === selectedSession.routeIndex) || null;
+};
+
+function signatureSegment(value: unknown): string {
+  /** Convert primitive refresh fields into stable signature segments. */
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[|:,]/g, ' ');
+}
+
+function sessionListSignature(items: ProjectSession[] | undefined): string {
+  /** Summarize visible session identity and ordering without deep serialization. */
+  return (items || [])
+    .map((item) => [
+      item.id,
+      item.routeIndex,
+      item.updatedAt ?? item.updated_at ?? item.lastActivity ?? item.last_activity ?? item.timestamp,
+      item.messageCount,
+      item.status,
+      item.favorite,
+      item.hidden,
+      item.archived,
+    ].map(signatureSegment).join(':'))
+    .join('|');
+}
+
+function workflowListSignature(items: ProjectWorkflow[] | undefined): string {
+  /** Summarize workflow list identity and status without walking nested payloads. */
+  return (items || [])
+    .map((item) => [
+      item.id,
+      item.status,
+      item.updatedAt ?? item.createdAt,
+      item.title,
+    ].map(signatureSegment).join(':'))
+    .join('|');
+}
+
+export function buildProjectRefreshSignature(
+  project: RefreshComparableProject,
+  includeExternalSessions: boolean,
+): string {
+  /** Build a bounded project refresh signature from fields that affect sidebar state. */
+  const internal = project as Project;
+  const base = [
+    project.name,
+    project.displayName,
+    project.fullPath,
+    project.sessionMeta?.total,
+    project.sessionMeta?.hasMore,
+    project.hasUnreadActivity,
+    sessionListSignature(internal.sessions),
+    workflowListSignature(internal.workflows),
+  ];
+  if (includeExternalSessions) {
+    base.push(sessionListSignature(internal.codexSessions), sessionListSignature(internal.piSessions));
+  }
+  return base.map(signatureSegment).join('|');
+}
+
+/**
+ * Compare project arrays, including provider rows when requested.
+ */
+export const projectsHaveChanges = (
+  prevProjects: Project[],
+  nextProjects: Project[],
+  includeExternalRows: boolean,
+): boolean => {
+  if (prevProjects.length !== nextProjects.length) return true;
+
+  return nextProjects.some((nextProject, index) => {
+    const prevProject = prevProjects[index];
+    if (!prevProject) return true;
+    return (
+      buildProjectRefreshSignature(nextProject, includeExternalRows) !==
+      buildProjectRefreshSignature(prevProject, includeExternalRows)
+    );
+  });
 };

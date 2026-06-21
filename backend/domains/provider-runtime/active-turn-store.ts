@@ -1,4 +1,3 @@
-// @ts-nocheck -- Runtime bridge shared by backend TS and Playwright TS tests.
 /**
  * File purpose: own disposable active-turn overlays for running provider
  * sessions so refresh recovery stays separate from durable transcript storage.
@@ -6,7 +5,7 @@
 
 import { mkdirSync, appendFileSync } from 'fs';
 import path from 'path';
-import { reduceNativeRuntimeEvent } from '../../../frontend/components/chat/utils/nativeRuntimeTranscript.js';
+import { reduceNativeRuntimeEvent, type ChatMessageLike } from '../../../shared/provider-runtime-transcript.js';
 import type { Provider } from './provider-runtime-events.js';
 
 const activeTurns = new Map<string, Record<string, unknown>>();
@@ -118,11 +117,11 @@ export function recordProviderActiveTurnRuntimeEvent({
   if (!existing) {
     return;
   }
-  const previous = Array.isArray(existing.runtimeRows) ? existing.runtimeRows : [];
+  const previous = Array.isArray(existing.runtimeRows) ? existing.runtimeRows as ChatMessageLike[] : [];
   activeTurns.set(key, {
     ...existing,
     status: 'running',
-    runtimeRows: reduceNativeRuntimeEvent(previous as any[], {
+    runtimeRows: reduceNativeRuntimeEvent(previous, {
       type: `${provider}-response`,
       data: event,
       sessionId,

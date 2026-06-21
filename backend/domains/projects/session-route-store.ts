@@ -90,6 +90,8 @@ export async function initManualSessionRoute(
   deps.clearProjectDirectoryCache();
   const responseRecord = { ...updatedRecord };
   delete responseRecord.routeStarted;
+  delete responseRecord.createdAt;
+  delete responseRecord.updatedAt;
   return { started: true, record: responseRecord };
 }
 
@@ -225,6 +227,7 @@ export async function finalizeManualSessionRoute(
       ...draftRecord.record,
       sessionId: provider === 'pi' ? (routeSessionId || draftSessionId) : actualSessionId,
       title: trimmedLabel || draftRecord.record.title,
+      routeTitle: draft?.routeTitle || draftRecord.record.routeTitle || trimmedLabel || draftRecord.record.title,
       provider,
       providerSessionId: actualSessionId,
       workflowId,

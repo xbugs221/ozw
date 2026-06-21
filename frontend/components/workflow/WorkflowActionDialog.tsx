@@ -153,7 +153,11 @@ export default function WorkflowActionDialog({
       )));
 
       try {
-        const response = await api.createProjectWorkflow(project.name, { openspecChangeName: changeName });
+        const response = await api.createProjectWorkflow(
+          project.name,
+          { openspecChangeName: changeName },
+          project.fullPath || project.path || '',
+        );
         if (!response.ok) {
           throw new Error(await readWorkflowCreateError(response));
         }

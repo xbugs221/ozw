@@ -7,9 +7,9 @@ export const IS_PLATFORM = process.env.VITE_IS_PLATFORM === 'true';
 /**
  * Environment Flag: Trust loopback hosts
  * Allows localhost/127.0.0.1 requests to reuse the first local account without JWT login.
- * Local desktop access is trusted by default; set CBW_TRUST_LOCALHOST_AUTH=false to require login.
+ * Local desktop access is trusted by default; set OZW_TRUST_LOCALHOST_AUTH=false to require login.
  */
-export const TRUST_LOCALHOST_AUTH = process.env.CBW_TRUST_LOCALHOST_AUTH !== 'false';
+export const TRUST_LOCALHOST_AUTH = process.env.OZW_TRUST_LOCALHOST_AUTH !== 'false';
 
 /**
  * Token expiry time for JWT auth tokens.

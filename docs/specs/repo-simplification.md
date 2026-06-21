@@ -31,18 +31,20 @@
 
 ## 需求：系统不得引用已删除的 public assets
 
-应用入口不得继续请求已经删除的 public 图标和 logo 文件。
+应用入口不得继续请求已经删除的 public 图标和 logo 文件；PWA 使用的 manifest 与图标必须指向当前存在的 public 资源。
 
-### 场景：HTML 入口不引用失效 favicon 和 apple icons
+### 场景：HTML 入口不引用失效 favicon
 
 - **当** 浏览器加载 `index.html`
-- **则** HTML 不得引用 `/favicon.svg`、`/favicon.png` 或 `/icons/icon-*.png`
+- **则** HTML 不得引用 `/favicon.svg`、`/favicon.png`、`/favicon.ico` 或旧 `/icons/icon-*.png`
+- **且** 若发布 PWA 安装入口，必须引用当前存在的 `/manifest.webmanifest` 和 `/pwa/` 图标
 - **且** 仍必须保留正常加载前端入口脚本
 
 ### 场景：manifest 不引用失效 icons
 
-- **当** 浏览器请求 `manifest.json`
+- **当** 浏览器请求 PWA manifest
 - **则** manifest 不得包含指向 `/icons/` 的已删除 icon 列表
+- **且** manifest 中每个图标文件必须存在于 `public/`
 - **且** manifest JSON 必须保持合法
 
 ### 场景：provider 和 auth UI 不引用失效 logo
@@ -161,13 +163,13 @@
 ### 场景：运行环境变量读取逻辑
 
 - **当** server 启动时读取 `TRUST_LOCALHOST_AUTH`
-- **则** 应当读取 `CBW_TRUST_LOCALHOST_AUTH` 环境变量，而不是 `CCFLOW_TRUST_LOCALHOST_AUTH`
-- **且** co 客户端已在 49 号提案中彻底移除，不应存在 `CCFLOW_CO_HOME` 或 `CBW_CO_HOME` 的读取逻辑
+- **则** 应当读取 `OZW_TRUST_LOCALHOST_AUTH` 环境变量，而不是 `CCFLOW_TRUST_LOCALHOST_AUTH`
+- **且** co 客户端已在 49 号提案中彻底移除，不应存在 `CCFLOW_CO_HOME` 或 `OZW_CO_HOME` 的读取逻辑
 
 ### 场景：前端读取浏览器本地设置
 
 - **当** `settingsStorage.ts` 读取 localStorage 时
-- **则** 应当使用常量 `CBW_SETTINGS_KEY`，其值保持为 `'ozw-settings'`
+- **则** 应当使用常量 `OZW_SETTINGS_KEY`，其值保持为 `'ozw-settings'`
 - **且** 其他模块应导入 `readCbwSettings`，而不是 `readCcflowSettings`
 
 ## 需求：移除不必要的历史兼容写法

@@ -53,3 +53,22 @@ export function canRenderLiveRowForAcceptedTurn(message: ChatMessage): boolean {
 export function isNativeLiveTurnMessage(message: ChatMessage): boolean {
   return message.source === 'codex-live' || message.source === 'pi-live' || message.source === 'codex-realtime';
 }
+
+/**
+ * Decide whether the follow-latest action should avoid pulling JSONL tail rows
+ * because the active provider turn is already represented by WS live overlay.
+ */
+export function shouldDeferFollowLatestRefresh(input: {
+  messages: ChatMessage[];
+  isRealtimeConnected: boolean;
+  isTurnRunning: boolean;
+}): boolean {
+  /**
+   * While a native provider turn is still running, WS owns the visible current
+   * turn. JSONL refreshes can still happen from external updates or completion
+   * paths, but the follow button itself should only move the viewport.
+   */
+  return input.isRealtimeConnected
+    && input.isTurnRunning
+    && input.messages.some(isNativeLiveTurnMessage);
+}

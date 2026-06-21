@@ -399,10 +399,10 @@ test('分层质量门提供可复查 timing profile 且默认门禁不缩水', a
   assert.equal(scripts['test:smoke'], 'pnpm run test:fast && pnpm run test:e2e:smoke');
   assert.match(scripts['test:full'] ?? '', /pnpm run typecheck/);
   assert.match(scripts['test:full'] ?? '', /pnpm run test:browser:full/);
-  assert.equal(scripts['qa:test:timing:fast'], 'CBW_TEST_TIMING_PROFILE=fast tsx scripts/collect-test-timings.ts');
-  assert.equal(scripts['qa:test:timing:smoke'], 'CBW_TEST_TIMING_PROFILE=smoke tsx scripts/collect-test-timings.ts');
-  assert.equal(scripts['qa:test:timing:full'], 'CBW_TEST_TIMING_PROFILE=full tsx scripts/collect-test-timings.ts');
-  assert.match(timingScript, /CBW_TEST_TIMING_PROFILE/);
+  assert.equal(scripts['qa:test:timing:fast'], 'OZW_TEST_TIMING_PROFILE=fast tsx scripts/collect-test-timings.ts');
+  assert.equal(scripts['qa:test:timing:smoke'], 'OZW_TEST_TIMING_PROFILE=smoke tsx scripts/collect-test-timings.ts');
+  assert.equal(scripts['qa:test:timing:full'], 'OZW_TEST_TIMING_PROFILE=full tsx scripts/collect-test-timings.ts');
+  assert.match(timingScript, /OZW_TEST_TIMING_PROFILE/);
   assert.match(timingScript, /test-results\/test-performance/);
   assert.match(timingScript, /failed\.length > 0/);
   assert.match(timingScript, /process\.exitCode = failed\[0\]\.exitCode \?\? 1/);

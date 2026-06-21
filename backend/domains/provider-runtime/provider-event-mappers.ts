@@ -5,6 +5,22 @@
 import type { RuntimeEvent } from './provider-runtime-events.js';
 
 /**
+ * 读取 Pi 工具调用输入，兼容 SDK 版本间的字段别名。
+ */
+function readPiToolInput(event: Record<string, unknown>): unknown {
+  /** 统一传给前端 reducer，避免 start/update 缺 input 导致裸卡片。 */
+  return event.arguments ?? event.args ?? event.input;
+}
+
+/**
+ * 读取 Pi 工具调用输出，兼容中间更新与结束事件。
+ */
+function readPiToolOutput(event: Record<string, unknown>): unknown {
+  /** update 事件可能用 partialResult，end 事件可能用 output/result。 */
+  return event.partialResult ?? event.output ?? event.result;
+}
+
+/**
  * 将 Pi SDK AgentSessionEvent 映射为 ozw runtime item/turn/error 事件。
  */
 export function transformPiEvent(event: Record<string, unknown>): unknown {
@@ -22,11 +38,37 @@ export function transformPiEvent(event: Record<string, unknown>): unknown {
       }
       // Tool execution lifecycle
       case 'tool_execution_start':
-        return { type: 'item', itemType: 'tool_call', itemId: event.toolCallId || null, tool: event.toolName, status: 'running' };
+        return {
+          type: 'item',
+          itemType: 'tool_call',
+          itemId: event.toolCallId || null,
+          toolCallId: event.toolCallId || null,
+          tool: event.toolName,
+          arguments: readPiToolInput(event),
+          status: 'running'
+        };
       case 'tool_execution_update':
-        return { type: 'item', itemType: 'tool_call', itemId: event.toolCallId || null, tool: event.toolName, output: event.output };
+        return {
+          type: 'item',
+          itemType: 'tool_call',
+          itemId: event.toolCallId || null,
+          toolCallId: event.toolCallId || null,
+          tool: event.toolName,
+          arguments: readPiToolInput(event),
+          output: readPiToolOutput(event),
+          status: 'running'
+        };
       case 'tool_execution_end':
-        return { type: 'item', itemType: 'tool_result', itemId: event.toolCallId || null, tool: event.toolName, result: event.output, isError: event.isError, status: 'completed' };
+        return {
+          type: 'item',
+          itemType: 'tool_result',
+          itemId: event.toolCallId || null,
+          toolCallId: event.toolCallId || null,
+          tool: event.toolName,
+          result: readPiToolOutput(event),
+          isError: event.isError,
+          status: 'completed'
+        };
       // Turn lifecycle
       case 'turn_start':
         return { type: 'turn_started', timestamp: typeof event.timestamp === 'number' ? event.timestamp : undefined };

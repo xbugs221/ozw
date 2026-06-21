@@ -1,3 +1,7 @@
+/**
+ * PURPOSE: Provide scoped CodeMirror loading, merge diff, and toolbar styles
+ * for the workspace text editor.
+ */
 export const getEditorLoadingStyles = (isDarkMode: boolean) => {
   return `
     .code-editor-loading {
@@ -24,8 +28,26 @@ export const getEditorStyles = (isDarkMode: boolean) => {
       padding-left: 4px !important;
     }
 
+    .cm-editor.cm-merge-b .cm-changedLine,
+    .cm-editor.cm-merge-b .cm-inlineChangedLine {
+      background-color: ${isDarkMode ? 'rgba(34, 197, 94, 0.18)' : 'rgba(220, 252, 231, 1)'} !important;
+      box-shadow: inset 3px 0 0 ${isDarkMode ? 'rgba(34, 197, 94, 0.75)' : 'rgb(34, 197, 94)'} !important;
+    }
+
+    .cm-editor.cm-merge-b .cm-insertedLine {
+      background-color: ${isDarkMode ? 'rgba(34, 197, 94, 0.22)' : 'rgba(187, 247, 208, 0.9)'} !important;
+      text-decoration: none !important;
+    }
+
+    .cm-editor .cm-deletedLine,
+    .cm-editor .cm-deletedLine del,
+    .cm-editor .cm-deletedChunk .cm-deletedLine {
+      background-color: ${isDarkMode ? 'rgba(239, 68, 68, 0.20)' : 'rgba(254, 226, 226, 1)'} !important;
+      text-decoration: none !important;
+    }
+
     .cm-editor.cm-merge-b .cm-changedText {
-      background: ${isDarkMode ? 'rgba(34, 197, 94, 0.4)' : 'rgba(34, 197, 94, 0.3)'} !important;
+      background: ${isDarkMode ? 'rgba(34, 197, 94, 0.42)' : 'rgba(74, 222, 128, 0.48)'} !important;
       padding-top: 2px !important;
       padding-bottom: 2px !important;
       margin-top: -2px !important;
@@ -33,11 +55,28 @@ export const getEditorStyles = (isDarkMode: boolean) => {
     }
 
     .cm-editor .cm-deletedChunk .cm-changedText {
-      background: ${isDarkMode ? 'rgba(239, 68, 68, 0.4)' : 'rgba(239, 68, 68, 0.3)'} !important;
+      background: ${isDarkMode ? 'rgba(239, 68, 68, 0.42)' : 'rgba(248, 113, 113, 0.42)'} !important;
       padding-top: 2px !important;
       padding-bottom: 2px !important;
       margin-top: -2px !important;
       margin-bottom: -2px !important;
+    }
+
+    .cm-editor .cm-changeGutter {
+      width: 4px !important;
+      padding-left: 0 !important;
+    }
+
+    .cm-editor.cm-merge-b .cm-changedLineGutter {
+      background-color: ${isDarkMode ? 'rgba(34, 197, 94, 0.9)' : 'rgb(22, 163, 74)'} !important;
+    }
+
+    .cm-editor .cm-deletedLineGutter {
+      background-color: ${isDarkMode ? 'rgba(239, 68, 68, 0.9)' : 'rgb(220, 38, 38)'} !important;
+    }
+
+    .cm-editor.cm-focused .cm-activeLine {
+      background-color: ${isDarkMode ? 'rgba(59, 130, 246, 0.12)' : 'rgba(191, 219, 254, 0.45)'} !important;
     }
 
     .cm-gutter.cm-gutter-minimap {

@@ -2,6 +2,7 @@
  * PURPOSE: Share project home session-card activity signatures with the sidebar
  * so both surfaces agree on unread state and read receipts.
  */
+import { getSessionActivityTime } from '../../../../utils/sessionActivityTime';
 
 export interface Session {
   id: string;
@@ -9,10 +10,20 @@ export interface Session {
   provider?: string;
   __projectName?: string;
   lastActivity?: string;
+  last_activity?: string;
+  activityAt?: string;
+  activity_at?: string;
   updated_at?: string;
   updatedAt?: string;
+  time_updated?: string;
+  timeUpdated?: string;
+  modified_at?: string;
+  modifiedAt?: string;
+  timestamp?: string;
   created_at?: string;
   createdAt?: string;
+  time_created?: string;
+  timeCreated?: string;
   messageCount?: number | null;
   [key: string]: unknown;
 }
@@ -52,13 +63,7 @@ export function getSessionActivitySignature(session: Session): string {
   /**
    * Convert visible session activity into a stable read/unread comparison value.
    */
-  const sessionTime =
-    session.lastActivity ||
-    session.updated_at ||
-    session.updatedAt ||
-    session.created_at ||
-    session.createdAt ||
-    '';
+  const sessionTime = getSessionActivityTime(session);
   const messageCount = typeof session.messageCount === 'number' && Number.isFinite(session.messageCount)
     ? session.messageCount
     : 'unknown';

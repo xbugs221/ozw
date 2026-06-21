@@ -53,6 +53,7 @@ test('provider session index migrates old rows and persists workflow origin', ()
       origin: 'workflow',
       projectPath: '/tmp/ozw-provider-index-origin',
       title: 'workflow state owned session',
+      routeTitle: 'workflow state',
       filePath: '/tmp/pi-workflow-child.jsonl',
       createdAt: '2026-06-13T01:00:00.000Z',
       lastActivity: '2026-06-13T01:00:01.000Z',
@@ -60,11 +61,13 @@ test('provider session index migrates old rows and persists workflow origin', ()
 
     const columns = db.prepare('PRAGMA table_info(provider_session_index)').all();
     assert.equal(columns.some((column) => column.name === 'origin'), true);
+    assert.equal(columns.some((column) => column.name === 'route_title'), true);
 
     const sessions = providerSessionIndexDb.listForProject(db, 'pi', '/tmp/ozw-provider-index-origin', 10);
     assert.equal(sessions.length, 1);
     assert.equal(sessions[0].id, 'pi-workflow-child');
     assert.equal(sessions[0].origin, 'workflow');
+    assert.equal(sessions[0].routeTitle, 'workflow state');
 
     providerSessionIndexDb.upsert(db, {
       provider: 'pi',

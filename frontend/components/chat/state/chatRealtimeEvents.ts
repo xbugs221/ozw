@@ -15,6 +15,7 @@ const NATIVE_LIVE_ITEM_TYPES = new Set([
   'file_change',
   'mcp_tool_call',
   'function_call',
+  'custom_tool_call',
   'function_call_output',
   'update',
   'error',

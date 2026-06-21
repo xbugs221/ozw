@@ -67,6 +67,10 @@ export interface ContextCommandPayloadViewModel {
 export interface FileChangeViewModel {
   kind: string;
   path: string;
+  diffInfo?: {
+    old_string?: string;
+    new_string?: string;
+  };
 }
 
 export interface FileChangesPayloadViewModel {
@@ -672,9 +676,30 @@ export function parseFileChangesPayload(value: unknown, resultValue?: unknown): 
           if (!path) {
             return null;
           }
+          const oldString = typeof changeRecord.old_string === 'string'
+            ? changeRecord.old_string
+            : typeof record?.old_string === 'string'
+              ? record.old_string
+              : undefined;
+          const newString = typeof changeRecord.new_string === 'string'
+            ? changeRecord.new_string
+            : typeof record?.new_string === 'string'
+              ? record.new_string
+              : undefined;
+
           return {
             kind: typeof changeRecord.kind === 'string' ? changeRecord.kind : 'changed',
             path,
+            ...(
+              oldString !== undefined || newString !== undefined
+                ? {
+                    diffInfo: {
+                      ...(oldString !== undefined ? { old_string: oldString } : {}),
+                      ...(newString !== undefined ? { new_string: newString } : {}),
+                    },
+                  }
+                : {}
+            ),
           };
         })
         .filter((item): item is FileChangeViewModel => Boolean(item)),

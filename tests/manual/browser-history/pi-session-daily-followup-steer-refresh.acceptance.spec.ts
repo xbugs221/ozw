@@ -23,7 +23,7 @@ const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results/pi-session-58');
 
 test.describe('Pi manual session daily send, follow-up, steer, and reload recovery', () => {
   test.skip(
-    process.env.CBW_PLAYWRIGHT_TRACE_RUN === '1',
+    process.env.OZW_PLAYWRIGHT_TRACE_RUN === '1',
     'Playwright trace-on runner teardown is tracked outside this Pi business acceptance contract.',
   );
 

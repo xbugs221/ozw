@@ -1,3 +1,7 @@
+/**
+ * PURPOSE: Build stable UI row identities for chat messages without confusing
+ * request/turn identity with individual transcript row identity.
+ */
 import type { ChatMessage } from '../types/types';
 
 const toMessageKeyPart = (value: unknown): string | null => {
@@ -10,17 +14,31 @@ const toMessageKeyPart = (value: unknown): string | null => {
 };
 
 export const getIntrinsicMessageKey = (message: ChatMessage): string | null => {
-  const candidates = [
-    message.clientRequestId,
-    message.messageKey,
-    message.id,
-    message.messageId,
-    message.toolId,
-    message.toolCallId,
-    message.blobId,
-    message.rowid,
-    message.sequence,
-  ];
+  /**
+   * User optimistic/persisted rows use clientRequestId as their row identity.
+   * Assistant/tool rows can share one clientRequestId across several visible
+   * rows in the same turn, so prefer provider row/tool identities there.
+   */
+  const candidates = message.type === 'user'
+    ? [
+        message.clientRequestId,
+        message.messageKey,
+        message.id,
+        message.messageId,
+        message.blobId,
+        message.rowid,
+        message.sequence,
+      ]
+    : [
+        message.messageKey,
+        message.id,
+        message.messageId,
+        message.toolId,
+        message.toolCallId,
+        message.blobId,
+        message.rowid,
+        message.sequence,
+      ];
 
   for (const candidate of candidates) {
     const keyPart = toMessageKeyPart(candidate);

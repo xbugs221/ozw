@@ -48,6 +48,18 @@ function getBoundProviderSessionId(session: LooseRecord): string {
 }
 
 /**
+ * Convert session activity into a stable sort key.
+ */
+function getSessionActivityTimeMs(session: LooseRecord): number {
+  /**
+   * PURPOSE: Missing timestamps are old data, not current activity, so they
+   * must not crowd newer provider JSONL sessions out of limited overview lists.
+   */
+  const parsed = new Date(session?.lastActivity || session?.updated_at || session?.createdAt || 0).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
  * 判断旧版本误记为 manual 的 workflow 角色会话，避免历史内部子任务污染手动列表。
  */
 function isLegacyWorkflowRolePromptSession(session: LooseRecord): boolean {
@@ -128,7 +140,7 @@ export function buildProviderSessionListReadModel(input: ProviderSessionListInpu
     new Map([...standaloneProviderSessions, ...routedSessions].map((session) => [session?.id, session])).values(),
   )
     .filter((session) => includeHidden || !isHiddenArchivedSession(session))
-    .sort((sessionA, sessionB) => new Date(sessionB.lastActivity || 0).getTime() - new Date(sessionA.lastActivity || 0).getTime());
+    .sort((sessionA, sessionB) => getSessionActivityTimeMs(sessionB) - getSessionActivityTimeMs(sessionA));
 
   return sessions;
 }

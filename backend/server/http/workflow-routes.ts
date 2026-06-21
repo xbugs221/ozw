@@ -3,24 +3,55 @@
  * 业务意义：route module 直接声明自身依赖，避免通过宽泛依赖隐藏权限边界。
  */
 
-type LooseRecord = Record<string, any>;
+import type {
+    AuthMiddleware,
+    FsPromisesDeps,
+    HeavyReadCoalescer,
+    HttpRouteApp,
+    LooseRecord,
+    ProjectInvalidationEvent,
+    ProjectLike,
+    WorkflowLike,
+} from './route-deps.js';
 
 export interface WorkflowRouteDeps {
-    app: any; authenticateToken: any; heavyReadCoalescer: any; fsPromises: any; extractProjectDirectory: any; listProjectWorkflows: any; summarizeWorkflowForProjectList: any; getProjects: any; attachWorkflowMetadata: any; findProjectByName: any; createProjectWorkflow: any; watchGoWorkflowRun: any; broadcastProjectListInvalidated: any; listProjectAdoptableOpenSpecChanges: any; getProjectWorkflow: any; resumeWorkflowRun: any; abortWorkflowRun: any;
+    app: HttpRouteApp;
+    authenticateToken: AuthMiddleware;
+    heavyReadCoalescer: HeavyReadCoalescer;
+    fsPromises: FsPromisesDeps;
+    extractProjectDirectory: (projectName: string) => Promise<string>;
+    listProjectWorkflows: (projectPath: string) => Promise<WorkflowLike[]>;
+    summarizeWorkflowForProjectList: (workflow: WorkflowLike) => WorkflowLike;
+    getProjects: () => Promise<ProjectLike[]>;
+    attachWorkflowMetadata: (project: ProjectLike) => Promise<ProjectLike> | ProjectLike;
+    findProjectByName: (projectName: string) => ProjectLike | Promise<ProjectLike | null> | null;
+    createProjectWorkflow: (project: ProjectLike, request: { title: unknown; objective: unknown; openspecChangeName: unknown }) => Promise<WorkflowLike>;
+    watchGoWorkflowRun: (project: ProjectLike, workflow: WorkflowLike) => Promise<unknown>;
+    broadcastProjectListInvalidated: (event: ProjectInvalidationEvent) => unknown;
+    listProjectAdoptableOpenSpecChanges: (project: ProjectLike) => Promise<unknown[]>;
+    getProjectWorkflow: (project: ProjectLike, workflowId: string) => Promise<WorkflowLike | null>;
+    resumeWorkflowRun: (project: ProjectLike, workflowId: string) => Promise<WorkflowLike | null>;
+    abortWorkflowRun: (project: ProjectLike, workflowId: string) => Promise<WorkflowLike | null>;
 }
 
 /**
  * 注册 workflow 相关 HTTP 路由。
  */
 export function registerWorkflowRoutes(deps: WorkflowRouteDeps): void {
-    const { app, authenticateToken, heavyReadCoalescer, fsPromises, extractProjectDirectory, listProjectWorkflows, summarizeWorkflowForProjectList, getProjects, attachWorkflowMetadata, findProjectByName, createProjectWorkflow, watchGoWorkflowRun, broadcastProjectListInvalidated, listProjectAdoptableOpenSpecChanges, getProjectWorkflow, resumeWorkflowRun, abortWorkflowRun } = deps;
+    const { app, authenticateToken, heavyReadCoalescer, fsPromises, extractProjectDirectory, listProjectWorkflows, summarizeWorkflowForProjectList, getProjects, createProjectWorkflow, watchGoWorkflowRun, broadcastProjectListInvalidated, listProjectAdoptableOpenSpecChanges, getProjectWorkflow, resumeWorkflowRun, abortWorkflowRun } = deps;
 
 const listWorkflowsHandler = async (req: any, res: any) => {
     try {
         const workflows = await heavyReadCoalescer.run(`projects:workflows:${req.params.projectName}`, async () => {
             // Resolve only the requested project; the sidebar summary endpoint
             // already watches all discovered projects after /api/projects.
-            const projectPath = await extractProjectDirectory(req.params.projectName);
+            const projectPath = await resolveExistingWorkflowProjectPath(
+                String(req.params.projectName),
+                typeof req.query?.projectPath === 'string' ? req.query.projectPath : '',
+            );
+            if (!projectPath) {
+                return null;
+            }
             try {
                 const stat = await fsPromises.stat(projectPath);
                 if (!stat.isDirectory()) {
@@ -71,7 +102,7 @@ async function resolveExistingWorkflowProjectPath(projectName: string, requested
     }
 
     const projects = await getProjects();
-const matchedProject = projects.find((project: any) => (
+    const matchedProject = projects.find((project: any) => (
         project.name === projectName
         || project.routePath === projectName
         || project.fullPath === projectName
@@ -91,11 +122,12 @@ const matchedProject = projects.find((project: any) => (
 
 const createWorkflowHandler = async (req: any, res: any) => {
     try {
-        const projects = await attachWorkflowMetadata(await getProjects());
-        const project = findProjectByName(projects, req.params.projectName);
-        if (!project) {
+        const requestedProjectPath = typeof req.body?.projectPath === 'string' ? req.body.projectPath : '';
+        const projectPath = await resolveExistingWorkflowProjectPath(String(req.params.projectName), requestedProjectPath);
+        if (!projectPath) {
             return res.status(404).json({ error: 'Project not found' });
         }
+        const project = { name: req.params.projectName, fullPath: projectPath, path: projectPath };
 
         const workflow = await createProjectWorkflow(project, {
             title: req.body?.title,
@@ -168,11 +200,12 @@ const getWorkflowHandler = async (req: any, res: any) => {
 
 const resumeWorkflowRunHandler = async (req: any, res: any) => {
     try {
-        const projects = await attachWorkflowMetadata(await getProjects());
-        const project = findProjectByName(projects, req.params.projectName);
-        if (!project) {
+        const requestedProjectPath = typeof req.body?.projectPath === 'string' ? req.body.projectPath : '';
+        const projectPath = await resolveExistingWorkflowProjectPath(String(req.params.projectName), requestedProjectPath);
+        if (!projectPath) {
             return res.status(404).json({ error: 'Project not found' });
         }
+        const project = { name: req.params.projectName, fullPath: projectPath, path: projectPath };
 
         const workflow = await resumeWorkflowRun(project, req.params.workflowId);
         if (!workflow) {
@@ -188,11 +221,12 @@ const resumeWorkflowRunHandler = async (req: any, res: any) => {
 
 const abortWorkflowRunHandler = async (req: any, res: any) => {
     try {
-        const projects = await attachWorkflowMetadata(await getProjects());
-        const project = findProjectByName(projects, req.params.projectName);
-        if (!project) {
+        const requestedProjectPath = typeof req.body?.projectPath === 'string' ? req.body.projectPath : '';
+        const projectPath = await resolveExistingWorkflowProjectPath(String(req.params.projectName), requestedProjectPath);
+        if (!projectPath) {
             return res.status(404).json({ error: 'Project not found' });
         }
+        const project = { name: req.params.projectName, fullPath: projectPath, path: projectPath };
 
         const workflow = await abortWorkflowRun(project, req.params.workflowId);
         if (!workflow) {

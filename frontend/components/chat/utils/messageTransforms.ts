@@ -1,3 +1,6 @@
+/**
+ * PURPOSE: Convert provider transcript records into renderable chat messages.
+ */
 import type { ChatMessage } from '../types/types';
 import { decodeHtmlEntities, unescapeWithMathProtection } from './chatFormatting';
 import { dedupeAdjacentChatMessages } from './messageDedup';
@@ -5,6 +8,7 @@ import {
   normalizeCodexFunctionCall,
   normalizeCodexToolOutput,
 } from '../../../../shared/codex-message-normalizer.js';
+import { isSubagentToolCall } from '../../../../shared/subagent-tool-utils.js';
 import {
   isProviderFileUpdatePayload,
   resolveCodexToolUpdateJson,
@@ -66,6 +70,7 @@ function toCodexToolUpdateChatMessage(
 
   const normalized = normalizeCodexFunctionCall(resolved.payload);
   const normalizedToolCallId = typeof normalized.toolCallId === 'string' ? normalized.toolCallId : undefined;
+  const isSubagentContainer = isSubagentToolCall(normalized.toolName, normalized.toolInput);
   return {
     type: 'assistant',
     content: '',
@@ -80,6 +85,14 @@ function toCodexToolUpdateChatMessage(
     toolCallId: normalizedToolCallId,
     toolId: normalizedToolCallId,
     toolResult: null,
+    isSubagentContainer,
+    subagentState: isSubagentContainer
+      ? {
+          childTools: [],
+          currentToolIndex: -1,
+          isComplete: false,
+        }
+      : undefined,
   };
 }
 
@@ -93,6 +106,40 @@ function stripUserUploadNoteForDisplay(content: string): string {
   }
 
   return content.slice(0, markerIndex).trimEnd();
+}
+
+/**
+ * Recover persisted upload metadata so refreshed user bubbles still show the
+ * attached files even though provider-facing instructions stay hidden.
+ */
+function parseUserUploadNoteAttachments(content: string): NonNullable<ChatMessage['attachments']> {
+  const markerIndex = content.indexOf(USER_UPLOAD_NOTE_MARKER);
+  if (markerIndex < 0) {
+    return [];
+  }
+
+  const attachments: NonNullable<ChatMessage['attachments']> = [];
+  content
+    .slice(markerIndex + USER_UPLOAD_NOTE_MARKER.length)
+    .split('\n')
+    .forEach((line) => {
+      const match = line.match(/^\s*\d+\.\s+(.+?)\s+->\s+(.+?)\s+\((.+?),\s+(\d+)\s+bytes\)\s*$/);
+      if (!match) {
+        return;
+      }
+      const relativePath = match[1].trim();
+      const absolutePath = match[2].trim();
+      const name = relativePath.split(/[\\/]/).filter(Boolean).pop() || absolutePath.split(/[\\/]/).filter(Boolean).pop() || 'upload';
+      attachments.push({
+        kind: 'file' as const,
+        name,
+        relativePath,
+        absolutePath,
+        mimeType: match[3].trim(),
+        size: Number(match[4]),
+      });
+    });
+  return attachments;
 }
 
 const asArray = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
@@ -569,8 +616,9 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
       }
 
       const displayContent = stripUserUploadNoteForDisplay(content);
+      const parsedAttachments = parseUserUploadNoteAttachments(content);
       const shouldSkip =
-        !displayContent ||
+        (!displayContent && parsedAttachments.length === 0) ||
         displayContent.startsWith('<command-name>') ||
         displayContent.startsWith('<command-message>') ||
         displayContent.startsWith('<command-args>') ||
@@ -608,6 +656,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
             clientRequestId: getClientRequestId(message),
             turnAnchorKey: typeof message.turnAnchorKey === 'string' ? message.turnAnchorKey : undefined,
             ...getStoredOrderFields(message),
+            ...(parsedAttachments.length > 0 ? { attachments: parsedAttachments } : {}),
             deliveryStatus: 'persisted',
           });
         }
@@ -630,7 +679,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
     }
 
     if (message.type === 'tool_use' && message.toolName) {
-      const isSubagentContainer = message.toolName === 'Task' || message.toolName === 'Agent';
+      const isSubagentContainer = isSubagentToolCall(message.toolName, message.toolInput);
       converted.push({
         type: 'assistant',
         content: '',
@@ -670,7 +719,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
             isError: false,
           };
           if (
-            (convertedMessage.toolName === 'Task' || convertedMessage.toolName === 'Agent') &&
+            isSubagentToolCall(convertedMessage.toolName, convertedMessage.toolInput) &&
             Array.isArray(message.subagentTools)
           ) {
             const childTools = message.subagentTools.map((tool: any) => ({
@@ -743,7 +792,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
 
           if (part.type === 'tool_use') {
             const toolResult = toolResults.get(part.id);
-            const isSubagentContainer = part.name === 'Task' || part.name === 'Agent';
+            const isSubagentContainer = isSubagentToolCall(part.name, part.input);
 
             // Build child tools from server-provided subagentTools data
             const childTools: import('../types/types').SubagentChildTool[] = [];

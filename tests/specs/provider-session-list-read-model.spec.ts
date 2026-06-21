@@ -70,6 +70,38 @@ test('Provider 会话列表隐藏已绑定 cN 的原始 session 并过滤 workfl
   await writeEvidenceSnapshot('read-model-output.json', output);
 });
 
+test('Provider 会话列表不会让缺失时间的旧 cN 路由挤掉最近 provider 会话', async () => {
+  /**
+   * 业务场景：旧版本自动导入的 cN 路由可能没有 createdAt/updatedAt；
+   * 它们不能被当成“刚刚活动”排在真实新 JSONL 会话之前。
+   */
+  const output = buildProviderSessionListReadModel({
+    provider: 'codex',
+    providerSessions: [
+      {
+        id: 'recent-provider-session',
+        title: '刚创建的真实 Codex 会话',
+        lastActivity: '2026-06-18T06:30:00.000Z',
+      },
+    ],
+    manualDrafts: [
+      {
+        id: 'old-routed-session',
+        routeIndex: 1,
+        provider: 'codex',
+        title: '旧 cN 路由',
+      },
+    ],
+    excludeWorkflowChildSessions: true,
+    includeHidden: true,
+  });
+
+  assert.equal(output[0].id, 'recent-provider-session');
+  assert.equal(output[1].id, 'old-routed-session');
+
+  await writeEvidenceSnapshot('untimestamped-route-order.json', output);
+});
+
 test('Provider 会话列表过滤旧版本误标为 manual 的 workflow 角色提示会话', async () => {
   /**
    * 业务场景：历史 workflow 子会话曾以 cN manual route 形态持久化，项目首页不能把这些内部角色会话展示成手动会话。

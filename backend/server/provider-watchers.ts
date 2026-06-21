@@ -10,8 +10,12 @@ type LooseRecord = Record<string, any>;
 
 const WATCHER_DEBOUNCE_MS = 300;
 const GO_RUNNER_WATCH_DEPTH = 1;
+const PROVIDER_WATCH_POLLING_INTERVAL_MS = Number.parseInt(
+    process.env.OZW_PROVIDER_WATCH_INTERVAL_MS || process.env.CHOKIDAR_INTERVAL || '1000',
+    10,
+);
 let projectsWatchers: Array<{ close(): Promise<void> | void }> = [];
-let projectsWatcherDebounceTimer: NodeJS.Timeout | null = null;
+const projectsWatcherDebounceTimers = new Map<string, NodeJS.Timeout>();
 const goRunnerWatchers = new Map<string, { close(): Promise<void> | void }>();
 let goRunnerWatcherDebounceTimer: NodeJS.Timeout | null = null;
 
@@ -24,10 +28,8 @@ export function createProviderWatcherController(deps: any) {
      * Close all provider filesystem watchers and clear any pending debounce work.
      */
     async function closeProjectsWatchers() {
-        if (projectsWatcherDebounceTimer) {
-            clearTimeout(projectsWatcherDebounceTimer);
-            projectsWatcherDebounceTimer = null;
-        }
+        projectsWatcherDebounceTimers.forEach((timer) => clearTimeout(timer));
+        projectsWatcherDebounceTimers.clear();
 
         await Promise.all(
             projectsWatchers.map(async (watcher) => {
@@ -39,6 +41,15 @@ export function createProviderWatcherController(deps: any) {
             })
         );
         projectsWatchers = [];
+    }
+
+    /**
+     * Use polling for provider transcript trees by default so large Codex/Pi
+     * histories do not exhaust inotify descriptors and silently disable realtime.
+     */
+    function shouldUseProviderPolling() {
+        const rawValue = String(process.env.OZW_PROVIDER_WATCH_USE_POLLING || process.env.CHOKIDAR_USEPOLLING || '').trim().toLowerCase();
+        return rawValue !== '0' && rawValue !== 'false' && rawValue !== 'no';
     }
 
     /**
@@ -155,32 +166,54 @@ export function createProviderWatcherController(deps: any) {
         const chokidar = (await import('chokidar')).default;
 
         await closeProjectsWatchers();
+        const readyPromises: Array<Promise<void>> = [];
 
         const debouncedUpdate = (eventType: string, filePath: string, provider: string, rootPath: string) => {
-            if (projectsWatcherDebounceTimer) {
-                clearTimeout(projectsWatcherDebounceTimer);
+            const debounceKey = `${provider}:${filePath}`;
+            const existingTimer = projectsWatcherDebounceTimers.get(debounceKey);
+            if (existingTimer) {
+                clearTimeout(existingTimer);
             }
 
-            projectsWatcherDebounceTimer = setTimeout(async () => {
+            const timer = setTimeout(async () => {
+                projectsWatcherDebounceTimers.delete(debounceKey);
                 try {
                     clearProjectDirectoryCache();
-	                    if (filePath.endsWith('.jsonl')) {
-	                        if (eventType === 'unlink') {
-	                            const projectPath = typeof getProviderSessionProjectPathForFile === 'function'
-	                                ? await getProviderSessionProjectPathForFile(provider, filePath)
-	                                : '';
-	                            await deleteProviderSessionIndexFile(provider, filePath);
-	                            const remainingSessions = projectPath && typeof countProviderSessionsForProject === 'function'
-	                                ? await countProviderSessionsForProject(projectPath)
-	                                : 0;
-	                            if (projectPath && remainingSessions === 0 && typeof hideProviderProjectIndex === 'function') {
-	                                hideProviderProjectIndex(projectPath, 'provider-session-deleted');
-	                                void broadcastProjectListInvalidated({
-	                                    reason: 'project-index-sync-delete',
-	                                    changedProjectPath: projectPath,
-	                                });
-	                            }
-	                        } else if (eventType === 'add' || eventType === 'change') {
+                    if (!filePath.toLowerCase().endsWith('.jsonl')) {
+                        return;
+                    }
+
+                    let deletedProjectPath = '';
+                    if (eventType === 'unlink') {
+                        deletedProjectPath = typeof getProviderSessionProjectPathForFile === 'function'
+                            ? await getProviderSessionProjectPathForFile(provider, filePath)
+                            : '';
+                    }
+                    const sessionChange = await resolveProviderSessionChange({
+                        provider,
+                        filePath,
+                        rootPath,
+                        changeType: eventType,
+                    });
+                    if (!sessionChange.projectPath && deletedProjectPath) {
+                        sessionChange.projectPath = deletedProjectPath;
+                    }
+                    broadcastSessionChanged(sessionChange);
+
+                    try {
+                        if (eventType === 'unlink') {
+                            await deleteProviderSessionIndexFile(provider, filePath);
+                            const remainingSessions = deletedProjectPath && typeof countProviderSessionsForProject === 'function'
+                                ? await countProviderSessionsForProject(deletedProjectPath)
+                                : 0;
+                            if (deletedProjectPath && remainingSessions === 0 && typeof hideProviderProjectIndex === 'function') {
+                                hideProviderProjectIndex(deletedProjectPath, 'provider-session-deleted');
+                                void broadcastProjectListInvalidated({
+                                    reason: 'project-index-sync-delete',
+                                    changedProjectPath: deletedProjectPath,
+                                });
+                            }
+                        } else if (eventType === 'add' || eventType === 'change') {
                             const session = await indexProviderSessionFile(provider, filePath);
                             const projectPath = await upsertProjectIndexFromProviderSession(session);
                             if (projectPath) {
@@ -190,20 +223,16 @@ export function createProviderWatcherController(deps: any) {
                                 });
                             }
                         }
+                    } catch (indexError: any) {
+                        console.warn('[WARN] Provider session index sync failed:', indexError?.message || indexError);
                     }
-                    const sessionChange = await resolveProviderSessionChange({
-                        provider,
-                        filePath,
-                        rootPath,
-                        changeType: eventType,
-                    });
-                    broadcastSessionChanged(sessionChange);
                     // 只发 scoped 事件；transcript 追加不触发全局项目列表刷新
 
                 } catch (error: any) {
                     console.error('[ERROR] Error handling project changes:', error);
                 }
             }, WATCHER_DEBOUNCE_MS);
+            projectsWatcherDebounceTimers.set(debounceKey, timer);
         };
 
         for (const { provider, rootPath } of PROVIDER_WATCH_PATHS) {
@@ -219,10 +248,25 @@ export function createProviderWatcherController(deps: any) {
                     ignoreInitial: true, // Don't fire events for existing files on startup
                     followSymlinks: false,
                     depth: 10, // Reasonable depth limit
+                    usePolling: shouldUseProviderPolling(),
+                    interval: Number.isFinite(PROVIDER_WATCH_POLLING_INTERVAL_MS) && PROVIDER_WATCH_POLLING_INTERVAL_MS > 0
+                        ? PROVIDER_WATCH_POLLING_INTERVAL_MS
+                        : 1000,
+                    binaryInterval: Number.isFinite(PROVIDER_WATCH_POLLING_INTERVAL_MS) && PROVIDER_WATCH_POLLING_INTERVAL_MS > 0
+                        ? PROVIDER_WATCH_POLLING_INTERVAL_MS
+                        : 1000,
                     awaitWriteFinish: {
                         stabilityThreshold: 100, // Wait 100ms for file to stabilize
                         pollInterval: 50
                     }
+                });
+
+                const readyPromise = new Promise<void>((resolve) => {
+                    const readyTimer = setTimeout(resolve, 1000);
+                    watcher.once('ready', () => {
+                        clearTimeout(readyTimer);
+                        resolve();
+                    });
                 });
 
                 // Set up event listeners
@@ -235,10 +279,10 @@ export function createProviderWatcherController(deps: any) {
                     .on('error', (error) => {
                         console.error(`[ERROR] ${provider} watcher error:`, error);
                     })
-                    .on('ready', () => {
-                    });
+                    .on('ready', () => {});
 
                 projectsWatchers.push(watcher);
+                readyPromises.push(readyPromise);
             } catch (error: any) {
                 console.error(`[ERROR] Failed to setup ${provider} watcher for ${rootPath}:`, error);
             }
@@ -247,6 +291,8 @@ export function createProviderWatcherController(deps: any) {
         if (projectsWatchers.length === 0) {
             console.error('[ERROR] Failed to setup any provider watchers');
         }
+
+        await Promise.all(readyPromises);
     }
 
 

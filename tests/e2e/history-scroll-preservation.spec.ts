@@ -288,6 +288,37 @@ test('external append while scrolled up does not force bottom follow', async ({ 
   await expect(page.getByText(appendedText)).toBeHidden();
 });
 
+test('external append on project cN route renders without manual refresh', async ({ page }) => {
+  const appendedText = `history scroll live appended on cN route ${Date.now()}`;
+  const projectsResponse = await page.request.get('/api/projects', {
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+  });
+  const projects = await projectsResponse.json();
+  const project = projects.find((entry) => entry.fullPath === HISTORY_SCROLL_PROJECT_PATH);
+  expect(project, `history-scroll project must be discoverable at ${HISTORY_SCROLL_PROJECT_PATH}`).toBeTruthy();
+
+  const overviewResponse = await page.request.get(
+    `/api/projects/${encodeURIComponent(project.name)}/overview?projectPath=${encodeURIComponent(HISTORY_SCROLL_PROJECT_PATH)}`,
+    { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } },
+  );
+  const overview = await overviewResponse.json();
+  const session = (overview.codexSessions || []).find((entry) => entry.providerSessionId === HISTORY_SCROLL_SESSION_ID || entry.id === HISTORY_SCROLL_SESSION_ID);
+  expect(session?.routeIndex, 'history-scroll fixture session must have a cN route index').toBeTruthy();
+
+  const messageRequests = [];
+  await page.route(/\/api\/(?:projects\/.*\/sessions\/c\d+|codex\/sessions\/.*)\/messages.*/, async (route) => {
+    messageRequests.push(route.request().url());
+    await route.continue();
+  });
+
+  await page.goto(`${project.routePath}/c${session.routeIndex}`, { waitUntil: 'networkidle' });
+  await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 80');
+
+  appendAssistantHistoryMessage(appendedText);
+  await expect(page.getByText(appendedText)).toBeVisible({ timeout: 10_000 });
+  expect(messageRequests.some((url) => new URL(url).searchParams.has('afterLine'))).toBe(true);
+});
+
 // This test appends to the fixture file, so it must run after the scroll test above.
 test('afterLine API returns only new messages appended after the known count', async ({ request }) => {
   const projectName = encodeClaudeProjectName(HISTORY_SCROLL_PROJECT_PATH);

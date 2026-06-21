@@ -4,6 +4,7 @@
  */
 import type { APIRequestContext, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
+import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +16,22 @@ export interface CodexFixtureSessionDiscovery {
   session: Record<string, unknown>;
   routeSessionId: string;
   providerSessionId: string;
+}
+
+/**
+ * Resolve the project-local config path used by backend project-config-store.
+ */
+function getFixtureProjectConfigPath(projectPath: string): string {
+  /**
+   * PURPOSE: Browser fixture fallback writes the same XDG state config file the
+   * API reads, without importing backend code from hard-linked helper paths.
+   */
+  const absPath = path.resolve(projectPath);
+  const basename = path.basename(absPath);
+  const safeBasename = basename.toLowerCase().replace(/[^a-z0-9._-]/g, '-');
+  const hash = crypto.createHash('sha1').update(absPath).digest('hex').slice(0, 10);
+  const stateRoot = path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state'), 'ozw');
+  return path.join(stateRoot, 'repos', `${safeBasename}-${hash}`, 'conf.json');
 }
 
 /**
@@ -64,7 +81,7 @@ async function writeCodexRouteFallback(project: Record<string, unknown>, session
     return null;
   }
 
-  const configPath = path.join(projectPath, '.ozw', 'conf.json');
+  const configPath = getFixtureProjectConfigPath(projectPath);
   let config: Record<string, unknown> = {};
   try {
     config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<string, unknown>;
@@ -77,12 +94,24 @@ async function writeCodexRouteFallback(project: Record<string, unknown>, session
       : {}
   ) as Record<string, Record<string, unknown>>;
   const existing = Object.entries(chat).find(([, record]) => record?.sessionId === sessionId);
+  const projectRouteIndexes = [
+    ...((Array.isArray(project.sessions) ? project.sessions : []) as Array<Record<string, unknown>>),
+    ...((Array.isArray(project.codexSessions) ? project.codexSessions : []) as Array<Record<string, unknown>>),
+    ...((Array.isArray(project.piSessions) ? project.piSessions : []) as Array<Record<string, unknown>>),
+  ]
+    .map((session) => Number(session.routeIndex))
+    .filter((value) => Number.isInteger(value) && value > 0);
   const routeIndex = existing
     ? Number(existing[0])
-    : Math.max(0, ...Object.keys(chat).map((key) => Number(key)).filter((value) => Number.isInteger(value))) + 1;
+    : Math.max(
+      0,
+      ...Object.keys(chat).map((key) => Number(key)).filter((value) => Number.isInteger(value) && value > 0),
+      ...projectRouteIndexes,
+    ) + 1;
   chat[String(routeIndex)] = {
     ...(chat[String(routeIndex)] || {}),
     sessionId,
+    providerSessionId: sessionId,
     provider: 'codex',
     title: 'Codex Session',
   };

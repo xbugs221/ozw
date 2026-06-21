@@ -4,7 +4,14 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import type { TFunction } from 'i18next';
 
+import {
+  compareSessionsByCardSortMode,
+  createSessionViewModel,
+} from '../../frontend/components/sidebar/utils/utils.ts';
+import type { ProjectSession } from '../../frontend/types/app.ts';
+import { formatTimeAgo } from '../../frontend/utils/dateUtils.ts';
 import {
   getSessionActivitySignature,
   getSessionProjectName,
@@ -42,6 +49,50 @@ test('historical project-home sessions are read on first visit until activity ch
     }),
     true,
   );
+});
+
+test('project-home recent-message sort reads snake_case provider activity timestamp', () => {
+  /**
+   * Some provider/read-model payloads expose the latest activity as
+   * last_activity. Project-home cards must use that timestamp for both the
+   * visible time label and the "最近消息" sort order.
+   */
+  const now = new Date('2026-06-01T12:00:00.000Z');
+  const translate = ((key: string, params: { count?: number } = {}) => {
+    const labels: Record<string, string> = {
+      'time.oneHourAgo': '1 小时前',
+      'time.hoursAgo': `${params.count} 小时前`,
+      'status.unknown': '未知时间',
+    };
+    return labels[key] || key;
+  }) as TFunction;
+  const recentlyActiveOldRoute: ProjectSession & { __provider: 'codex' } = {
+    id: 'c2',
+    routeIndex: 2,
+    __provider: 'codex',
+    title: '旧编号最近有消息',
+    createdAt: '2026-06-01T08:00:00.000Z',
+    last_activity: '2026-06-01T11:00:00.000Z',
+    messageCount: 4,
+  };
+  const newerRouteWithoutRecentMessage: ProjectSession & { __provider: 'codex' } = {
+    id: 'c9',
+    routeIndex: 9,
+    __provider: 'codex',
+    title: '新编号但消息更早',
+    createdAt: '2026-06-01T10:00:00.000Z',
+    updatedAt: '2026-06-01T10:00:00.000Z',
+    messageCount: 2,
+  };
+
+  const viewModel = createSessionViewModel(recentlyActiveOldRoute, now, translate);
+  const sorted = [newerRouteWithoutRecentMessage, recentlyActiveOldRoute]
+    .sort((left, right) => compareSessionsByCardSortMode(left, right, 'updated', translate));
+
+  assert.equal(viewModel.sessionTime, '2026-06-01T11:00:00.000Z');
+  assert.equal(formatTimeAgo(viewModel.sessionTime, now, translate), '1 小时前');
+  assert.equal(getSessionActivitySignature(recentlyActiveOldRoute), '4:2026-06-01T11:00:00.000Z');
+  assert.equal(sorted[0].id, 'c2');
 });
 
 test('cross-project session cards use the source project key when clearing unread state', () => {

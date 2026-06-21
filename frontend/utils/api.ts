@@ -110,8 +110,10 @@ export const api = {
     const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
     return authenticatedFetch(`${projectApiPath(projectName)}/overview${query}`);
   },
-  projectWorkflows: (projectName: string): Promise<Response> =>
-    authenticatedFetch(`${projectApiPath(projectName)}/workflows`),
+  projectWorkflows: (projectName: string, projectPath?: string): Promise<Response> => {
+    const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
+    return authenticatedFetch(`${projectApiPath(projectName)}/workflows${query}`);
+  },
   projectWorkflow: (projectName: string, workflowId: string, projectPath?: string): Promise<Response> => {
     const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
     return authenticatedFetch(`${projectApiPath(projectName)}/workflows/${encodeRouteSegment(workflowId)}${query}`);
@@ -120,18 +122,23 @@ export const api = {
     const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
     return authenticatedFetch(`${projectApiPath(projectName)}/openspec/changes${query}`);
   },
-  createProjectWorkflow: (projectName: string, payload: Record<string, unknown>): Promise<Response> =>
+  createProjectWorkflow: (projectName: string, payload: Record<string, unknown>, projectPath = ''): Promise<Response> =>
     authenticatedFetch(`${projectApiPath(projectName)}/workflows`, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        projectPath,
+      }),
     }),
-  resumeProjectWorkflowRun: (projectName: string, workflowId: string): Promise<Response> =>
+  resumeProjectWorkflowRun: (projectName: string, workflowId: string, projectPath = ''): Promise<Response> =>
     authenticatedFetch(`${projectApiPath(projectName)}/workflows/${encodeRouteSegment(workflowId)}/resume-run`, {
       method: 'POST',
+      body: JSON.stringify({ projectPath }),
     }),
-  abortProjectWorkflowRun: (projectName: string, workflowId: string): Promise<Response> =>
+  abortProjectWorkflowRun: (projectName: string, workflowId: string, projectPath = ''): Promise<Response> =>
     authenticatedFetch(`${projectApiPath(projectName)}/workflows/${encodeRouteSegment(workflowId)}/abort-run`, {
       method: 'POST',
+      body: JSON.stringify({ projectPath }),
     }),
   sessions: (projectName: string, limit = 5, offset = 0): Promise<Response> =>
     authenticatedFetch(`${projectApiPath(projectName)}/sessions?limit=${limit}&offset=${offset}`),
@@ -344,13 +351,6 @@ export const api = {
 
     return authenticatedFetch(`${projectApiPath(projectName)}/folders/download?${query.toString()}`);
   },
-  transcribe: (formData: FormData): Promise<Response> =>
-    authenticatedFetch('/api/transcribe', {
-      method: 'POST',
-      body: formData,
-      headers: {},
-    }),
-
   browseFilesystem: (dirPath: string | null = null): Promise<Response> => {
     const params = new URLSearchParams();
     if (dirPath) params.append('path', dirPath);

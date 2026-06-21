@@ -6,13 +6,20 @@
 /**
  * 注册系统维护相关 HTTP route。
  */
+import type {
+    AuthMiddleware,
+    HttpRouteApp,
+    OsDeps,
+    SpawnDeps,
+} from './route-deps.js';
+
 export interface SystemRouteDeps {
-    app: any;
-    authenticateToken: any;
+    app: HttpRouteApp;
+    authenticateToken: AuthMiddleware;
     installMode: string;
     PKG_ROOT: string;
-    os: any;
-    spawn: any;
+    os: OsDeps;
+    spawn: SpawnDeps;
 }
 
 export function registerSystemRoutes(deps: SystemRouteDeps): void {
@@ -52,7 +59,7 @@ export function registerSystemRoutes(deps: SystemRouteDeps): void {
                 console.error('Update error:', text);
             });
 
-            child.on('close', (code: number) => {
+            child.on('close', (code: number | null) => {
                 if (code === 0) {
                     res.json({
                         success: true,

@@ -1,5 +1,5 @@
 // PURPOSE: Centralize provider-neutral browser settings persistence.
-export const CBW_SETTINGS_KEY = 'ozw-settings';
+export const OZW_SETTINGS_KEY = 'ozw-settings';
 
 type StoredSettings = {
   lastUpdated?: string;
@@ -27,7 +27,7 @@ const parseSettings = (raw: string | null): StoredSettings => {
  */
 export const readCbwSettings = (): StoredSettings => {
   try {
-    return parseSettings(localStorage.getItem(CBW_SETTINGS_KEY));
+    return parseSettings(localStorage.getItem(OZW_SETTINGS_KEY));
   } catch {
     return {};
   }

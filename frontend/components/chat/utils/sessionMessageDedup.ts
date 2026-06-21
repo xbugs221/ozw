@@ -43,6 +43,15 @@ interface UserTurnParts {
   timestamp: number;
 }
 
+interface AssistantTextParts {
+  content: string;
+  normalizedContent: string;
+  timestamp: number | null;
+}
+
+const MIN_ASSISTANT_OVERLAY_COVERAGE_LENGTH = 12;
+const MAX_ASSISTANT_OVERLAY_COVERAGE_WINDOW_MS = 5 * 60 * 1000;
+
 /**
  * Extract normalized user turn parts for duplicate detection.
  */
@@ -91,6 +100,174 @@ function getUserTurnKey(message: SessionMessage): string | null {
     return null;
   }
   return `${userTurn.timestamp}:${userTurn.normalizedContent}`;
+}
+
+/**
+ * Read plain assistant text from raw provider transcript rows.
+ */
+function getAssistantTextParts(message: SessionMessage): AssistantTextParts | null {
+  /**
+   * PURPOSE: `afterLine` refreshes can return active overlay assistant rows
+   * whose provider key differs from the already loaded JSONL line key.
+   */
+  const isAssistantMessage = message.type === 'assistant'
+    || (message.type === 'message' && message.message?.role === 'assistant');
+  if (!isAssistantMessage) {
+    return null;
+  }
+
+  let rawContent: unknown = message.content;
+  if (typeof message.message?.content === 'string') {
+    rawContent = message.message.content;
+  } else if (Array.isArray(message.message?.content)) {
+    rawContent = message.message.content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && typeof (part as Record<string, unknown>).text === 'string') {
+          return (part as Record<string, unknown>).text as string;
+        }
+        return '';
+      })
+      .join('\n');
+  }
+
+  if (typeof rawContent !== 'string') {
+    return null;
+  }
+  const normalizedContent = rawContent.replace(/\s+/g, ' ').trim();
+  if (normalizedContent.length < MIN_ASSISTANT_OVERLAY_COVERAGE_LENGTH) {
+    return null;
+  }
+
+  const timestamp = new Date(message.timestamp as string | number | Date).getTime();
+  return {
+    content: rawContent,
+    normalizedContent,
+    timestamp: Number.isFinite(timestamp) ? timestamp : null,
+  };
+}
+
+/**
+ * Determine whether a raw message key came from an authoritative JSONL line.
+ */
+function isProviderLineIdentity(message: SessionMessage): boolean {
+  /**
+   * PURPOSE: Only cross-dedupe live overlay keys against line keys; two line
+   * keys with the same text can still be legitimate repeated assistant turns.
+   */
+  return typeof message.messageKey === 'string' && /(?:^|:)line:\d+(?::|$)/.test(message.messageKey);
+}
+
+/**
+ * Check whether two raw assistant rows are near enough to be one overlay echo.
+ */
+function isAssistantOverlayCoverageCandidate(existingMessage: SessionMessage, incomingMessage: SessionMessage): boolean {
+  /**
+   * PURPOSE: Bound text-based cross-key coverage to the live overlay case.
+   */
+  if (isProviderLineIdentity(existingMessage) === isProviderLineIdentity(incomingMessage)) {
+    return false;
+  }
+
+  const existingParts = getAssistantTextParts(existingMessage);
+  const incomingParts = getAssistantTextParts(incomingMessage);
+  if (!existingParts || !incomingParts) {
+    return false;
+  }
+  if (existingParts.timestamp !== null && incomingParts.timestamp !== null) {
+    return Math.abs(existingParts.timestamp - incomingParts.timestamp) <= MAX_ASSISTANT_OVERLAY_COVERAGE_WINDOW_MS;
+  }
+  return true;
+}
+
+/**
+ * Merge newer live text into an existing line row while preserving its cursor.
+ */
+function mergeAssistantContentIntoLineMessage(lineMessage: SessionMessage, contentSource: SessionMessage): SessionMessage {
+  /**
+   * PURPOSE: Keep the loaded JSONL line identity for future afterLine cursors
+   * while showing the active overlay's longer in-progress text.
+   */
+  const sourceParts = getAssistantTextParts(contentSource);
+  if (!sourceParts?.content) {
+    return lineMessage;
+  }
+  return {
+    ...lineMessage,
+    timestamp: contentSource.timestamp ?? lineMessage.timestamp,
+    message: {
+      ...(lineMessage.message || {}),
+      role: 'assistant',
+      content: sourceParts.content,
+    },
+  };
+}
+
+/**
+ * Find the latest raw user row that bounds the active assistant turn.
+ */
+function findLatestRawUserIndex(messages: SessionMessage[]): number {
+  /**
+   * PURPOSE: Text-based live/history coverage should not cross into older
+   * turns that happened to contain the same assistant sentence.
+   */
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.type === 'user' || message?.message?.role === 'user') {
+      return index;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Find an existing assistant row covered by an incoming line/live counterpart.
+ */
+function findAssistantOverlayCoverage(existingRows: SessionMessage[], incomingMessage: SessionMessage): {
+  index: number;
+  action: 'skip-incoming' | 'replace-existing' | 'merge-into-line';
+} | null {
+  /**
+   * PURPOSE: Incremental cN refreshes combine newly persisted JSONL rows with a
+   * full active overlay; this prevents cross-response duplicates.
+   */
+  const incomingParts = getAssistantTextParts(incomingMessage);
+  if (!incomingParts) {
+    return null;
+  }
+
+  const lowerBound = findLatestRawUserIndex(existingRows);
+  for (let index = existingRows.length - 1; index > lowerBound; index -= 1) {
+    const existingMessage = existingRows[index];
+    if (!isAssistantOverlayCoverageCandidate(existingMessage, incomingMessage)) {
+      continue;
+    }
+    const existingParts = getAssistantTextParts(existingMessage);
+    if (!existingParts) {
+      continue;
+    }
+
+    const existingText = existingParts.normalizedContent;
+    const incomingText = incomingParts.normalizedContent;
+    const existingIsLine = isProviderLineIdentity(existingMessage);
+    const incomingIsLine = isProviderLineIdentity(incomingMessage);
+
+    if (existingText === incomingText || existingText.startsWith(incomingText) || existingText.includes(incomingText)) {
+      return {
+        index,
+        action: incomingIsLine && !existingIsLine ? 'replace-existing' : 'skip-incoming',
+      };
+    }
+
+    if (incomingText.startsWith(existingText)) {
+      return {
+        index,
+        action: existingIsLine && !incomingIsLine ? 'merge-into-line' : 'replace-existing',
+      };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -224,6 +401,15 @@ export function mergeSessionMessagesByIdentityPreservingOrder(
   for (const message of incomingRows) {
     const identity = getSessionMessageIdentity(message);
     if (identity && (existingIdentities.has(identity) || replacedIdentities.has(identity))) {
+      continue;
+    }
+    const coverage = findAssistantOverlayCoverage(mergedRows, message);
+    if (coverage) {
+      if (coverage.action === 'replace-existing') {
+        mergedRows[coverage.index] = message;
+      } else if (coverage.action === 'merge-into-line') {
+        mergedRows[coverage.index] = mergeAssistantContentIntoLineMessage(mergedRows[coverage.index], message);
+      }
       continue;
     }
     mergedRows.push(message);

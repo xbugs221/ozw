@@ -1,0 +1,88 @@
+{
+  "summary": "彻底移除 Codex 单次 exec 路径和 OpenAI 语音/GPT 直连依赖，并保证 Codex 生产执行统一进入 app-server steer runtime。",
+  "coverage": [
+    {
+      "spec": "需求：Codex 生产执行只能进入 app-server / 场景：`/api/agent` 不再调用单次 Codex exec",
+      "tests": [
+        "codex-runtime-removal-contract",
+        "agent-route-regression"
+      ],
+      "evidence": [
+        "codex-runtime-source-audit"
+      ],
+      "risk": "源码契约能阻止旧入口回归；真实 GitHub branch/PR 成功仍依赖用户账号和 token，执行阶段通过 route 回归测试证明业务响应，不强制产出额外 runtime log。"
+    },
+    {
+      "spec": "需求：OpenAI 直连语音能力被移除 / 场景：附件路由不再依赖 OpenAI Whisper 或 GPT SDK",
+      "tests": [
+        "codex-runtime-removal-contract"
+      ],
+      "evidence": [
+        "codex-runtime-source-audit"
+      ],
+      "risk": "本变更接受语音转写和增强功能消失；未来替代方案不在本次范围。"
+    },
+    {
+      "spec": "需求：依赖和文档口径不再暴露旧能力 / 场景：包依赖、前端调用和规格不再指向 OpenAI 单次路径",
+      "tests": [
+        "codex-runtime-removal-contract",
+        "provider-runtime-regression"
+      ],
+      "evidence": [
+        "codex-runtime-source-audit"
+      ],
+      "risk": "历史 archive 可保留旧事实；本验收只约束活跃文档、生产源码和当前依赖。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "codex-runtime-removal-contract",
+      "source": "change_contract",
+      "path": "docs/changes/30-移除OpenAI单次调用并统一Codex-app-server-steer/tests/codex-runtime-removal-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/30-移除OpenAI单次调用并统一Codex-app-server-steer/tests/codex-runtime-removal-contract.test.ts",
+      "purpose": "证明生产源码、前端调用和依赖树中已经没有旧 Codex 单次 exec 与 OpenAI 语音/GPT 直连路径。",
+      "assertions": [
+        "backend/openai-codex.ts 不存在，生产源码不 import openai-codex 或调用 queryCodex",
+        "/api/agent route 必须引用 Codex app-server runtime 或专用 app-server runner",
+        "生产源码不包含 codex exec --json、OpenAI Whisper transcription URL 或 openai npm SDK import",
+        "package.json 不再直接声明 openai npm SDK，生产源码不直接导入 openai npm SDK",
+        "前端源码不再调用 /api/transcribe-audio"
+      ],
+      "expected_initial_failure": "当前仓库仍存在 backend/openai-codex.ts、/api/agent 调用 queryCodex、attachment-routes OpenAI 转写增强，因此应失败于目标业务边界缺失。"
+    },
+    {
+      "id": "agent-route-regression",
+      "source": "existing_regression",
+      "path": "tests/backend/agent-route.test.ts",
+      "command": "pnpm exec tsx --test tests/backend/agent-route.test.ts",
+      "purpose": "证明 /api/agent 的认证、项目路径和业务响应在替换 Codex 执行内核后仍可用。",
+      "assertions": [
+        "缺少或非法 API key 时 route 明确拒绝",
+        "已有项目路径经过 workspace validation 后才执行",
+        "执行完成后 route 能返回 session/status/response 或明确错误"
+      ],
+      "expected_initial_failure": "如果执行阶段只删除旧 queryCodex 而没有接入 app-server runner，route 回归应失败于业务响应缺失。"
+    },
+    {
+      "id": "provider-runtime-regression",
+      "source": "existing_regression",
+      "path": "tests/specs/provider-runtime-boundary.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts",
+      "purpose": "证明 provider runtime 边界仍保持 Codex app-server 与 Pi native SDK 分工。",
+      "assertions": [
+        "Codex 分支调用 app-server facade",
+        "Pi 分支保留 native SDK",
+        "生产源码不重新引入 Codex native SDK 或旧单次运行口径"
+      ],
+      "expected_initial_failure": "如果实现过程中绕回旧 Codex exec 或 SDK 路径，该规格应失败。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "codex-runtime-source-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/30-remove-openai-single-runtime/source-audit.json",
+      "purpose": "记录旧 Codex exec、OpenAI API、openai SDK、前端转写调用和依赖残留的源码审计结果；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

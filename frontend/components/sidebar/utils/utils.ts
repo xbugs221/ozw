@@ -2,6 +2,7 @@
 import type { TFunction } from 'i18next';
 import type { Project, ProjectSession, ProjectWorkflow } from '../../../types/app';
 import { normalizeBusinessTimestamp } from '../../../utils/dateUtils';
+import { getSessionActivityTime } from '../../../utils/sessionActivityTime';
 import type {
   AdditionalSessionsByProject,
   ProjectSortOrder,
@@ -75,13 +76,6 @@ const getFirstSessionDisplayText = (fallback: string, ...candidates: unknown[]):
 export const getSessionDate = (session: SessionWithProvider): Date => {
   return normalizeBusinessTimestamp(getSessionActivityTime(session)) || new Date(0);
 };
-
-/**
- * Read the timestamp that represents visible session activity.
- */
-const getSessionActivityTime = (session: SessionWithProvider): string => (
-  String(session.lastActivity || session.updated_at || session.updatedAt || session.createdAt || session.created_at || '')
-);
 
 /**
  * Read the immutable creation route number used to keep manual sessions stable.
@@ -173,8 +167,8 @@ export const getSessionName = (session: SessionWithProvider, t: TFunction): stri
       t('projects.codexSession'),
       session.label,
       session.routeTitle,
-      session.summary,
       session.title,
+      session.summary,
       session.name,
     );
   }
@@ -184,8 +178,8 @@ export const getSessionName = (session: SessionWithProvider, t: TFunction): stri
       t('projects.piSession'),
       session.label,
       session.routeTitle,
-      session.summary,
       session.title,
+      session.summary,
       session.name,
     );
   }
@@ -194,8 +188,8 @@ export const getSessionName = (session: SessionWithProvider, t: TFunction): stri
     t('projects.newSession'),
     session.label,
     session.routeTitle,
-    session.summary,
     session.title,
+    session.summary,
     session.name,
   );
 };

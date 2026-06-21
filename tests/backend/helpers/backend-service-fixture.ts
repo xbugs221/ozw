@@ -56,7 +56,7 @@ export async function startIsolatedBackendServer(options = {}) {
     DATABASE_PATH: options.databasePath,
     OZW_DATABASE_PATH_DEFAULTED: '',
     JWT_SECRET: TEST_JWT_SECRET,
-    CBW_FAKE_PI_RUNTIME: '1',
+    OZW_FAKE_PI_RUNTIME: '1',
     SESSION_PATH_SCAN_INTERVAL_MS: '0',
   };
   if (!env.DATABASE_PATH) {

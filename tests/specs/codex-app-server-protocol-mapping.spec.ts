@@ -561,18 +561,18 @@ test('same session does not register duplicate notification handlers across mult
   );
 });
 
-test('backend/index Codex branch does not unconditionally broadcast message-accepted', async () => {
-  const serverIndexSource = await readFile(
-    new URL('../../backend/server/chat-websocket.ts', import.meta.url),
+test('chat command runtime Codex branch does not unconditionally broadcast message-accepted', async () => {
+  const chatRuntimeSource = await readFile(
+    new URL('../../backend/server/realtime/chat-command-runtime.ts', import.meta.url),
     'utf8',
   );
 
   // Find the codex-command branch and check that sendMessageAccepted is not
   // called unconditionally after sendNativeMessage.
-  const codexBranchMatch = serverIndexSource.match(
+  const codexBranchMatch = chatRuntimeSource.match(
     /data\.type === ['"]codex-command['"][\s\S]*?(?=\} else if \(data\.type === ['"]pi-command['"])/,
   );
-  assert.ok(codexBranchMatch, 'must find codex-command branch in backend/index.ts');
+  assert.ok(codexBranchMatch, 'must find codex-command branch in chat-command-runtime.ts');
   const codexBranch = codexBranchMatch[0];
 
   assert.match(

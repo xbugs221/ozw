@@ -67,37 +67,28 @@ test('JSON frontmatter is not parsed through executable engine', async () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('Codex permission modes still map to expected runtime options', async () => {
-  const { __mapPermissionModeToCodexOptionsForTest, __buildCodexExecArgsForTest } =
-    await import('../../backend/openai-codex.ts');
+  const { __codexAppServerRuntimeInternalsForTest } =
+    await import('../../backend/codex-app-server-runtime.ts');
 
   // 1. acceptEdits => configured YOLO defaults
-  const accept = __mapPermissionModeToCodexOptionsForTest('acceptEdits');
-  assert.deepEqual(accept, { sandboxMode: 'danger-full-access', approvalPolicy: 'never' });
+  const accept = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('acceptEdits');
+  assert.deepEqual(accept, { sandbox: 'danger-full-access', approvalPolicy: 'never' });
 
   // 2. bypassPermissions => danger-full-access + never approval
-  const bypass = __mapPermissionModeToCodexOptionsForTest('bypassPermissions');
-  assert.deepEqual(bypass, { sandboxMode: 'danger-full-access', approvalPolicy: 'never' });
+  const bypass = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('bypassPermissions');
+  assert.deepEqual(bypass, { sandbox: 'danger-full-access', approvalPolicy: 'never' });
 
   // 3. default => YOLO defaults
-  const def = __mapPermissionModeToCodexOptionsForTest('default');
-  assert.deepEqual(def, { sandboxMode: 'danger-full-access', approvalPolicy: 'never' });
+  const def = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('default');
+  assert.deepEqual(def, { sandbox: 'danger-full-access', approvalPolicy: 'never' });
 
   // 4. Unknown mode falls back to default semantics.
-  const fallback = __mapPermissionModeToCodexOptionsForTest('something-else');
-  assert.deepEqual(fallback, { sandboxMode: 'danger-full-access', approvalPolicy: 'never' });
+  const fallback = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('something-else');
+  assert.deepEqual(fallback, { sandbox: 'danger-full-access', approvalPolicy: 'never' });
 
-  // 5. Resulting CLI args carry --sandbox and approval_policy override.
-  const args = __buildCodexExecArgsForTest({
-    command: 'list files',
-    sessionId: null,
-    workingDirectory: '/tmp/proj',
-    model: 'gpt-5',
-    sandboxMode: bypass.sandboxMode,
-    approvalPolicy: bypass.approvalPolicy,
-  });
-  assert.ok(args.includes('--sandbox'), '--sandbox flag must be emitted');
-  const sandboxIdx = args.indexOf('--sandbox');
-  assert.equal(args[sandboxIdx + 1], 'danger-full-access');
+  // 5. Resulting app-server CLI args carry sandbox and approval_policy overrides.
+  const args = __codexAppServerRuntimeInternalsForTest.buildCodexAppServerCliArgs();
+  assert.ok(args.includes('sandbox_mode=danger-full-access'), 'sandbox override must be emitted');
   assert.ok(
     args.some((a) => typeof a === 'string' && a.startsWith('approval_policy=')),
     'approval_policy override must be emitted',
@@ -167,35 +158,18 @@ test('Frontend download flow uses blob/arrayBuffer rather than text() (no UTF-8 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. Service Worker cleanup (retired via frontend unregistration)
+// 5. PWA service worker is deliberately scoped and realtime-safe
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('Legacy service worker file is removed; frontend unregisters stale workers', async () => {
-  // Change 30 deleted public/sw.js because no entry point registers it.
-  // Instead, frontend/main.tsx unregisters every existing service worker on load.
-  const swPath = resolvePath(REPO_ROOT, 'public/sw.js');
-  let swExists = false;
-  try {
-    await readFile(swPath, 'utf8');
-    swExists = true;
-  } catch {
-    // Expected: file is deleted.
-  }
-  assert.equal(swExists, false, 'public/sw.js must no longer exist');
+test('PWA service worker is published without caching API or websocket traffic', async () => {
+  const sw = await readFile(resolvePath(REPO_ROOT, 'public/sw.js'), 'utf8');
+  assert.match(sw, /ozw-pwa/, 'service worker must use an ozw-owned cache namespace');
+  assert.match(sw, /pathname\.startsWith\('\/api'\)/, 'service worker must bypass API routes');
+  assert.match(sw, /pathname\.startsWith\('\/ws'\)/, 'service worker must bypass chat websocket routes');
+  assert.match(sw, /pathname\.startsWith\('\/shell'\)/, 'service worker must bypass shell websocket routes');
+  assert.match(sw, /request\.mode === 'navigate'/, 'service worker must keep navigations network-first');
 
-  // The frontend entry point must unregister stale workers.
   const mainTsx = await readFile(resolvePath(REPO_ROOT, 'frontend/main.tsx'), 'utf8');
-  assert.match(mainTsx, /getRegistrations/, 'main.tsx must call getRegistrations to find stale workers');
-  assert.match(mainTsx, /\.unregister\(\)/, 'main.tsx must unregister each stale service worker');
-
-  // Build output must not contain sw.js.
-  const distSwPath = resolvePath(REPO_ROOT, 'dist', 'sw.js');
-  let distSwExists = false;
-  try {
-    const distSw = await readFile(distSwPath, 'utf8');
-    distSwExists = !!distSw;
-  } catch {
-    // Expected: not published.
-  }
-  assert.equal(distSwExists, false, 'dist/sw.js must not be published');
+  assert.match(mainTsx, /serviceWorker\.register\('\/sw\.js'\)/, 'main.tsx must register the PWA worker');
+  assert.doesNotMatch(mainTsx, /\.unregister\(\)/, 'main.tsx must not retire the PWA worker on load');
 });

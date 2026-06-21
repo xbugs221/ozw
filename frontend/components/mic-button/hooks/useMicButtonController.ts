@@ -1,16 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { transcribeWithWhisper } from '../data/whisper';
 import {
-  DEFAULT_WHISPER_MODE,
-  ENHANCEMENT_WHISPER_MODES,
   MIC_BUTTON_STATES,
   MIC_ERROR_BY_NAME,
   MIC_NOT_AVAILABLE_ERROR,
   MIC_NOT_SUPPORTED_ERROR,
   MIC_SECURE_CONTEXT_ERROR,
   MIC_TAP_DEBOUNCE_MS,
-  PROCESSING_STATE_DELAY_MS,
 } from '../constants/constants';
 import type { MicButtonState } from '../types/types';
 
@@ -52,15 +48,6 @@ export function useMicButtonController({
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const lastTapRef = useRef(0);
-  const processingTimerRef = useRef<number | null>(null);
-
-  const clearProcessingTimer = (): void => {
-    if (processingTimerRef.current !== null) {
-      window.clearTimeout(processingTimerRef.current);
-      processingTimerRef.current = null;
-    }
-  };
-
   const stopStreamTracks = (): void => {
     if (!streamRef.current) {
       return;
@@ -71,33 +58,11 @@ export function useMicButtonController({
   };
 
   const handleStopRecording = async (mimeType: string): Promise<void> => {
-    const audioBlob = new Blob(chunksRef.current, { type: mimeType });
-
-    // Release the microphone immediately once recording ends.
+    /** Release the microphone immediately once recording ends. */
     stopStreamTracks();
-    setState(MIC_BUTTON_STATES.TRANSCRIBING);
-
-    const whisperMode = window.localStorage.getItem('whisperMode') || DEFAULT_WHISPER_MODE;
-    const shouldShowProcessingState = ENHANCEMENT_WHISPER_MODES.has(whisperMode);
-
-    if (shouldShowProcessingState) {
-      processingTimerRef.current = window.setTimeout(() => {
-        setState(MIC_BUTTON_STATES.PROCESSING);
-      }, PROCESSING_STATE_DELAY_MS);
-    }
-
-    try {
-      const transcript = await transcribeWithWhisper(audioBlob);
-      if (transcript && onTranscript) {
-        onTranscript(transcript);
-      }
-    } catch (transcriptionError) {
-      const message = transcriptionError instanceof Error ? transcriptionError.message : 'Transcription error';
-      setError(message);
-    } finally {
-      clearProcessingTimer();
-      setState(MIC_BUTTON_STATES.IDLE);
-    }
+    chunksRef.current = [];
+    setError('Audio transcription is no longer available');
+    setState(MIC_BUTTON_STATES.IDLE);
   };
 
   const startRecording = async (): Promise<void> => {
@@ -191,7 +156,6 @@ export function useMicButtonController({
   }, []);
 
   useEffect(() => () => {
-    clearProcessingTimer();
     stopStreamTracks();
   }, []);
 

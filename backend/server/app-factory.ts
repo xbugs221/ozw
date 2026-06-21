@@ -5,6 +5,28 @@
 import express from 'express';
 
 /**
+ * 给静态资源设置缓存策略。
+ */
+function setStaticCacheHeaders(res: any, filePath: string): void {
+    /**
+     * PWA shell files need quick update checks, while hashed build assets and
+     * install icons can use long-lived browser caches.
+     */
+    const fileName = filePath.split(/[\\/]/).pop() || '';
+
+    if (filePath.endsWith('.html') || fileName === 'sw.js' || fileName === 'manifest.webmanifest') {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        return;
+    }
+
+    if (filePath.match(/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico)$/)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+}
+
+/**
  * 创建后端 Express 应用实例。
  */
 export function createBackendApp(): express.Express {
@@ -54,22 +76,14 @@ export function configureAppMiddleware(deps: any): void {
 export function registerStaticAssets(deps: any): void {
     const { app, express, path, PKG_ROOT } = deps;
     // Serve static public assets.
-    app.use(express.static(path.join(PKG_ROOT, 'public')));
+    app.use(express.static(path.join(PKG_ROOT, 'public'), {
+        setHeaders: setStaticCacheHeaders,
+    }));
 
     // Static files served after API routes
     // Add cache control: HTML files should not be cached, but assets can be cached
     app.use(express.static(path.join(PKG_ROOT, 'dist'), {
-        setHeaders: (res: any, filePath: string) => {
-            if (filePath.endsWith('.html')) {
-                // Prevent HTML caching to avoid service worker issues after builds
-                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-                res.setHeader('Pragma', 'no-cache');
-                res.setHeader('Expires', '0');
-            } else if (filePath.match(/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico)$/)) {
-                // Cache static assets for 1 year (they have hashed names)
-                res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-            }
-        }
+        setHeaders: setStaticCacheHeaders,
     }));
 }
 

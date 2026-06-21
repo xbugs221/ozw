@@ -1,0 +1,190 @@
+parallel: true
+subagent_guard: advisory
+max_review_iterations: 5
+stages:
+  planning:
+    agent: codex
+    reasoning: xhigh
+  execution:
+    agent: codex
+    reasoning: low
+    before:
+      - name: 代码库侦察员
+        purpose: 汇总 execution 需要读取的文件和测试模式
+        agent: pi
+        subagent: explore
+      - name: 外部资料研究员
+        purpose: 查询 execution 依赖的外部库文档和开源实现
+        agent: pi
+        subagent: librarian
+  fix:
+    agent: codex
+    reasoning: low
+  review:
+    agent: codex
+    reasoning: high
+    before:
+      - name: 目标核对审核员
+        purpose: 核对 proposal/spec/task 是否满足
+        agent: pi
+        required: true
+      - name: 测试有效性审核员
+        purpose: 判断测试是否真实覆盖场景
+        agent: pi
+        required: true
+      - name: 安全风险审核员
+        purpose: 检查权限、输入、泄漏和破坏性操作
+        agent: pi
+        required: true
+      - name: 上下文一致性审核员
+        purpose: 检查是否违背现有架构约定
+        agent: pi
+        required: true
+  qa:
+    agent: codex
+    reasoning: high
+    before:
+      - name: CLI/API 测试员
+        purpose: 执行命令行或接口真实路径
+        agent: pi
+        required: true
+      - name: 浏览器路径测试员
+        purpose: 执行页面真实用户路径
+        agent: pi
+        required: true
+      - name: 回归场景测试员
+        purpose: 覆盖邻近功能回归
+        agent: pi
+        required: true
+  archive:
+    agent: codex
+    reasoning: low
+validation:
+  limit: 3
+  commands:
+    - oz validate 30-移除OpenAI单次调用并统一Codex-app-server-steer --json
+    - pnpm exec tsx --test docs/changes/30-移除OpenAI单次调用并统一Codex-app-server-steer/tests/codex-runtime-removal-contract.test.ts
+    - pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts tests/specs/codex-app-server-protocol-mapping.spec.ts tests/specs/codex-app-server-steer-runtime.spec.ts tests/backend/runtime-dependencies.test.ts
+    - pnpm run typecheck
+    - pnpm exec tsx --test tests/specs/chat-message-merge-core.spec.ts tests/specs/backend-type-module-boundary.spec.ts tests/backend/agent-route.test.ts
+    - pnpm exec vitest run --config vitest.config.ts tests/unit/chat-tool-runtime.test.ts
+    - pnpm exec playwright test tests/e2e/project-overview-real-performance.spec.ts
+    - pnpm run build
+prompts:
+  planning: |
+      调用 `oz-plan` 技能开始讨论规划阶段
+  execution: |
+      读取:
+
+      - `{{.StatePath}}`
+      - 以 `state.json.change_name` 为准识别当前 oz change，不要超出当前提案范围
+      - acceptance.json：`{{.AcceptancePath}}`
+      {{if .HasPlanningContext}}
+      - subagent artifact：`{{.PlanningContextPath}}`
+      {{end}}
+      {{if .HasParallelContext}}
+      - subagent artifact：`{{.ParallelContextPath}}`
+      {{end}}
+
+      调用 oz-exec 技能执行当前 oz change: `{{.ChangePath}}/`
+  review: |
+      读取：`{{.StatePath}}`、`{{.AcceptancePath}}`、当前完整变更 `{{.ChangePath}}/`、当前 diff baseline `{{.BaselineHead}}`
+      {{if .HasPlanningContext}}可选上下文：`{{.PlanningContextPath}}`
+      {{end}}{{if .HasParallelContext}}可选上下文：`{{.ParallelContextPath}}`
+      {{end}}{{if .HasParallelReview}}review helper：`{{.ParallelReviewPath}}`
+      {{end}}
+
+      任务：
+
+      - 只审核当前提案范围，不修改源码。
+      - 当前提案问题写 `findings`；历史债务或无关问题写 `non_blocking_findings`，scope 用 `out_of_scope_existing`。
+      - blocking scope 只允许 `current_change` 或 `introduced_regression`；acceptance_contract 未满足必须可复现。
+      - `required_evidence` 只要求可复核，不要求 `test-results/`、截图、trace 或 runtime log 进 git；强制跟踪运行产物属于合同设计错误。
+      {{if .HasParallelReview}}- 读或生成 `{{.ParallelReviewPath}}`；先把 gate_input 成员结论归一化。relevant:false 且 findings=[] 的 helper 只作 evidence，不得阻断。只有复核确认当前 acceptance/spec 的 blocker/major 失败才进入最终 `findings`。
+      {{end}}
+      {{if .HasPreviousReview}}
+      上一轮：`{{.LatestPreviousReviewPath}}`；历史 review 数量：{{.PreviousReviewCount}}
+      {{if .HasPreviousFixSummary}}Fix summary：`{{.LatestPreviousFixSummaryPath}}`
+      {{end}}{{end}}
+
+      写入：`{{.ReviewPath}}`
+
+      写入后运行：`oz flow validate-review --artifact "{{.ReviewPath}}" --json`
+
+      {{if .IsFirstRoleTurn}}
+      严格 JSON：只写一个 JSON object。
+
+      字段：`summary`、`decision`(0=clean,1=needs_fix)、`evidence[]`、`findings[]`、`checks`、`non_blocking_findings[]`、`workflow_failure`。
+
+      findings 字段：`{title,severity,scope,evidence,recommendation}`；`severity`: 1=blocker, 2=major, 3=minor；`scope`: 1=current_change, 2=introduced_regression, 0=out_of_scope_existing。`evidence[]` 每项必须是字符串，写可复核命令、artifact、截图、trace、QA、控制台或网络证据。
+
+      clean：`decision=0`、`findings=[]`、`checks` 全 true、`evidence` 非空并覆盖 acceptance_contract。needs_fix：`decision=1` 且 `findings` 非空。
+      {{else}}
+      续轮：复用当前角色会话 `{{.RoleSessionKey}}`，按同 schema 重写 `{{.ReviewPath}}` 为一个 JSON object；核对上一轮 review/fix 后只报告仍存在的问题。
+      {{end}}
+  qa: |
+      读取：`{{.StatePath}}`、`{{.AcceptancePath}}`、`{{.ReviewPath}}`、当前变更 `{{.ChangePath}}/`
+      {{if .HasPlanningContext}}可选上下文：`{{.PlanningContextPath}}`
+      {{end}}{{if .HasParallelContext}}可选上下文：`{{.ParallelContextPath}}`
+      {{end}}{{if .HasParallelQA}}QA helper：`{{.ParallelQAPath}}`
+      {{end}}
+
+      任务：
+
+      - 只验收当前提案范围，不修改源码或 `{{.AcceptancePath}}`。
+      - `acceptance_matrix[].id` 必须逐字来自 `{{.AcceptancePath}}` 的 required_tests/required_evidence，并覆盖 acceptance_contract。
+      - 当前提案问题写 `findings`；历史债务或无关问题写 `non_blocking_findings`，scope 用 `out_of_scope_existing`。
+      - blocking scope 只允许 `current_change` 或 `introduced_regression`；required_evidence 只要求可复核，不要求运行产物进 git。
+      {{if .HasParallelQA}}- 读或生成 `{{.ParallelQAPath}}`；缺少 required evidence 或有 severity=1/2 finding 时，最终 `decision` 不得为 0；relevant:false 且 findings=[] 的 helper 只作 evidence。
+      {{end}}
+
+      写入：`{{.QAPath}}`
+
+      写入后运行：`oz flow validate-qa --artifact "{{.QAPath}}" --acceptance "{{.AcceptancePath}}" --json`
+
+      {{if .IsFirstRoleTurn}}
+      只写一个 JSON object。
+
+      字段：`summary`、`decision`(0=clean,1=needs_fix)、`evidence[]`、`acceptance_matrix[]`、`findings[]`、`non_blocking_findings[]`。
+
+      `acceptance_matrix[]`: `{id,status,artifact,evidence}`，`status`: 0=passed, 1=failed。`findings[]`: `{title,severity,scope,evidence,recommendation}`；`severity`: 1=blocker, 2=major, 3=minor；`scope`: 1=current_change, 2=introduced_regression, 0=out_of_scope_existing。`evidence[]` 每项必须是字符串，写可复核测试、截图、trace、控制台、网络或运行时证据。
+
+      clean：`decision=0`、`findings=[]`、`evidence` 非空、`acceptance_matrix` 覆盖 required_tests/required_evidence。needs_fix：`decision=1` 且 `findings` 非空。
+      {{else}}
+      续轮：复用当前角色会话 `{{.RoleSessionKey}}`，按同 schema 重写 `{{.QAPath}}`。
+      {{end}}
+  fix: |
+      读取：`{{.StatePath}}`、`{{.AcceptancePath}}`、`{{.ReviewPath}}`{{if .QAPath}}、`{{.QAPath}}`{{end}}
+
+      任务：
+
+      - 只修复当前 review/QA artifact 中列出的 findings。
+      {{if .IsFirstRoleTurn}}- 必须做根因分析，禁止只按错误文本打补丁；不得删除、弱化或绕过 `{{.AcceptancePath}}`。
+      {{end}}{{if .HasRoleSession}}- 复用当前角色会话：`{{.RoleSessionKey}}`
+      {{end}}{{if .FixEscalated}}- 升级轮次：连续失败 {{.ConsecutiveReviewFailures}} 次；summary 写上一轮未解决原因和重复 finding 根因。
+      {{end}}
+
+      写入：`{{.FixSummaryPath}}`
+
+      summary 用 Markdown，包含：修复的问题、根因、改动、验证命令及结果、剩余风险。
+  archive: |
+      读取：
+
+      - `{{.StatePath}}`
+      - `{{.AcceptancePath}}`
+      - `{{.PreviousReviewPaths}}`
+      - `{{.PreviousQAPaths}}`（如存在）
+      - `{{.PreviousFixSummaryPaths}}`（如存在）
+
+      执行：
+
+      - 调用 `oz-archive` skill 归档，change-name 见 `state.json.change_name`。
+
+      写入：
+
+      ```text
+      {{.DeliverySummaryPath}}
+      ```
+
+      该路径是当前 run 的 `delivery-summary.md`。
+      summary 包含 `最终审核` 小节。

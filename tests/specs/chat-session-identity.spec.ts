@@ -70,6 +70,7 @@ test('chat session identity rules are centralized and business samples resolve c
   const exportedNames = [
     'isTemporarySessionId',
     'isCbwRouteSessionId',
+    'getSessionLoadId',
     'resolveProjectSessionProvider',
     'resolveSessionRoutingContext',
   ].filter((name) => new RegExp(`\\b${name}\\b`).test(identitySource));
@@ -86,6 +87,7 @@ test('chat session identity rules are centralized and business samples resolve c
   const identity = await import(pathToFileURL(path.join(REPO_ROOT, IDENTITY_MODULE)).href) as {
     isTemporarySessionId(value?: string | null): boolean;
     isCbwRouteSessionId(value?: string | null): boolean;
+    getSessionLoadId(session?: Record<string, unknown> | null): string;
     resolveProjectSessionProvider(project: unknown, sessionId?: string | null): 'codex' | 'pi' | null;
     resolveSessionRoutingContext(project: unknown, session: unknown, fallbackProvider?: 'codex' | 'pi'): {
       projectName: string;
@@ -117,12 +119,18 @@ test('chat session identity rules are centralized and business samples resolve c
     cRouteIsRoute: identity.isCbwRouteSessionId('c7'),
     codexProvider: identity.resolveProjectSessionProvider(project, 'codex-native-1'),
     piRouteProvider: identity.resolveProjectSessionProvider(project, 'c7'),
+    routeBackedLoadId: identity.getSessionLoadId({
+      id: '019ed912-8c02-7b40-9dff-85d1a90d02ec',
+      routeIndex: 365,
+      providerSessionId: '019ed912-8c02-7b40-9dff-85d1a90d02ec',
+    }),
     workflowContext: identity.resolveSessionRoutingContext(project, workflowSession, 'codex'),
   };
   snapshot.sampleResults = sampleResults;
   await writeEvidence(snapshot);
 
   assert.deepEqual(exportedNames.sort(), [
+    'getSessionLoadId',
     'isCbwRouteSessionId',
     'isTemporarySessionId',
     'resolveProjectSessionProvider',
@@ -132,6 +140,11 @@ test('chat session identity rules are centralized and business samples resolve c
   assert.equal(sampleResults.cRouteIsRoute, true, 'cN must resolve as an ozw route alias');
   assert.equal(sampleResults.codexProvider, 'codex', 'direct Codex session id must resolve to codex');
   assert.equal(sampleResults.piRouteProvider, 'pi', 'cN routeIndex must resolve to the Pi session provider');
+  assert.equal(
+    sampleResults.routeBackedLoadId,
+    'c365',
+    'provider-backed cN pages must load messages through the route id so active-turn overlay is preserved',
+  );
   assert.deepEqual(sampleResults.workflowContext, {
     projectName: 'demo-child',
     projectPath: '/work/demo-child',

@@ -382,10 +382,13 @@ async function ensureCodexRouteRecords(projectPath: string, providerSessions: Lo
     chat[String(nextIndex)] = {
       sessionId: session.id,
       provider: 'codex',
-      title: session.routeTitle || session.summary || session.title || `会话${nextIndex}`,
+      title: session.title || session.routeTitle || session.summary || `会话${nextIndex}`,
+      routeTitle: session.routeTitle || session.title || session.summary || `会话${nextIndex}`,
       titleSource: 'auto-import',
       summary: session.summary,
       origin: session.origin,
+      createdAt: readSessionTimestamp(session.createdAt, session.created_at, session.timestamp, session.lastActivity, session.updated_at),
+      updatedAt: readSessionTimestamp(session.lastActivity, session.updated_at, session.updatedAt, session.createdAt, session.created_at),
     };
     existingSessionIds.add(String(session.id));
     changed = true;
@@ -600,7 +603,9 @@ async function collectWorkflowOwnedProviderSessionIds(
  * Convert a project chat route record into overview session shape.
  */
 function routeRecordToSession(routeIndex: string, record: LooseRecord, projectPath: string): LooseRecord {
-  const now = new Date().toISOString();
+  const updatedAt = readSessionTimestamp(record.updatedAt, record.updated_at, record.lastActivity, record.last_activity);
+  const createdAt = readSessionTimestamp(record.createdAt, record.created_at, record.timestamp);
+  const activityAt = readSessionTimestamp(updatedAt, createdAt);
   return {
     id: record.sessionId,
     routeIndex: Number(routeIndex),
@@ -609,9 +614,9 @@ function routeRecordToSession(routeIndex: string, record: LooseRecord, projectPa
     summary: record.summary || record.title || record.sessionId,
     provider: record.provider || 'codex',
     projectPath,
-    lastActivity: record.updatedAt || record.createdAt || now,
-    updated_at: record.updatedAt || record.createdAt || now,
-    createdAt: record.createdAt || record.updatedAt || now,
+    lastActivity: activityAt,
+    updated_at: activityAt,
+    createdAt: createdAt || updatedAt,
     providerSessionId: record.providerSessionId,
     origin: record.origin,
     stageKey: record.stageKey,
@@ -650,7 +655,9 @@ function routeRecordToProviderSession(routeIndex: string, record: LooseRecord, p
  * Convert a manual draft record into a provider list session.
  */
 function draftToSession(draft: LooseRecord, projectPath: string): LooseRecord {
-  const now = new Date().toISOString();
+  const updatedAt = readSessionTimestamp(draft.updatedAt, draft.updated_at, draft.lastActivity, draft.last_activity);
+  const createdAt = readSessionTimestamp(draft.createdAt, draft.created_at, draft.timestamp);
+  const activityAt = readSessionTimestamp(updatedAt, createdAt);
   return {
     id: draft.id,
     routeIndex: draft.routeIndex,
@@ -660,9 +667,9 @@ function draftToSession(draft: LooseRecord, projectPath: string): LooseRecord {
     providerSessionId: draft.providerSessionId,
     status: 'draft',
     projectPath: draft.projectPath || projectPath,
-    lastActivity: draft.updatedAt || draft.createdAt || now,
-    updated_at: draft.updatedAt || draft.createdAt || now,
-    createdAt: draft.createdAt || draft.updatedAt || now,
+    lastActivity: activityAt,
+    updated_at: activityAt,
+    createdAt: createdAt || updatedAt,
     origin: draft.origin,
     workflowId: draft.workflowId,
     stageKey: draft.stageKey,
@@ -670,11 +677,44 @@ function draftToSession(draft: LooseRecord, projectPath: string): LooseRecord {
 }
 
 /**
+ * Read the first usable timestamp without substituting request time.
+ */
+function readSessionTimestamp(...values: unknown[]): string {
+  /**
+   * PURPOSE: Keep stale cN route records from appearing as freshly active when
+   * older project configs did not persist route timestamps.
+   */
+  for (const value of values) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value.toISOString();
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+/**
+ * Convert a session activity timestamp into a sortable millisecond value.
+ */
+function getSessionActivityTimeMs(session: LooseRecord): number {
+  /**
+   * PURPOSE: Treat missing or malformed activity times as oldest instead of
+   * letting Date parsing produce an unstable comparator.
+   */
+  const parsed = new Date(session.lastActivity || session.updated_at || session.createdAt || 0).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
  * Sort sessions newest first.
  */
 function sortByLastActivityDesc(sessionA: LooseRecord, sessionB: LooseRecord): number {
-  return new Date(sessionB.lastActivity || sessionB.updated_at || sessionB.createdAt || 0).getTime()
-    - new Date(sessionA.lastActivity || sessionA.updated_at || sessionA.createdAt || 0).getTime();
+  return getSessionActivityTimeMs(sessionB) - getSessionActivityTimeMs(sessionA);
 }
 
 /**

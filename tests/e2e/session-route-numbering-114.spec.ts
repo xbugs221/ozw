@@ -1,7 +1,7 @@
 // @ts-nocheck -- Playwright fixture tests use runtime browser globals and isolated state.
 /**
  * 文件目的：用真实浏览器路径验证 114 会话路由编号合同。
- * 业务意义：用户连续点击新建会话时，CBW 必须把 cN 当作本地 route id，并在刷新后恢复 route。
+ * 业务意义：用户连续点击新建会话时，OZW 必须把 cN 当作本地 route id，并在刷新后恢复 route。
  */
 import { test, expect } from '@playwright/test';
 import { promises as fs } from 'node:fs';

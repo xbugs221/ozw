@@ -286,7 +286,27 @@ export function useProjectsState({
       }
     }
     if (projectListInvalidated) {
-      void requestCoordinatedProjectRefresh(projectListInvalidated);
+      void (async () => {
+        const freshProjects = await requestCoordinatedProjectRefresh(projectListInvalidated);
+        if (!selectedProject) {
+          return;
+        }
+        if (selectedSession || selectedWorkflowRef.current) {
+          return;
+        }
+        const changedProjectPath = typeof projectListInvalidated?.changedProjectPath === 'string'
+          ? normalizeComparablePath(projectListInvalidated.changedProjectPath)
+          : '';
+        const selectedProjectPath = normalizeComparablePath(selectedProject.fullPath || selectedProject.path || '');
+        if (changedProjectPath && selectedProjectPath && changedProjectPath !== selectedProjectPath) {
+          return;
+        }
+        const refreshedProject = (freshProjects || projects).find((project) => (
+          project.name === selectedProject.name
+          || normalizeComparablePath(project.fullPath || project.path || '') === selectedProjectPath
+        )) || selectedProject;
+        await fetchProjectOverview(refreshedProject);
+      })();
     }
     const projectMessages = pendingMessages
       .map((entry) => entry.message as ProjectsUpdatedMessage | null)
@@ -325,7 +345,7 @@ export function useProjectsState({
     if (serialize(reducedState.selectedSession) !== serialize(selectedSession)) {
       setSelectedSession(reducedState.selectedSession);
     }
-  }, [messageHistory, selectedProject, selectedSession, activeSessions, projects, requestCoordinatedProjectRefresh]);
+  }, [fetchProjectOverview, messageHistory, selectedProject, selectedSession, activeSessions, projects, requestCoordinatedProjectRefresh]);
   useEffect(() => {
     return () => {
       if (loadingProgressTimeoutRef.current) {
@@ -468,8 +488,9 @@ export function useProjectsState({
       setSelectedWorkflow(null);
       setActiveTab('chat');
       navigate(buildProjectRoute(project));
+      void fetchProjectOverview(project);
     },
-    [navigate],
+    [fetchProjectOverview, navigate],
   );
   const handleSessionSelect = useCallback(
     (session: ProjectSession) => {

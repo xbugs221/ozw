@@ -27,6 +27,7 @@ import {
   saveProjectConfig,
   searchChatHistory,
   initManualSessionRoute,
+  updateManualSessionTitleFromFirstRequest,
 } from '../../backend/projects.ts';
 import {
   createProjectWorkflow,
@@ -405,6 +406,73 @@ test('manual Codex draft sessions are visible before the first provider message'
   });
 });
 
+test('manual Codex default route title adopts the first WebUI request', { concurrency: false }, async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const projectPath = path.join(tempHome, 'workspace', 'codex-manual-first-request-title');
+    await fs.mkdir(projectPath, { recursive: true });
+
+    const project = await addProjectManually(projectPath, 'Codex Manual First Request Title');
+    const draftSession = await createManualSessionDraft(project.name, projectPath, 'codex', '');
+    const firstRequest = '请修复手动会话标题重复';
+
+    const updateResult = await updateManualSessionTitleFromFirstRequest(
+      project.name,
+      projectPath,
+      draftSession.id,
+      'codex',
+      firstRequest,
+    );
+    await createCodexSessionFile(tempHome, projectPath, 'codex-manual-first-request-real', {
+      message: firstRequest,
+    });
+    await finalizeManualSessionRoute(
+      project.name,
+      draftSession.id,
+      'codex-manual-first-request-real',
+      'codex',
+      projectPath,
+    );
+
+    assert.equal(updateResult.updated, true);
+
+    const config = await loadProjectConfig(projectPath);
+    const routeRecord = config.chat?.[String(draftSession.routeIndex)];
+    assert.equal(routeRecord?.title, firstRequest);
+    assert.equal(routeRecord?.routeTitle, firstRequest);
+    assert.equal(config.sessionSummaryById?.['codex-manual-first-request-real'], firstRequest);
+
+    const sessions = await getCodexSessions(projectPath, { limit: 0, includeHidden: true });
+    const session = sessions.find((candidate) => candidate.providerSessionId === 'codex-manual-first-request-real');
+    assert.equal(session?.title, firstRequest);
+    assert.equal(session?.routeTitle, firstRequest);
+    assert.equal(session?.summary, firstRequest);
+    assert.equal(session?.routeIndex, draftSession.routeIndex);
+  });
+});
+
+test('manual Codex custom route title is not replaced by the first WebUI request', { concurrency: false }, async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const projectPath = path.join(tempHome, 'workspace', 'codex-manual-custom-title');
+    await fs.mkdir(projectPath, { recursive: true });
+
+    const project = await addProjectManually(projectPath, 'Codex Manual Custom Title');
+    const draftSession = await createManualSessionDraft(project.name, projectPath, 'codex', '保留的会话标题');
+    const updateResult = await updateManualSessionTitleFromFirstRequest(
+      project.name,
+      projectPath,
+      draftSession.id,
+      'codex',
+      '这句请求不应覆盖自定义标题',
+    );
+
+    const config = await loadProjectConfig(projectPath);
+    const routeRecord = config.chat?.[String(draftSession.routeIndex)];
+    assert.equal(updateResult.updated, false);
+    assert.equal(updateResult.reason, 'custom-title');
+    assert.equal(routeRecord?.title, '保留的会话标题');
+  });
+});
+
 test('rebuilt Codex route numbers follow creation time instead of latest activity', { concurrency: false }, async () => {
   await withTemporaryHome(async (tempHome) => {
     const projectPath = path.join(tempHome, 'workspace', 'codex-route-rebuild');
@@ -432,6 +500,42 @@ test('rebuilt Codex route numbers follow creation time instead of latest activit
     const config = await loadProjectConfig(projectPath);
     assert.equal(config.chat?.['1']?.sessionId, 'older-updated-later');
     assert.equal(config.chat?.['2']?.sessionId, 'newer-updated-earlier');
+  });
+});
+
+test('manual Codex list keeps recent provider sessions ahead of untimestamped old route records', { concurrency: false }, async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const projectPath = path.join(tempHome, 'workspace', 'codex-stale-route-times');
+    await fs.mkdir(projectPath, { recursive: true });
+
+    await addProjectManually(projectPath, 'Codex Stale Route Times');
+    const config = await loadProjectConfig(projectPath);
+    config.chat = {};
+    for (let routeIndex = 1; routeIndex <= 12; routeIndex += 1) {
+      config.chat[String(routeIndex)] = {
+        sessionId: `old-route-${routeIndex}`,
+        provider: 'codex',
+        title: `旧会话${routeIndex}`,
+      };
+    }
+    await saveProjectConfig(config, projectPath);
+    await createCodexSessionFile(tempHome, projectPath, 'recent-real-session', {
+      startedAt: '2026-06-01T06:00:00.000Z',
+      messageAt: '2026-06-01T06:00:01.000Z',
+      finalAt: '2026-06-01T06:05:00.000Z',
+      message: '用户刚创建的真实 Codex 会话',
+    });
+
+    const sessions = await getCodexSessions(projectPath, {
+      limit: 10,
+      includeHidden: true,
+      excludeWorkflowChildSessions: true,
+    });
+
+    assert.equal(sessions[0].id, 'recent-real-session');
+    assert.equal(sessions[0].routeIndex, 13);
+    assert.equal(sessions[0].lastActivity, '2026-06-01T06:05:00.000Z');
+    assert.equal(sessions.some((session) => session.id === 'recent-real-session'), true);
   });
 });
 

@@ -75,6 +75,14 @@
 - **那么** persisted transcript 应替换或确认 live message
 - **并且** 同一 user/assistant/tool 消息不得重复显示或乱序
 
+### 场景：前后端共享 live transcript reducer
+
+- **给定** provider runtime 需要维护 active turn overlay 和 live transcript snapshot
+- **当** 前端渲染 native runtime transcript 且后端 store 合并 provider event
+- **那么** 两端必须复用 `shared/provider-runtime-transcript.ts` 中的纯 reducer 和类型
+- **并且** 后端 provider runtime 模块不得导入 `frontend/components/chat/*`
+- **并且** active turn store 和 live transcript store 不得用 `@ts-nocheck` 绕过类型边界
+
 ### 场景：长历史仍按需加载
 
 - **给定** 一个包含大量历史消息的 Codex/Pi 会话

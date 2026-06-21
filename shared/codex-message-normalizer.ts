@@ -60,6 +60,8 @@ export function normalizeCodexToolOutput(value: unknown): string {
 export interface FileChange {
   kind: string;
   path: string;
+  old_string?: string;
+  new_string?: string;
 }
 
 const FILE_OPERATION_KINDS = new Map<string, string>([
@@ -126,7 +128,12 @@ export function normalizeCodexFileOperationPayload(value: unknown, depth = 0): {
         const changePathValue = changeRecord.path ?? changeRecord.filePath ?? changeRecord.file_path;
         const changePath = typeof changePathValue === 'string' ? changePathValue.trim() : '';
         const changeKind = FILE_OPERATION_KINDS.get(rawChangeKind);
-        return changeKind && changePath ? { kind: changeKind, path: changePath } : null;
+        return changeKind && changePath ? {
+          kind: changeKind,
+          path: changePath,
+          ...(typeof changeRecord.old_string === 'string' ? { old_string: changeRecord.old_string } : {}),
+          ...(typeof changeRecord.new_string === 'string' ? { new_string: changeRecord.new_string } : {}),
+        } : null;
       })
       .filter((change): change is FileChange => change !== null);
     if (changes.length > 0) {
@@ -146,7 +153,12 @@ export function normalizeCodexFileOperationPayload(value: unknown, depth = 0): {
   if (kind && filePath) {
     return {
       status: kind === 'added' ? 'Add file' : kind === 'deleted' ? 'Delete file' : 'Edit file',
-      changes: [{ kind, path: filePath }],
+      changes: [{
+        kind,
+        path: filePath,
+        ...(typeof record.old_string === 'string' ? { old_string: record.old_string } : {}),
+        ...(typeof record.new_string === 'string' ? { new_string: record.new_string } : {}),
+      }],
     };
   }
 
@@ -168,6 +180,78 @@ function extractPatchPath(patch: string): string {
 }
 
 /**
+ * Convert one apply_patch file section into old/new text snapshots.
+ */
+function pushApplyPatchSection(
+  changes: FileChange[],
+  section: {
+    kind: string;
+    path: string;
+    oldLines: string[];
+    newLines: string[];
+  } | null,
+) {
+  if (!section) {
+    return;
+  }
+
+  const change: FileChange = {
+    kind: section.kind,
+    path: section.path,
+  };
+
+  if (section.oldLines.length > 0 || section.newLines.length > 0) {
+    change.old_string = section.oldLines.join('\n');
+    change.new_string = section.newLines.join('\n');
+  }
+
+  changes.push(change);
+}
+
+/**
+ * Split an apply_patch payload into per-file changes with diff text snapshots.
+ */
+function parseApplyPatchChanges(patch: string): FileChange[] {
+  const changes: FileChange[] = [];
+  let currentSection: {
+    kind: string;
+    path: string;
+    oldLines: string[];
+    newLines: string[];
+  } | null = null;
+
+  patch.split('\n').forEach((line) => {
+    const fileMatch = line.match(/^\*\*\* (Update|Add|Delete) File:\s*(.+)$/);
+    if (fileMatch) {
+      pushApplyPatchSection(changes, currentSection);
+      currentSection = {
+        kind: fileMatch[1] === 'Add' ? 'added' : fileMatch[1] === 'Delete' ? 'deleted' : 'edit',
+        path: fileMatch[2].trim(),
+        oldLines: [],
+        newLines: [],
+      };
+      return;
+    }
+
+    if (!currentSection || line.startsWith('***') || line.startsWith('@@')) {
+      return;
+    }
+
+    if (line.startsWith('-')) {
+      currentSection.oldLines.push(line.slice(1));
+    } else if (line.startsWith('+')) {
+      currentSection.newLines.push(line.slice(1));
+    } else if (line.startsWith(' ')) {
+      currentSection.oldLines.push(line.slice(1));
+      currentSection.newLines.push(line.slice(1));
+    }
+  });
+
+  pushApplyPatchSection(changes, currentSection);
+  return changes;
+}
+
+/**
  * Convert apply_patch arguments into the FileChanges renderer payload.
  */
 export function normalizeCodexFileChangesInput(argumentsValue: unknown): {
@@ -178,17 +262,7 @@ export function normalizeCodexFileChangesInput(argumentsValue: unknown): {
   const patch = typeof parsed === 'object' && parsed
     ? String((parsed as Record<string, unknown>).patch ?? (parsed as Record<string, unknown>).input ?? '')
     : String(parsed ?? '');
-  const changes = patch
-    .split('\n')
-    .map((line) => {
-      const match = line.match(/^\*\*\* (Update|Add|Delete) File:\s*(.+)$/);
-      if (!match) {
-        return null;
-      }
-      const kind = match[1] === 'Add' ? 'added' : match[1] === 'Delete' ? 'deleted' : 'edit';
-      return { kind, path: match[2].trim() };
-    })
-    .filter((c): c is FileChange => c !== null);
+  const changes = parseApplyPatchChanges(patch);
 
   return {
     status: 'Edit file',
@@ -210,27 +284,13 @@ export function normalizeCodexApplyPatchInput(argumentsValue: unknown): ApplyPat
   const patch = typeof parsed === 'object' && parsed
     ? String((parsed as Record<string, unknown>).patch ?? (parsed as Record<string, unknown>).input ?? '')
     : String(parsed ?? '');
-  const oldLines: string[] = [];
-  const newLines: string[] = [];
-
-  patch.split('\n').forEach((line) => {
-    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('***')) {
-      return;
-    }
-    if (line.startsWith('-')) {
-      oldLines.push(line.slice(1));
-    } else if (line.startsWith('+')) {
-      newLines.push(line.slice(1));
-    } else if (line.startsWith(' ')) {
-      oldLines.push(line.slice(1));
-      newLines.push(line.slice(1));
-    }
-  });
+  const changes = parseApplyPatchChanges(patch);
+  const firstChange = changes[0];
 
   return {
-    file_path: extractPatchPath(patch),
-    old_string: oldLines.join('\n'),
-    new_string: newLines.join('\n') || patch,
+    file_path: firstChange?.path || extractPatchPath(patch),
+    old_string: firstChange?.old_string || '',
+    new_string: firstChange?.new_string || patch,
   };
 }
 
@@ -269,15 +329,26 @@ function resolveCodexFunctionCallId(payload: Record<string, unknown>): unknown {
 }
 
 /**
+ * Codex stores tool arguments under different keys across JSONL and live item
+ * shapes. Prefer the canonical arguments field, then fall back to input/args.
+ */
+function resolveCodexFunctionArguments(payload: Record<string, unknown>): unknown {
+  return payload.arguments ?? payload.input ?? payload.args ?? '';
+}
+
+/**
  * Normalize a Codex function_call payload into an existing ChatMessage tool shape.
  */
 export function normalizeCodexFunctionCall(payload: Record<string, unknown>): NormalizedFunctionCall {
-  const rawName = String(payload?.name || 'UnknownTool');
+  const rawName = String(payload?.name || payload?.tool_name || payload?.toolName || 'UnknownTool');
+  const functionArguments = resolveCodexFunctionArguments(payload);
   const toolCallId = resolveCodexFunctionCallId(payload);
 
   if (rawName === 'shell_command') {
-    const parsed = parseCodexJsonMaybe(payload.arguments);
-    const command = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>).command : payload.arguments;
+    const parsed = parseCodexJsonMaybe(functionArguments);
+    const command = parsed && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>).command ?? (parsed as Record<string, unknown>).cmd
+      : functionArguments;
     return {
       toolName: 'Bash',
       toolInput: JSON.stringify({ command: command || '' }),
@@ -288,14 +359,14 @@ export function normalizeCodexFunctionCall(payload: Record<string, unknown>): No
   if (rawName === 'apply_patch') {
     return {
       toolName: 'FileChanges',
-      toolInput: normalizeCodexFileChangesInput(payload.arguments),
+      toolInput: normalizeCodexFileChangesInput(functionArguments),
       toolCallId,
     };
   }
 
   return {
     toolName: rawName,
-    toolInput: payload?.arguments ?? '',
+    toolInput: functionArguments,
     toolCallId,
   };
 }
@@ -418,6 +489,7 @@ export function transformCodexEvent(event: unknown): unknown {
         case 'mcp_tool_call':
           return { type: 'item', itemType: 'mcp_tool_call', itemId: item.id || item.call_id || null, server: item.server, tool: item.tool, arguments: item.arguments, result: item.result, error: item.error, status: item.status };
         case 'function_call':
+        case 'custom_tool_call':
           return { type: 'item', itemType: 'function_call', itemId: item.id || item.call_id || item.callId || null, item };
         case 'function_call_output':
           return { type: 'item', itemType: 'function_call_output', itemId: item.id || item.call_id || item.callId || null, item };

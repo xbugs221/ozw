@@ -227,5 +227,5 @@ function shouldUseFakePiRuntime(): boolean {
    * PURPOSE: Let abort handling mirror fake runtime behavior without importing
    * router facade code back into the session store.
    */
-  return process.env.CCFLOW_FAKE_RUNNER === '1' || process.env.CBW_FAKE_PI_RUNTIME === '1';
+  return process.env.CCFLOW_FAKE_RUNNER === '1' || process.env.OZW_FAKE_PI_RUNTIME === '1';
 }

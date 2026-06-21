@@ -12,6 +12,7 @@ type ProviderSessionIndexRecord = {
   projectPath: string;
   summary?: string | null;
   title?: string | null;
+  routeTitle?: string | null;
   model?: string | null;
   thread?: string | null;
   sessionFileName?: string | null;
@@ -31,6 +32,7 @@ type ProviderSessionIndexRow = {
   project_path: string;
   summary: string | null;
   title: string | null;
+  route_title: string | null;
   model: string | null;
   thread: string | null;
   session_file_name: string | null;
@@ -108,6 +110,7 @@ function ensureProviderSessionIndexSchema(db: any): void {
       normalized_project_path TEXT NOT NULL,
       summary TEXT,
       title TEXT,
+      route_title TEXT,
       model TEXT,
       thread TEXT,
       session_file_name TEXT,
@@ -130,6 +133,9 @@ function ensureProviderSessionIndexSchema(db: any): void {
   if (!columnNames.has('origin')) {
     db.exec('ALTER TABLE provider_session_index ADD COLUMN origin TEXT');
   }
+  if (!columnNames.has('route_title')) {
+    db.exec('ALTER TABLE provider_session_index ADD COLUMN route_title TEXT');
+  }
   schemaReadyDbs.add(db);
 }
 
@@ -141,12 +147,15 @@ function rowToSession(row: ProviderSessionIndexRow): Record<string, unknown> {
    * PURPOSE: Keep project overview callers independent from SQLite column
    * naming and preserve provider-specific identity fields.
    */
+  const fallbackTitle = row.provider === 'pi' ? 'Pi Session' : 'Codex Session';
+  const routeTitle = row.route_title || row.title || row.summary || fallbackTitle;
   return {
     id: row.session_id,
     sourceSessionId: row.source_session_id || undefined,
     origin: normalizeSessionOrigin(row.origin) || undefined,
-    summary: row.summary || row.title || (row.provider === 'pi' ? 'Pi Session' : 'Codex Session'),
-    title: row.title || row.summary || (row.provider === 'pi' ? 'Pi Session' : 'Codex Session'),
+    summary: row.summary || row.title || row.route_title || fallbackTitle,
+    title: row.title || row.route_title || row.summary || fallbackTitle,
+    routeTitle,
     messageCount: row.message_count,
     messageCountKnown: row.message_count_known === 1,
     createdAt: row.created_at || undefined,
@@ -191,6 +200,7 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
       normalized_project_path,
       summary,
       title,
+      route_title,
       model,
       thread,
       session_file_name,
@@ -201,7 +211,7 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
       message_count_known,
       file_mtime_ms,
       indexed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(provider, session_id) DO UPDATE SET
       source_session_id = excluded.source_session_id,
       origin = COALESCE(excluded.origin, provider_session_index.origin),
@@ -209,6 +219,7 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
       normalized_project_path = excluded.normalized_project_path,
       summary = excluded.summary,
       title = excluded.title,
+      route_title = excluded.route_title,
       model = excluded.model,
       thread = excluded.thread,
       session_file_name = excluded.session_file_name,
@@ -228,6 +239,7 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
     normalizedProjectPath,
     record.summary || null,
     record.title || record.summary || null,
+    record.routeTitle || record.title || record.summary || null,
     record.model || null,
     record.thread || null,
     record.sessionFileName || null,
@@ -261,6 +273,7 @@ function listProviderSessionsForProject(db: any, provider: 'codex' | 'pi', proje
       project_path,
       summary,
       title,
+      route_title,
       model,
       thread,
       session_file_name,

@@ -57,6 +57,7 @@ function getSessionTitle(session: ProjectSession): string {
     return getFirstSessionDisplayText(
       'Codex Session',
       session.routeTitle,
+      session.title,
       session.summary,
       session.name,
     );
@@ -65,6 +66,7 @@ function getSessionTitle(session: ProjectSession): string {
   return getFirstSessionDisplayText(
     'New Session',
     session.routeTitle,
+    session.title,
     session.summary,
     session.name,
   );

@@ -18,7 +18,7 @@ const REQUIRED_BOUNDARY_MODULES = [
     markers: ['codex-command', 'pi-command', 'abort-session', 'subscribe-session'],
   },
   {
-    path: 'backend/server/realtime/chat-command-dispatcher.ts',
+    path: 'backend/server/realtime/chat-command-runtime.ts',
     markers: ['sendNativeMessage', 'abortNativeSession', 'sessionSubscriptionRegistry'],
   },
   {
@@ -68,7 +68,7 @@ async function writeEvidence(snapshot: unknown): Promise<void> {
 
 test('backend realtime protocol and provider runtime use focused boundaries', async () => {
   const chatWebSocket = await readRepoFile('backend/server/chat-websocket.ts');
-  const chatCommandDispatcher = await readRepoFile('backend/server/realtime/chat-command-dispatcher.ts');
+  const chatCommandDispatcher = await readRepoFile('backend/server/realtime/chat-command-runtime.ts');
   const runtimeRouter = await readRepoFile('backend/domains/provider-runtime/runtime-router.ts');
   const moduleSnapshots = [];
 

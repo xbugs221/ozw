@@ -172,6 +172,7 @@ Codex app-server 实时路径不得重新退化为单个巨型 runtime 文件；
 - **当** 维护者调整 route 注册函数或依赖注入映射
 - **则** 每个业务 route module 必须导出具名 deps interface
 - **且** `register*Routes(deps)` 必须使用对应 deps interface，不得使用 `deps: any`
+- **且** route deps interface 的字段不得用 `any` 逃逸；必须使用具体函数、store、系统模块 adapter 或明确的 `unknown` 边界
 - **且** `backend/server/backend-http-routes.ts` 只能做 route module 编排和最小依赖映射
 - **且** 聚合层不得重新承载大量 handler 主体
 

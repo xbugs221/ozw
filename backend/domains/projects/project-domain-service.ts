@@ -53,6 +53,7 @@ export {
   finalizeManualSessionRoute,
   getManualSessionRouteRuntime,
   initManualSessionRoute,
+  updateManualSessionTitleFromFirstRequest,
 } from './manual-session-route-read-model.js';
 export {
   buildProviderSessionListReadModel,

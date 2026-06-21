@@ -7,12 +7,15 @@ import { expect, test } from '@playwright/test';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
+  authHeaders,
   authenticatePage,
+  getFixtureProject,
   openFixtureProject,
   PRIMARY_FIXTURE_PROJECT_PATH,
 } from './helpers/spec-test-helpers.ts';
 import { openCodexFixtureRoute, waitForCodexFixtureSession } from './helpers/fixture-session-discovery.ts';
 import { installProviderRuntimeHarness } from './helpers/provider-runtime-harness.ts';
+import { getProjectLocalConfigPath } from '../../backend/project-config-store.ts';
 import {
   appendCodexSessionEntries,
   codexAssistantMessageEntry,
@@ -27,6 +30,7 @@ import {
 } from '../e2e/helpers/playwright-fixture.ts';
 
 const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results/oz-91-codex-first-turn-rendering');
+const LIVE_REFRESH_DEBUG_DIR = path.resolve(process.cwd(), 'docs/debug/20260618-1024-live-reply-refresh/screenshots');
 const SESSION_DAY = ['2026', '06', '09'];
 
 /**
@@ -238,6 +242,25 @@ async function emitCodexSocketMessage(page, routeSessionId, message) {
     projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
     ...message,
   });
+}
+
+/**
+ * Emit one global project-list invalidation through the browser socket harness.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @returns {Promise<void>}
+ */
+async function emitProjectListInvalidated(page) {
+  /** docstring: 复现后端 provider 绑定完成后发出的项目刷新事件。 */
+  await page.evaluate((projectPath) => {
+    window.__oz91EmitSocketMessage?.({
+      type: 'project_list_invalidated',
+      reason: 'manual-session-provider-bound',
+      changedProjectPath: projectPath,
+      scope: 'projects:list',
+      version: String(Date.now()),
+    });
+  }, PRIMARY_FIXTURE_PROJECT_PATH);
 }
 
 /**
@@ -528,4 +551,172 @@ test('Codex 首条响应 live 和 persisted 阶段顺序稳定且命令卡没有
   await expectCommandOutputIconOnly(persistedCommandCard, output.trim());
   await saveEvidence(page, 'persisted-first-turn', recorder);
   expectNoRuntimeNoise(recorder);
+});
+
+test('Codex 手动会话 provider 绑定刷新期间保留 live 回复', async ({ page, request }) => {
+  /**
+   * 业务场景: WebUI 新建 cN 手动会话后，第一条回复正在 live 输出。
+   * provider session 绑定完成会触发 project invalidation，但这个项目刷新
+   * 不应把当前聊天页的 live 回复清空。
+   */
+  await page.addInitScript(() => {
+    window.prompt = (_message, defaultValue = '') => String(defaultValue || '');
+  });
+  const recorder = attachNoiseRecorder(page);
+  const project = await getFixtureProject(request);
+  const providerSessionId = `oz91-live-refresh-provider-${Date.now()}`;
+  const prompt = '91 live 刷新回归：请回复时保持动态渲染。';
+  const liveBeforeRefresh = '91 live 刷新前：这条回复不能被项目 overview 刷新清空。';
+
+  await writeCodexSessionFixture({
+    sessionId: providerSessionId,
+    projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
+    sessionDay: SESSION_DAY,
+    homeDir: PLAYWRIGHT_FIXTURE_HOME,
+    timestamp: '2026-06-09T09:20:00.000Z',
+  });
+
+  await openFixtureProject(page, { reset: false });
+  const manualSessionGroup = page.locator('[data-testid="project-overview-manual-sessions"]').first();
+  await expect(manualSessionGroup).toBeVisible();
+  await manualSessionGroup.getByRole('button', { name: /新建|New Session/ }).click();
+  await page.getByTestId('project-new-session-provider-codex').click();
+  await expect(page).toHaveURL(/\/workspace\/.*\/c\d+$/);
+  const routeSessionId = page.url().match(/\/(c\d+)(?:[?#].*)?$/)?.[1] || '';
+  expect(routeSessionId).toMatch(/^c\d+$/);
+
+  await submitUserMessage(page, prompt);
+  const commandMessage = await waitForCodexCommand(page, prompt);
+  await emitCodexSocketMessage(page, routeSessionId, {
+    type: 'message-accepted',
+    clientRequestId: commandMessage.clientRequestId,
+  });
+  await emitCodexSocketMessage(page, routeSessionId, {
+    type: 'session-status',
+    isProcessing: true,
+    turnId: `turn-${commandMessage.clientRequestId}`,
+    turn_id: `turn-${commandMessage.clientRequestId}`,
+  });
+  await emitCodexSocketMessage(page, routeSessionId, {
+    type: 'codex-response',
+    data: {
+      type: 'item',
+      itemType: 'agent_message',
+      itemId: 'oz91-live-before-project-refresh',
+      message: {
+        role: 'assistant',
+        phase: 'commentary',
+        content: liveBeforeRefresh,
+      },
+    },
+  });
+  const transcript = page.locator('[data-testid="chat-scroll-container"]').last();
+  await expect(transcript).toContainText(liveBeforeRefresh);
+
+  const finalizeResponse = await request.post(
+    `/api/projects/${encodeURIComponent(project.name)}/manual-sessions/${routeSessionId}/finalize`,
+    {
+      headers: authHeaders(),
+      data: {
+        actualSessionId: providerSessionId,
+        provider: 'codex',
+        projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
+      },
+    },
+  );
+  expect(finalizeResponse.ok()).toBeTruthy();
+
+  await Promise.all([
+    page.waitForResponse((response) => (
+      response.url().includes('/overview')
+      && response.url().includes(encodeURIComponent(PRIMARY_FIXTURE_PROJECT_PATH))
+      && response.status() === 200
+    ), { timeout: 5000 }).catch(() => null),
+    emitProjectListInvalidated(page),
+  ]);
+
+  await expect(transcript).toContainText(liveBeforeRefresh);
+
+  await fs.mkdir(LIVE_REFRESH_DEBUG_DIR, { recursive: true });
+  await page.screenshot({
+    path: path.join(LIVE_REFRESH_DEBUG_DIR, 'codex-live-reply-after-project-refresh.png'),
+    fullPage: true,
+  });
+  await saveEvidence(page, 'live-refresh-preserved', recorder);
+  expectNoRuntimeNoise(recorder);
+});
+
+test('Codex cN route 消息刷新保持 route-scoped 加载入口', async ({ page, request }) => {
+  /**
+   * 业务场景: 用户从项目页打开 `cN` 手动会话时，运行中回复恢复依赖
+   * route-scoped messages API 合并 active-turn overlay；前端不能在 overview
+   * 解析出 provider UUID 后切到裸 provider messages API。
+   */
+  const recorder = attachNoiseRecorder(page);
+  const sessionId = `oz91-route-scoped-loader-${Date.now()}`;
+  const persistedUser = '91 cN route loader：用户已进入 provider-backed 手动会话。';
+  const persistedAssistant = '91 cN route loader：历史消息通过 cN route 加载。';
+  const messageRequests = [];
+
+  await writeCodexSessionFixture({
+    sessionId,
+    projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
+    sessionDay: SESSION_DAY,
+    homeDir: PLAYWRIGHT_FIXTURE_HOME,
+    timestamp: '2026-06-09T09:30:00.000Z',
+    entries: [
+      userEvent('2026-06-09T09:30:01.000Z', persistedUser),
+      assistantMessage('2026-06-09T09:30:02.000Z', persistedAssistant),
+    ],
+  });
+  const configPath = getProjectLocalConfigPath(PRIMARY_FIXTURE_PROJECT_PATH);
+  const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
+  const chat = Object.fromEntries(
+    Object.entries(config.chat || {}).filter(([, record]) => record?.sessionId !== sessionId),
+  ) as Record<string, Record<string, unknown>>;
+  const routeIndex = Math.max(
+    0,
+    ...Object.keys(chat).map((key) => Number(key)).filter((value) => Number.isInteger(value) && value > 0),
+  ) + 1;
+  const routeSessionId = `c${routeIndex}`;
+  config.chat = chat;
+  chat[String(routeIndex)] = {
+    sessionId,
+    providerSessionId: sessionId,
+    provider: 'codex',
+    title: 'Codex route-scoped loader',
+  };
+  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+  page.on('request', (pageRequest) => {
+    const url = pageRequest.url();
+    if (url.includes('/messages')) {
+      messageRequests.push(url);
+    }
+  });
+
+  const project = await getFixtureProject(request);
+  const route = {
+    project,
+    session: config.chat[String(routeIndex)],
+    routeSessionId,
+    providerSessionId: sessionId,
+  };
+  await openFixtureProject(page, { reset: false });
+  await page.goto(`${project.routePath}/${routeSessionId}`, { waitUntil: 'domcontentloaded' });
+  const transcript = page.locator('[data-testid="chat-scroll-container"]').last();
+  await expect(transcript).toContainText(persistedAssistant);
+  await page.waitForTimeout(1200);
+
+  const routeScopedRequests = messageRequests.filter((url) => url.includes(`/sessions/${route.routeSessionId}/messages`));
+  const providerScopedRequests = messageRequests.filter((url) => url.includes(`/api/codex/sessions/${sessionId}/messages`));
+  await fs.writeFile(
+    path.join(EVIDENCE_DIR, 'route-scoped-message-requests.json'),
+    `${JSON.stringify({ route, messageRequests, routeScopedRequests, providerScopedRequests }, null, 2)}\n`,
+    'utf8',
+  );
+
+  expect(routeScopedRequests.length, 'cN route must request route-scoped messages').toBeGreaterThan(0);
+  expect(providerScopedRequests, 'cN route must not bypass active-turn overlay with provider UUID messages API').toEqual([]);
+  await saveEvidence(page, 'route-scoped-loader', recorder);
 });

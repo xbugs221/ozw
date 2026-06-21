@@ -242,6 +242,7 @@ function ChatInterface({
     selectedSession,
     sendMessage,
     isFollowingLatest,
+    isRealtimeConnected: Boolean(ws && ws.readyState === WebSocket.OPEN),
     autoScrollToBottom,
     externalMessageUpdate,
     resetStreamingState,

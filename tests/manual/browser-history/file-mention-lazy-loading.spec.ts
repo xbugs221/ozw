@@ -4,7 +4,7 @@
  */
 import { expect, test } from '@playwright/test';
 
-const baseUrl = process.env.CBW_BASE_URL || 'http://localhost:5174';
+const baseUrl = process.env.OZW_BASE_URL || 'http://localhost:5174';
 
 type ProjectSession = {
   id?: string;

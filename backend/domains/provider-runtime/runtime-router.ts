@@ -10,7 +10,7 @@ import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from '
 import os from 'os';
 import path from 'path';
 import { promises as fsp } from 'fs';
-import type { ChatMessageLike } from '../../../frontend/components/chat/utils/nativeRuntimeTranscript.js';
+import type { ChatMessageLike } from '../../../shared/provider-runtime-transcript.js';
 import {
   sendCodexAppServerMessage,
   getCodexAppServerSessionStatus,

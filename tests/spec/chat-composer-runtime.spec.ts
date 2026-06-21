@@ -33,6 +33,8 @@ const READ_TOOL_SESSION_ID = 'codex-read-tool-link';
 const READ_TOOL_RELATIVE_PATH = 'src/read-tool-link.ts';
 const EDIT_TOOL_SESSION_ID = 'codex-edit-tool-link';
 const EDIT_TOOL_RELATIVE_PATH = 'src/edit-tool-link.ts';
+const FILE_CHANGES_TOOL_SESSION_ID = 'codex-file-changes-tool-link';
+const FILE_CHANGES_TOOL_RELATIVE_PATH = 'src/file-changes-tool-link.ts';
 const TINY_PNG_BYTES = Uint8Array.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
   0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -44,6 +46,32 @@ const TINY_PNG_BYTES = Uint8Array.from([
   0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
   0x44, 0xae, 0x42, 0x60, 0x82,
 ]);
+
+/**
+ * Build a long old/new text pair with one changed line below the initial editor viewport.
+ *
+ * @param {string} exportName
+ * @returns {{oldText: string, newText: string, oldLine: string, newLine: string}}
+ */
+function buildLongDiffFixture(exportName) {
+  const contextBefore = Array.from(
+    { length: 70 },
+    (_, index) => `export const ${exportName}ContextBefore${index + 1} = ${index + 1};`,
+  );
+  const contextAfter = Array.from(
+    { length: 20 },
+    (_, index) => `export const ${exportName}ContextAfter${index + 1} = ${index + 1};`,
+  );
+  const oldLine = `export const ${exportName} = true;`;
+  const newLine = `export const ${exportName} = "edited";`;
+
+  return {
+    oldText: `${[...contextBefore, oldLine, ...contextAfter].join('\n')}\n`,
+    newText: `${[...contextBefore, newLine, ...contextAfter].join('\n')}\n`,
+    oldLine,
+    newLine,
+  };
+}
 
 /**
  * Ensure screenshots and state snapshots can be written by every scenario.
@@ -512,6 +540,27 @@ test('running cN session shows provider live output and sends abort for the rout
   );
 });
 
+test('follow latest scrolls during running native live output without refreshing JSONL tail', async ({ page }) => {
+  /** Business rule: while WS live owns the active turn, follow-latest only moves the viewport. */
+  let messagesRequestCount = 0;
+  await page.route('**/api/projects/**/sessions/c73/messages**', async (route) => {
+    messagesRequestCount += 1;
+    await route.continue();
+  });
+
+  const matxRoute = `${buildProjectRoutePrefix(MATX_PROJECT_PATH)}/c73`;
+  await page.goto(matxRoute, { waitUntil: 'networkidle' });
+  await expect(page.getByText('SPEC_C73_LIVE_OUTPUT')).toBeVisible({ timeout: 10_000 });
+  const countAfterLiveHydration = messagesRequestCount;
+
+  await page.getByTestId('chat-follow-latest').click();
+  await expect(page.getByTestId('chat-follow-latest')).toHaveAttribute('aria-pressed', 'true');
+  await page.waitForTimeout(500);
+
+  expect(messagesRequestCount).toBe(countAfterLiveHydration);
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'follow-live-no-jsonl-refresh.png'), fullPage: true });
+});
+
 test('running cN session shows only the completed tool card', async ({ page }) => {
   /** Business rule: tool start events are internal progress; users see the completed card once output arrives. */
   const matxRoute = `${buildProjectRoutePrefix(MATX_PROJECT_PATH)}/c73`;
@@ -568,13 +617,14 @@ test('Read tool card path opens the text editor', async ({ page }) => {
 
 test('Edit tool card path opens diff context in the text editor', async ({ page }) => {
   /** Business rule: Edit cards open the target file while carrying the old/new diff context. */
+  const diffFixture = buildLongDiffFixture('toolOpenFile');
   await writeTextToolCodexFixture({
     sessionId: EDIT_TOOL_SESSION_ID,
     relativePath: EDIT_TOOL_RELATIVE_PATH,
     toolName: 'Edit',
     toolArguments: {
-      old_string: 'export const toolOpenFile = true;',
-      new_string: 'export const toolOpenFile = "edited";',
+      old_string: diffFixture.oldText,
+      new_string: diffFixture.newText,
     },
   });
   const matxRoute = `${buildProjectRoutePrefix(MATX_PROJECT_PATH)}/${EDIT_TOOL_SESSION_ID}`;
@@ -588,8 +638,63 @@ test('Edit tool card path opens diff context in the text editor', async ({ page 
     page.getByTestId('workspace-dock-layout').getByRole('heading', { name: path.basename(EDIT_TOOL_RELATIVE_PATH) }),
   ).toBeVisible();
   await expect(page.getByText('显示更改')).toBeVisible();
+  await expect(page.getByTestId('workspace-dock-layout').locator('.cm-editor.cm-merge-b')).toBeVisible();
+  await expect(page.getByTestId('workspace-dock-layout').locator('.cm-changedLine').filter({ hasText: diffFixture.newLine }).first()).toBeVisible();
+  await expect(page.getByText(diffFixture.oldLine).first()).toBeVisible();
+  await expect(page.getByText(diffFixture.newLine).first()).toBeVisible();
+  await page.getByTestId('workspace-dock-layout').getByRole('button', { name: /关闭|Close/i }).click();
+
+  const editToolCard = page.getByTestId('codex-tool-card').filter({ hasText: EDIT_TOOL_RELATIVE_PATH });
+  await expect(editToolCard.locator('summary')).toHaveCount(0);
+  await editToolCard.getByRole('button', { name: `Open ${EDIT_TOOL_RELATIVE_PATH}` }).click();
+  await expect(
+    page.getByTestId('workspace-dock-layout').getByRole('heading', { name: path.basename(EDIT_TOOL_RELATIVE_PATH) }),
+  ).toBeVisible();
+  await expect(page.getByText('显示更改')).toBeVisible();
+  await expect(page.getByTestId('workspace-dock-layout').locator('.cm-editor.cm-merge-b')).toBeVisible();
+  await expect(page.getByTestId('workspace-dock-layout').locator('.cm-changedLine').filter({ hasText: diffFixture.newLine }).first()).toBeVisible();
+  await expect(page.getByText(diffFixture.oldLine).first()).toBeVisible();
+  await expect(page.getByText(diffFixture.newLine).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /Save|保存/i })).toBeVisible();
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'edit-tool-link-opened.png'), fullPage: true });
+});
+
+test('FileChanges edit row hides status and opens diff context in the text editor', async ({ page }) => {
+  /** Business rule: live file-change summaries stay compact and still open git-style diffs. */
+  const absolutePath = path.join(MATX_PROJECT_PATH, FILE_CHANGES_TOOL_RELATIVE_PATH);
+  const diffFixture = buildLongDiffFixture('fileChangesOpen');
+  await writeTextToolCodexFixture({
+    sessionId: FILE_CHANGES_TOOL_SESSION_ID,
+    relativePath: FILE_CHANGES_TOOL_RELATIVE_PATH,
+    toolName: 'FileChanges',
+    toolArguments: {
+      status: 'Edit file',
+      changes: [{
+        kind: 'edit',
+        path: absolutePath,
+        old_string: diffFixture.oldText,
+        new_string: diffFixture.newText,
+      }],
+    },
+  });
+  const matxRoute = `${buildProjectRoutePrefix(MATX_PROJECT_PATH)}/${FILE_CHANGES_TOOL_SESSION_ID}`;
+  await page.goto(matxRoute, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /open src\/file-change/i }).first().click();
+
+  const fileChangesCard = page.getByTestId('codex-tool-card').filter({ hasText: FILE_CHANGES_TOOL_RELATIVE_PATH });
+  await expect(fileChangesCard).toBeVisible();
+  await expect(fileChangesCard).not.toContainText('状态:');
+  await fileChangesCard.getByRole('button', { name: FILE_CHANGES_TOOL_RELATIVE_PATH }).click();
+
+  await expect(
+    page.getByTestId('workspace-dock-layout').getByRole('heading', { name: path.basename(FILE_CHANGES_TOOL_RELATIVE_PATH) }),
+  ).toBeVisible();
+  await expect(page.getByText('显示更改')).toBeVisible();
+  await expect(page.getByTestId('workspace-dock-layout').locator('.cm-editor.cm-merge-b')).toBeVisible();
+  await expect(page.getByTestId('workspace-dock-layout').locator('.cm-changedLine').filter({ hasText: diffFixture.newLine }).first()).toBeVisible();
+  await expect(page.getByText(diffFixture.oldLine).first()).toBeVisible();
+  await expect(page.getByText(diffFixture.newLine).first()).toBeVisible();
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'file-changes-tool-link-opened.png'), fullPage: true });
 });
 
 test('running cN follow-up turns green and renders live output before JSONL catches up', async ({ page }) => {

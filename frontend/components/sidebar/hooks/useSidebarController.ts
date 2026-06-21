@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type React from 'react';
 import type { TFunction } from 'i18next';
 import { api } from '../../../utils/api';
-import { CBW_SETTINGS_KEY } from '../../../utils/settingsStorage';
+import { OZW_SETTINGS_KEY } from '../../../utils/settingsStorage';
 import type { Project } from '../../../types/app';
 import type {
   DeleteProjectConfirmation,
@@ -60,7 +60,7 @@ export function useSidebarController({
     loadSortOrder();
 
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === CBW_SETTINGS_KEY) {
+      if (event.key === OZW_SETTINGS_KEY) {
         loadSortOrder();
       }
     };

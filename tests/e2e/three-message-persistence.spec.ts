@@ -1,6 +1,6 @@
 // @ts-nocheck -- Browser evidence test keeps assertions close to observable UI state.
 /**
- * PURPOSE: Verify one manual CBW chat session keeps three consecutive browser
+ * PURPOSE: Verify one manual OZW chat session keeps three consecutive browser
  * sends visible, pushed, durable, and non-duplicated across reload.
  */
 import { test, expect } from '@playwright/test';
@@ -34,7 +34,7 @@ async function openNewManualSession(page, provider) {
 }
 
 /**
- * Return the cN route id that CBW uses as the co conversation id.
+ * Return the cN route id that OZW uses as the co conversation id.
  */
 function currentConversationId(page) {
   const matched = page.url().match(/\/c(\d+)(?:[?#].*)?$/);

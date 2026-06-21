@@ -7,6 +7,7 @@ import { OneLineDisplay, CollapsibleDisplay, DiffViewer, MarkdownContent, FileLi
 import type { Project } from '../../../types/app';
 import type { SubagentChildTool } from '../types/types';
 import { formatPathRelativeToProject, formatPathTextRelativeToProject } from '../../../utils/pathDisplay';
+import { isSubagentToolName } from '../../../../shared/subagent-tool-utils.js';
 
 type DiffLine = {
   type: string;
@@ -47,6 +48,7 @@ function InlineToolResultAnchor({ toolId }: { toolId?: string }) {
 function getToolCategory(toolName: string): string {
   // Normalize to handle Pi SDK lowercase tool names (bash, read, edit, etc.)
   const normalized = toolName.charAt(0).toUpperCase() + toolName.slice(1);
+  if (isSubagentToolName(toolName)) return 'agent';
   if (['Edit', 'Edit file', 'Write', 'ApplyPatch'].includes(normalized)) return 'edit';
   if (['Grep', 'Glob'].includes(normalized)) return 'search';
   if (normalized === 'Bash') return 'bash';
@@ -79,7 +81,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
   subagentState
 }) => {
   // Route subagent containers to dedicated component
-  if (isSubagentContainer && subagentState) {
+  if (isSubagentContainer) {
     if (mode === 'result') {
       return null;
     }
@@ -87,7 +89,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
       <SubagentContainer
         toolInput={toolInput}
         toolResult={toolResult}
-        subagentState={subagentState}
+        subagentState={subagentState ?? { childTools: [], currentToolIndex: -1, isComplete: Boolean(toolResult) }}
         autoExpandTools={autoExpandTools}
       />
     );
@@ -134,7 +136,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
   const handleAction = useCallback(() => {
     if (displayConfig?.action === 'open-file' && onFileOpen) {
       const value = displayConfig.getValue?.(safeData) || '';
-      onFileOpen(value);
+      onFileOpen(value, displayConfig.getOpenFileDiffInfo?.(safeData));
     }
   }, [displayConfig, safeData, onFileOpen]);
 
@@ -253,12 +255,13 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
     switch (displayConfig.contentType) {
       case 'diff':
         if (createDiff) {
+          const openFileDiffInfo = displayConfig.getOpenFileDiffInfo?.(safeData, contentProps);
           contentComponent = (
             <DiffViewer
               {...contentProps}
               displayFilePath={formatProjectPath(contentProps.filePath || '')}
               createDiff={createDiff}
-              onFileClick={() => onFileOpen?.(contentProps.filePath)}
+              onFileClick={() => onFileOpen?.(contentProps.filePath, openFileDiffInfo)}
             />
           );
         }

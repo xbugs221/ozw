@@ -15,6 +15,7 @@ import {
   getManualSessionDraftMap,
   getNextManualRouteIndex,
   getSessionWorkflowMetadataMap,
+  isPlainRecord,
   loadProjectConfig,
   MANUAL_SESSION_DRAFTS_KEY,
   parseManualSessionRouteIndex,
@@ -153,6 +154,76 @@ export function finalizeManualSessionRoute(
 }
 
 /**
+ * Update a default manual cN route title from the first user request.
+ */
+export async function updateManualSessionTitleFromFirstRequest(
+  projectName = '',
+  projectPath = '',
+  draftSessionId = '',
+  provider: ProviderName = 'codex',
+  firstRequest = '',
+): Promise<LooseRecord> {
+  assertProvider(provider);
+  const firstRequestTitle = summarizeManualSessionTitle(firstRequest);
+  if (!firstRequestTitle) {
+    return { updated: false, reason: 'empty-request' };
+  }
+
+  const resolvedProjectPath = projectPath || await extractProjectDirectory(projectName);
+  const config = await loadProjectConfig(resolvedProjectPath);
+  const record = findProjectChatRecord(config, draftSessionId, provider);
+  if (!record?.record || record.scope !== 'chat') {
+    return { updated: false, reason: 'missing-route' };
+  }
+
+  const routeIndex = Number(record.routeIndex);
+  const routeSessionId = Number.isInteger(routeIndex) && routeIndex > 0
+    ? buildManualSessionId(routeIndex)
+    : '';
+  const currentTitle = String(record.record.title || record.record.summary || '').trim();
+  if (!isDefaultManualSessionTitle(currentTitle, routeIndex, draftSessionId)) {
+    return { updated: false, reason: 'custom-title' };
+  }
+
+  const routeTitle = summarizeManualSessionTitle(firstRequest, 20, false) || firstRequestTitle;
+  const now = new Date().toISOString();
+  config.chat = isPlainRecord(config.chat) ? { ...config.chat } : {};
+  config.chat[record.routeIndex] = {
+    ...record.record,
+    provider: record.record.provider || provider,
+    title: firstRequestTitle,
+    routeTitle,
+    summary: firstRequestTitle,
+    updatedAt: now,
+  };
+
+  const manualDrafts = {
+    ...getManualSessionDraftMap(config),
+  };
+  if (isPlainRecord(manualDrafts[draftSessionId])) {
+    manualDrafts[draftSessionId] = {
+      ...manualDrafts[draftSessionId],
+      label: firstRequestTitle,
+      title: firstRequestTitle,
+      routeTitle,
+      summary: firstRequestTitle,
+      updatedAt: now,
+    };
+    config[MANUAL_SESSION_DRAFTS_KEY] = manualDrafts;
+  }
+
+  writeSessionSummaryOverride(config, draftSessionId, firstRequestTitle);
+  const providerSessionId = resolveManualRouteProviderSessionId(config.chat[record.routeIndex], draftSessionId, routeSessionId);
+  if (providerSessionId) {
+    writeSessionSummaryOverride(config, providerSessionId, firstRequestTitle);
+  }
+
+  await saveProjectConfig(config, resolvedProjectPath);
+  clearProjectDirectoryCache();
+  return { updated: true, title: firstRequestTitle, routeTitle };
+}
+
+/**
  * Delete a manual session route when the owning session is removed.
  */
 export async function deleteSession(projectName = '', sessionId = '', provider: ProviderName | null = null): Promise<boolean> {
@@ -178,6 +249,39 @@ function resolveManualRouteProviderSessionId(record: LooseRecord, draftSessionId
   }
   const sessionId = String(record.sessionId || '');
   return sessionId && sessionId !== draftSessionId && sessionId !== routeSessionId ? sessionId : '';
+}
+
+/**
+ * Check whether a route title is still the generated route-number label.
+ */
+function isDefaultManualSessionTitle(title: string, routeIndex: number, draftSessionId: string): boolean {
+  /**
+   * PURPOSE: Preserve user-provided labels while allowing the redundant
+   * generated 会话N placeholder to become the first real request title.
+   */
+  if (!title) {
+    return true;
+  }
+  if (Number.isInteger(routeIndex) && routeIndex > 0 && title === `会话${routeIndex}`) {
+    return true;
+  }
+  return title === draftSessionId || title === 'New Session';
+}
+
+/**
+ * Normalize a user request into a compact manual-session title.
+ */
+function summarizeManualSessionTitle(text: unknown, maxLength = 50, ellipsis = true): string {
+  /**
+   * PURPOSE: Store enough of the user's first request for list scanning while
+   * keeping route titles bounded for compact cards.
+   */
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  const chars = Array.from(normalized);
+  if (chars.length <= maxLength) {
+    return normalized;
+  }
+  return ellipsis ? `${chars.slice(0, maxLength).join('')}...` : chars.slice(0, maxLength).join('');
 }
 
 /**

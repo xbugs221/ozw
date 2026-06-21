@@ -90,6 +90,19 @@ function parseWindowMessages(socket) {
   return socket.sent.map((raw) => JSON.parse(raw));
 }
 
+/**
+ * Wait for async command dispatch side effects in fake WebSocket specs.
+ */
+async function waitForCondition(predicate, timeoutMs = 1000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 test('Codex realtime handlers preserve client request identity across accepted response and complete events', async () => {
   const realtimeSource = await readRepoFile('frontend/components/chat/hooks/useChatRealtimeHandlers.ts');
   const websocketSource = await readRepoFile('frontend/contexts/WebSocketContext.tsx');
@@ -171,7 +184,7 @@ test('同一用户多窗口只向 owner 投递 Codex 会话私有 delta', { conc
     extractProjectDirectory: async () => projectPath,
     resolveCbwSessionStartContext: (data, resolvedOptions) => {
       /**
-       * PURPOSE: Resolve the CBW route id from browser command fields so the
+       * PURPOSE: Resolve the OZW route id from browser command fields so the
        * handler can record the owner scope for the emitting window.
        */
       const candidate = data.ozwSessionId
@@ -249,6 +262,7 @@ test('同一用户多窗口只向 owner 投递 Codex 会话私有 delta', { conc
     },
   });
 
+  await waitForCondition(() => parseWindowMessages(windowA).some((message) => message.type === 'codex-delta'));
   const messagesForA = parseWindowMessages(windowA);
   const messagesForB = parseWindowMessages(windowB);
   await fs.mkdir(WINDOW_OWNERSHIP_EVIDENCE_DIR, { recursive: true });
@@ -273,4 +287,79 @@ test('同一用户多窗口只向 owner 投递 Codex 会话私有 delta', { conc
     false,
     '窗口 B 订阅 c2 时不能收到窗口 A 的 c1 会话私有消息',
   );
+});
+
+test('Codex websocket command sends uploaded file note to native runtime', { concurrency: false }, async () => {
+  /**
+   * Business case: chat uploads are useful only if the provider prompt includes
+   * the persisted filesystem paths. The WebSocket native runtime branch must
+   * pass those paths to sendNativeMessage, not only keep them in the UI bubble.
+   */
+  const { handleChatConnection } = await import(pathToFileURL(`${process.cwd()}/backend/server/chat-websocket.ts`).href);
+  const { createSessionSubscriptionRegistry } = await import(pathToFileURL(`${process.cwd()}/backend/server/realtime/session-subscription-registry.ts`).href);
+  const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-attachment-project-'));
+  const connectedClients = new Set();
+  const chatClientUsers = new WeakMap();
+  const capturedNativeMessages = [];
+  const socket = createFakeChatWebSocket();
+
+  const deps = {
+    connectedClients,
+    chatClientUsers,
+    broadcastChatEvent: () => undefined,
+    bindManualSessionProvider: async () => undefined,
+    finalizeManualSessionRoute: async () => true,
+    getManualSessionRouteRuntime: async () => null,
+    initManualSessionRoute: async () => ({ started: true }),
+    acceptChatRequestId: () => true,
+    resolveChatProjectOptions: async (options) => options || {},
+    extractProjectDirectory: async () => projectPath,
+    resolveCbwSessionStartContext: (data, resolvedOptions) => ({
+      ozwSessionId: data.ozwSessionId || resolvedOptions.ozwSessionId || data.sessionId || '',
+      routeInitToken: data.clientRequestId || '',
+    }),
+    resolveCbwRouteSessionIdFromProviderSession: async () => '',
+    getSessionModelState: async () => ({}),
+    sendNativeMessage: async (input) => {
+      capturedNativeMessages.push(input);
+      return { accepted: true, providerSessionId: 'codex-upload-provider-session' };
+    },
+    sendMessageAccepted: () => undefined,
+    abortNativeSession: async () => ({ aborted: true }),
+    broadcastSessionModelStateUpdated: () => undefined,
+    isCbwRouteSessionId: (sessionId) => typeof sessionId === 'string' && /^c\d+$/.test(sessionId),
+    normalizeManualProvider: (provider) => provider === 'pi' ? 'pi' : 'codex',
+    getNativeSessionStatus: () => ({ isProcessing: false }),
+    getActiveNativeSessions: () => [],
+    sessionSubscriptionRegistry: createSessionSubscriptionRegistry(),
+  };
+
+  handleChatConnection(deps, socket, { user: { id: 'upload-user' } });
+
+  await socket.emitMessage({
+    type: 'codex-command',
+    command: '请读取上传文件',
+    clientRequestId: 'upload-request-1',
+    sessionId: 'c9',
+    ozwSessionId: 'c9',
+    options: {
+      projectName: 'attachment-project',
+      projectPath,
+      cwd: projectPath,
+      sessionId: 'c9',
+      ozwSessionId: 'c9',
+      attachments: [{
+        relativePath: 'notes/upload.txt',
+        absolutePath: '/tmp/ozw-uploads/upload-user/batch/notes/upload.txt',
+        mimeType: 'text/plain',
+        size: 42,
+      }],
+    },
+  });
+
+  await waitForCondition(() => capturedNativeMessages.length > 0);
+  assert.equal(capturedNativeMessages.length, 1);
+  assert.match(capturedNativeMessages[0].text, /请读取上传文件/);
+  assert.match(capturedNativeMessages[0].text, /\[User uploaded files for this message\]/);
+  assert.match(capturedNativeMessages[0].text, /\/tmp\/ozw-uploads\/upload-user\/batch\/notes\/upload\.txt/);
 });

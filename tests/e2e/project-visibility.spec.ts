@@ -16,6 +16,8 @@ import {
 process.env.DATABASE_PATH = PLAYWRIGHT_FIXTURE_AUTH_DB;
 
 const PROJECT_INDEX_EVIDENCE_DIR = path.join(process.cwd(), 'test-results', 'project-index-db-backed');
+const DEBUG_SCREENSHOT_DIR = path.join(process.cwd(), 'docs', 'debug', '20260618-0924-cli-session-title', 'screenshots');
+const WEBUI_TITLE_SCREENSHOT_DIR = path.join(process.cwd(), 'docs', 'debug', '20260618-1002-manual-first-request-title', 'screenshots');
 
 /**
  * Persist browser-side evidence required by the project index acceptance gate.
@@ -135,6 +137,30 @@ test('project overview session link loads Codex history instead of empty state',
   await expect(page.locator('body')).not.toContainText('继续您的对话');
 });
 
+test('project overview manual session card shows CLI first request title', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /^fixture-project\b/i }).first().click();
+
+  const manualSessionsPanel = page.getByTestId('project-overview-manual-sessions');
+  await expect(manualSessionsPanel).toBeVisible();
+  await expect(manualSessionsPanel.getByRole('button', { name: /fixture-project manu/ }).first()).toBeVisible();
+  await expect(manualSessionsPanel).not.toContainText('Codex Session');
+
+  const overview = await fetchFixtureProjectOverview(page);
+  expect(overview.ok).toBe(true);
+  const codexSessions = Array.isArray(overview.overview?.codexSessions)
+    ? overview.overview.codexSessions
+    : [];
+  const manualSession = codexSessions.find((session) => session.id === 'fixture-project-manual-session');
+  expect(manualSession?.title).toBe('fixture-project manual-only session');
+  expect(manualSession?.routeTitle).toBe('fixture-project manual-only session');
+
+  fs.mkdirSync(DEBUG_SCREENSHOT_DIR, { recursive: true });
+  await manualSessionsPanel.screenshot({
+    path: path.join(DEBUG_SCREENSHOT_DIR, 'cli-session-card-title.png'),
+  });
+});
+
 test('mobile project selection opens session and workflow list in main content', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/', { waitUntil: 'networkidle' });
@@ -217,6 +243,46 @@ test('creating a manual session updates the sidebar immediately without a browse
 
   await expect(page).toHaveURL(/\/workspace\/.*\/c\d+$/);
   await expect(page.locator('textarea').first()).toBeVisible();
+});
+
+test('WebUI manual session card adopts first request title after first send', async ({ page }) => {
+  const firstRequest = `首句标题${String(Date.now()).slice(-6)}`;
+
+  await page.addInitScript(() => {
+    window.prompt = (_message, defaultValue = '') => String(defaultValue || '');
+  });
+
+  await page.goto('/', { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /^fixture-project\b/i }).first().click();
+
+  const manualSessionGroup = page.locator('[data-testid="project-overview-manual-sessions"]').first();
+  await expect(manualSessionGroup).toBeVisible();
+
+  await manualSessionGroup.getByRole('button', { name: /新建|New Session/ }).click();
+  await page.getByTestId('project-new-session-provider-codex').click();
+  await expect(page).toHaveURL(/\/workspace\/.*\/c\d+$/);
+
+  const routeMatch = page.url().match(/\/c(\d+)(?:[?#].*)?$/);
+  expect(routeMatch).not.toBeNull();
+  const routeNumber = routeMatch?.[1] || '';
+  const defaultTitle = `会话${routeNumber}`;
+
+  const input = page.locator('textarea').first();
+  await input.fill(firstRequest);
+  await input.press('Control+Enter');
+  await expect(page.locator('[data-testid="chat-scroll-container"]').last()).toContainText(firstRequest);
+
+  await page.getByRole('button', { name: /^fixture-project\b/i }).first().click();
+  await expect(page).toHaveURL(/\/workspace\/fixture-project(?:[/?#]|$)/);
+  const refreshedManualSessionGroup = page.locator('[data-testid="project-overview-manual-sessions"]').first();
+  await expect(refreshedManualSessionGroup.getByRole('button', { name: new RegExp(firstRequest) })).toBeVisible({ timeout: 15_000 });
+  await expect(refreshedManualSessionGroup).not.toContainText(defaultTitle);
+  await expect(refreshedManualSessionGroup.getByText(`#${routeNumber}`)).toBeVisible();
+
+  fs.mkdirSync(WEBUI_TITLE_SCREENSHOT_DIR, { recursive: true });
+  await refreshedManualSessionGroup.screenshot({
+    path: path.join(WEBUI_TITLE_SCREENSHOT_DIR, 'webui-manual-first-request-title.png'),
+  });
 });
 
 test('creating a manual session keeps the default label number aligned with the route number', async ({ page }) => {

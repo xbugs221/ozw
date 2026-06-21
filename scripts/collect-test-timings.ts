@@ -82,7 +82,7 @@ type TimingReport = {
  */
 async function main(): Promise<void> {
   const profile = readTimingProfile();
-  const outputPath = process.env.CBW_TEST_TIMING_OUTPUT ?? getProfileOutputPath(profile);
+  const outputPath = process.env.OZW_TEST_TIMING_OUTPUT ?? getProfileOutputPath(profile);
   const commands = readConfiguredCommands(profile);
   const results: TimingResult[] = [];
 
@@ -109,16 +109,16 @@ async function main(): Promise<void> {
 /**
  * Parse optional command configuration from the environment.
  *
- * CBW_TEST_TIMING_COMMANDS is JSON with objects shaped like:
+ * OZW_TEST_TIMING_COMMANDS is JSON with objects shaped like:
  * [{"id":"fast","command":"pnpm","args":["run","test:fast"]}]
  */
 function readConfiguredCommands(profile: string): TimingCommand[] {
-  const raw = process.env.CBW_TEST_TIMING_COMMANDS;
+  const raw = process.env.OZW_TEST_TIMING_COMMANDS;
   if (!raw) return PROFILE_COMMANDS[profile] ?? DEFAULT_COMMANDS;
 
   const parsed = JSON.parse(raw) as TimingCommand[];
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error('CBW_TEST_TIMING_COMMANDS must be a non-empty JSON array');
+    throw new Error('OZW_TEST_TIMING_COMMANDS must be a non-empty JSON array');
   }
 
   for (const command of parsed) {
@@ -133,9 +133,9 @@ function readConfiguredCommands(profile: string): TimingCommand[] {
  * Read the built-in timing profile requested by the caller.
  */
 function readTimingProfile(): string {
-  const profile = process.env.CBW_TEST_TIMING_PROFILE?.trim() || DEFAULT_PROFILE;
+  const profile = process.env.OZW_TEST_TIMING_PROFILE?.trim() || DEFAULT_PROFILE;
   if (profile !== DEFAULT_PROFILE && !PROFILE_COMMANDS[profile]) {
-    throw new Error(`CBW_TEST_TIMING_PROFILE must be one of: ${Object.keys(PROFILE_COMMANDS).join(', ')}`);
+    throw new Error(`OZW_TEST_TIMING_PROFILE must be one of: ${Object.keys(PROFILE_COMMANDS).join(', ')}`);
   }
   return profile;
 }

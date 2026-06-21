@@ -6,7 +6,7 @@ import type { FileChangesPayloadViewModel } from './toolPayloadParsers';
 
 interface FileChangesContentProps {
   payload: FileChangesPayloadViewModel;
-  onFileClick?: (filePath: string) => void;
+  onFileClick?: (filePath: string, diffInfo?: FileChangesPayloadViewModel['changes'][number]['diffInfo']) => void;
   formatPath?: (filePath: string) => string;
 }
 
@@ -14,18 +14,12 @@ interface FileChangesContentProps {
  * Show changed files in a stable list so users can see exactly what moved and open targets directly.
  */
 export const FileChangesContent: React.FC<FileChangesContentProps> = ({ payload, onFileClick, formatPath }) => {
-  if (payload.changes.length === 0 && !payload.status) {
+  if (payload.changes.length === 0) {
     return null;
   }
 
   return (
     <div data-testid="tool-file-changes-content" className="space-y-2">
-      {payload.status && (
-        <div className="text-[11px] text-gray-500 dark:text-gray-400">
-          状态: <span className="font-medium text-gray-700 dark:text-gray-200">{payload.status}</span>
-        </div>
-      )}
-
       <div className="space-y-1.5">
         {payload.changes.map((change, index) => {
           const displayPath = formatPath?.(change.path) || change.path;
@@ -33,7 +27,7 @@ export const FileChangesContent: React.FC<FileChangesContentProps> = ({ payload,
           return (
             <div
               key={`${change.kind}-${change.path}-${index}`}
-              className="flex items-center gap-2 rounded border border-gray-200/70 dark:border-gray-700/60 px-2.5 py-2"
+              className="flex items-center gap-2 border-l-2 border-amber-500 dark:border-amber-400 pl-3 py-0.5"
             >
               <span className="inline-flex rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300 flex-shrink-0">
                 {change.kind}
@@ -41,7 +35,7 @@ export const FileChangesContent: React.FC<FileChangesContentProps> = ({ payload,
               {onFileClick ? (
                 <button
                   type="button"
-                  onClick={() => onFileClick(change.path)}
+                  onClick={() => onFileClick(change.path, change.diffInfo)}
                   className="min-w-0 truncate text-left text-[11px] font-mono text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                   title={displayPath}
                 >

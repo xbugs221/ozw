@@ -1,3 +1,6 @@
+/**
+ * PURPOSE: Render delegated subagent tool calls with their child tool timeline.
+ */
 import React, { useState, useMemo } from 'react';
 const Loader2 = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4 animate-spin"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
 const CheckCircle2 = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 6-6"/></svg>;
@@ -15,6 +18,11 @@ const AlertTriangle = ({ className: cls, strokeWidth: sw }: { className?: string
 import { CollapsibleSection } from './CollapsibleSection';
 import { Markdown } from '../../view/subcomponents/Markdown';
 import type { SubagentChildTool } from '../../types/types';
+import {
+  isSubagentToolCall,
+  isSubagentToolName,
+  summarizeSubagentToolInput,
+} from '../../../../../shared/subagent-tool-utils.js';
 
 interface SubagentContainerProps {
   toolInput: unknown;
@@ -34,6 +42,11 @@ const getCompactToolDisplay = (toolName: string, toolInput: unknown): string => 
     ? (() => { try { return JSON.parse(toolInput); } catch { return {}; } })()
     : (toolInput || {});
 
+  if (isSubagentToolCall(toolName, toolInput)) {
+    const summary = summarizeSubagentToolInput(toolInput);
+    return summary.description || summary.subagentType;
+  }
+
   switch (toolName) {
     case 'Read':
     case 'Write':
@@ -47,9 +60,6 @@ const getCompactToolDisplay = (toolName: string, toolInput: unknown): string => 
       const cmd = input.command || '';
       return cmd.length > 45 ? `${cmd.slice(0, 45)}...` : cmd;
     }
-    case 'Task':
-    case 'Agent':
-      return input.description || input.subagent_type || '';
     case 'WebFetch':
     case 'WebSearch':
       return input.url || input.query || '';
@@ -68,7 +78,11 @@ const toolIconMap: Record<string, React.ReactNode> = {
   Bash: <Terminal className="w-3.5 h-3.5" />,
   WebFetch: <Globe className="w-3.5 h-3.5" />,
   WebSearch: <Globe className="w-3.5 h-3.5" />,
+  Agent: <Bot className="w-3.5 h-3.5" />,
+  Subagent: <Bot className="w-3.5 h-3.5" />,
   Task: <Bot className="w-3.5 h-3.5" />,
+  sub_agent: <Bot className="w-3.5 h-3.5" />,
+  subagent: <Bot className="w-3.5 h-3.5" />,
 };
 
 const toolColorMap: Record<string, string> = {
@@ -81,14 +95,24 @@ const toolColorMap: Record<string, string> = {
   Bash: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/30',
   WebFetch: 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/30',
   WebSearch: 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/30',
+  Agent: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30',
+  Subagent: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30',
   Task: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30',
+  sub_agent: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30',
+  subagent: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30',
 };
 
 const getToolColor = (toolName: string): string =>
-  toolColorMap[toolName] || 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/40';
+  toolColorMap[toolName] ||
+  (isSubagentToolName(toolName)
+    ? 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30'
+    : 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/40');
 
 const getToolIcon = (toolName: string): React.ReactNode =>
-  toolIconMap[toolName] || <Wrench className="w-3.5 h-3.5" />;
+  toolIconMap[toolName] ||
+  (isSubagentToolName(toolName)
+    ? <Bot className="w-3.5 h-3.5" />
+    : <Wrench className="w-3.5 h-3.5" />);
 
 type ToolStatus = 'running' | 'done' | 'error' | 'pending';
 
@@ -213,13 +237,10 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
   subagentState,
   autoExpandTools = false,
 }) => {
-  const parsedInput = typeof toolInput === 'string'
-    ? (() => { try { return JSON.parse(toolInput); } catch { return {}; } })()
-    : (toolInput || {});
-
-  const subagentType = parsedInput?.subagent_type || 'Agent';
-  const description = parsedInput?.description || 'Running task';
-  const prompt = parsedInput?.prompt || '';
+  const subagentSummary = useMemo(() => summarizeSubagentToolInput(toolInput), [toolInput]);
+  const subagentType = subagentSummary.subagentType;
+  const description = subagentSummary.description;
+  const prompt = subagentSummary.prompt;
   const { childTools, currentToolIndex, isComplete } = subagentState;
   const currentTool = currentToolIndex >= 0 ? childTools[currentToolIndex] : null;
 
@@ -231,7 +252,10 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
   // Keep large child timelines collapsed so history rendering only mounts the summary row.
   const defaultOpen = autoExpandTools && childTools.length <= 20;
 
-  const title = `${subagentType}: ${description} (${completedTools}/${totalTools} done${errorTools > 0 ? `, ${errorTools} errors` : ''})`;
+  const titleProgress = totalTools > 0
+    ? ` (${completedTools}/${totalTools} done${errorTools > 0 ? `, ${errorTools} errors` : ''})`
+    : (isComplete ? ' (done)' : '');
+  const title = `${subagentType}: ${description}${titleProgress}`;
 
   /* ─── result content ─── */
   const resultContent = useMemo(() => {
@@ -262,7 +286,7 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
     <div className="border-l-2 border-l-purple-500 dark:border-l-purple-400 pl-3 py-1 my-1">
       <CollapsibleSection
         title={title}
-        toolName="Task"
+        toolName="Subagent"
         open={defaultOpen}
       >
         {/* Prompt */}
@@ -361,7 +385,7 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
         )}
 
         {/* Final result */}
-        {isComplete && resultContent && (
+        {isComplete && resultContent !== null && resultContent !== undefined && resultContent !== '' && (
           <div className="mt-2">
             <div className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-medium mb-1">
               Result

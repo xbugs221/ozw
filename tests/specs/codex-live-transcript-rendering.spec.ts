@@ -78,6 +78,41 @@ test('Codex live file_change changes array renders as a FileChanges card', async
   assertFileChangesCard(messages[0], 'src/live-update.ts');
 });
 
+test('Codex live custom apply_patch call renders as a FileChanges card', async () => {
+  /**
+   * apply_patch can arrive as a custom_tool_call with its patch text in input;
+   * that shape must use the same FileChanges card as JSONL replay.
+   */
+  const { reduceNativeRuntimeEvent } = await loadNativeTranscriptModule();
+
+  const messages = reduceNativeRuntimeEvent([], {
+    type: 'codex-response',
+    sessionId: 'codex-live-rendering-spec',
+    data: {
+      type: 'item',
+      itemType: 'custom_tool_call',
+      itemId: 'spec-custom-patch',
+      item: {
+        type: 'custom_tool_call',
+        name: 'apply_patch',
+        call_id: 'spec-custom-patch',
+        input: [
+          '*** Begin Patch',
+          '*** Update File: src/live-custom-patch.ts',
+          '@@',
+          '-old',
+          '+new',
+          '*** End Patch',
+        ].join('\n'),
+      },
+      status: 'completed',
+    },
+  });
+
+  assert.equal(messages.length, 1);
+  assertFileChangesCard(messages[0], 'src/live-custom-patch.ts');
+});
+
 test('Codex split file-operation JSON converts to one FileChanges card', async () => {
   /**
    * Streaming JSON can be incomplete at first. Once complete, the transcript

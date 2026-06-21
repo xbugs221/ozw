@@ -284,6 +284,91 @@ test('getCodexSessionMessages collapses duplicated Codex user echo records', asy
   });
 });
 
+test('getCodexSessionMessages collapses paired Codex assistant event and response item records', async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const sessionId = 'codex-duplicate-assistant-event';
+    const sessionsDir = path.join(tempHome, '.codex', 'sessions', '2026', '05', '01');
+    const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+    const content = '现在用 Playwright 截当前页面。';
+
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-05-01T08:00:00.000Z',
+          payload: {
+            type: 'agent_message',
+            phase: 'commentary',
+            message: content,
+          },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-05-01T08:00:00.002Z',
+          payload: {
+            type: 'message',
+            role: 'assistant',
+            phase: 'commentary',
+            content: [{ type: 'output_text', text: content }],
+          },
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    const result = await getCodexSessionMessages(sessionId, null, 0, null);
+
+    assert.equal(result.messages.length, 1);
+    assert.equal(result.messages[0].type, 'assistant');
+    assert.equal(result.messages[0].message.content, content);
+    assert.equal(result.messages[0].message.phase, 'commentary');
+  });
+});
+
+test('getCodexSessionMessages maps Codex custom apply_patch calls to FileChanges tools', async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const sessionId = 'codex-custom-apply-patch';
+    const sessionsDir = path.join(tempHome, '.codex', 'sessions', '2026', '05', '02');
+    const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: src/app.ts',
+      '@@',
+      '-old',
+      '+new',
+      '*** End Patch',
+    ].join('\n');
+
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-05-02T08:00:00.000Z',
+          payload: {
+            type: 'custom_tool_call',
+            name: 'apply_patch',
+            call_id: 'call-custom-patch',
+            input: patch,
+          },
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    const result = await getCodexSessionMessages(sessionId, null, 0, null);
+
+    assert.equal(result.messages.length, 1);
+    assert.equal(result.messages[0].type, 'tool_use');
+    assert.equal(result.messages[0].toolName, 'FileChanges');
+    assert.equal(result.messages[0].toolCallId, 'call-custom-patch');
+    assert.equal(result.messages[0].toolInput.changes[0].path, 'src/app.ts');
+  });
+});
+
 test('getCodexSessionMessages limits initial history to the newest requested lines', async () => {
   await withTemporaryHome(async (tempHome) => {
     const sessionId = 'codex-tail-window-session';
@@ -462,13 +547,15 @@ test('getCodexSessionMessages maps native Codex tool item records', async () => 
   });
 });
 
-test('Codex project overview uses lightweight title without deep transcript summary', async () => {
+test('Codex project overview uses first request title without deep transcript summary', async () => {
   await withTemporaryHome(async (tempHome) => {
     clearProjectDirectoryCache();
     const projectPath = path.join(tempHome, 'workspace', 'codex-demo');
+    const firstRequest = '请先定位首页空白问题';
+    const followupRequest = '修复首页空白问题';
     await fs.mkdir(projectPath, { recursive: true });
     await addProjectManually(projectPath, 'Codex Demo');
-    await createCodexSummaryFixture(tempHome, 'codex-summary-session', projectPath, ['ping', '修复首页空白问题']);
+    await createCodexSummaryFixture(tempHome, 'codex-summary-session', projectPath, [firstRequest, followupRequest]);
 
     const projects = await getProjects();
     const project = projects.find((entry) => entry.fullPath === projectPath || entry.path === projectPath);
@@ -476,11 +563,12 @@ test('Codex project overview uses lightweight title without deep transcript summ
     assert.ok(project);
     assert.equal(project.codexSessions.length, 1);
     assert.equal(project.codexSessions[0].summary, 'Codex Session');
-    assert.equal(project.codexSessions[0].routeTitle, '修复首页空白问题');
+    assert.equal(project.codexSessions[0].routeTitle, firstRequest);
+    assert.equal(project.codexSessions[0].title, firstRequest);
 
     const detail = await getCodexSessionMessages('codex-summary-session', null, 0, null);
     assert.equal(
-      detail.messages.some((message) => message.message?.content === '修复首页空白问题'),
+      detail.messages.some((message) => message.message?.content === followupRequest),
       true,
     );
   });
@@ -500,6 +588,7 @@ test('Codex project overview card title uses first user request prefix', async (
 
     assert.ok(project);
     assert.equal(project.codexSessions[0].routeTitle, Array.from(firstRequest).slice(0, 20).join(''));
+    assert.equal(project.codexSessions[0].title, firstRequest);
   });
 });
 

@@ -35,7 +35,7 @@ test('high-risk-module-refactor keeps public entry files as thin boundaries', as
 test('high-risk-module-refactor preserves project overview split contracts', async () => {
   /** Project overview 的生产入口必须依赖真实子模块，避免回退成单文件 UI。 */
   const panel = await readSource('frontend/components/main-content/view/subcomponents/ProjectOverviewPanel.tsx');
-  const runtime = await readSource('frontend/components/main-content/view/subcomponents/ProjectOverviewPanelRuntime.tsx');
+  const runtime = await readSource('frontend/components/main-content/project-overview/ProjectOverviewPanelRuntime.impl.tsx');
   const requiredModules = [
     'frontend/components/main-content/project-overview/projectOverviewViewModel.ts',
     'frontend/components/main-content/project-overview/ProjectOverviewWorkflowGroups.tsx',

@@ -257,6 +257,7 @@ function upsertProviderSessionIndexFromHeader(provider: 'codex' | 'pi', session:
     projectPath: session.projectPath || session.cwd || '',
     summary: session.summary || session.title || null,
     title: session.title || session.summary || null,
+    routeTitle: session.routeTitle || session.title || session.summary || null,
     model: session.model || null,
     thread: session.thread || null,
     sessionFileName: session.sessionFileName || session.session_file_name || null,

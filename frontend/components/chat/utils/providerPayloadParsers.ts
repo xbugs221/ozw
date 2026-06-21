@@ -108,7 +108,7 @@ export function resolveCodexToolUpdateJson(value: unknown, depth = 0): CodexTool
 
   const record = value as Record<string, unknown>;
   const rawType = String(record.type ?? record.itemType ?? '');
-  if (rawType === 'functionCall' || rawType === 'function_call') {
+  if (rawType === 'functionCall' || rawType === 'function_call' || rawType === 'custom_tool_call') {
     return { kind: 'tool_use', payload: { ...record, type: 'function_call' } };
   }
   if (rawType === 'functionCallOutput' || rawType === 'function_call_output') {

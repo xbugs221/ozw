@@ -80,7 +80,7 @@ async function spawnServer({ port, binDir, coHome, databasePath, homeDir }) {
       DATABASE_PATH: databasePath,
       CCFLOW_CO_HOME: coHome,
       CCFLOW_FAKE_RUNNER: '1',
-      CBW_FAKE_PI_RUNTIME: '1',
+      OZW_FAKE_PI_RUNTIME: '1',
       SESSION_PATH_SCAN_INTERVAL_MS: '0',
       PATH: `${binDir}:${process.env.PATH || ''}`,
     },

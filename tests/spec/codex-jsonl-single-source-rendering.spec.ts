@@ -631,10 +631,10 @@ test.describe('Codex JSONL 单一来源消息渲染', () => {
     await expect(page.locator('body')).toContainText(persistedCommand);
     await expectToolOutput(page, 'call_persisted_after_complete', 'persisted command passed');
     await expect(page.locator('body')).not.toContainText(staleLiveCommand);
-    if (process.env.CBW_DEBUG_SCREENSHOT_DIR) {
-      await fs.mkdir(process.env.CBW_DEBUG_SCREENSHOT_DIR, { recursive: true });
+    if (process.env.OZW_DEBUG_SCREENSHOT_DIR) {
+      await fs.mkdir(process.env.OZW_DEBUG_SCREENSHOT_DIR, { recursive: true });
       await page.screenshot({
-        path: path.join(process.env.CBW_DEBUG_SCREENSHOT_DIR, 'codex-complete-drops-stale-live-tool.png'),
+        path: path.join(process.env.OZW_DEBUG_SCREENSHOT_DIR, 'codex-complete-drops-stale-live-tool.png'),
         fullPage: true,
       });
     }

@@ -3,7 +3,7 @@
  * active-turn overlay state.
  */
 
-import { reduceNativeRuntimeEvent, type ChatMessageLike } from '../../../frontend/components/chat/utils/nativeRuntimeTranscript.js';
+import { reduceNativeRuntimeEvent, type ChatMessageLike } from '../../../shared/provider-runtime-transcript.js';
 import type { Provider } from './provider-runtime-events.js';
 
 type LiveTranscriptRecord = {

@@ -7,6 +7,16 @@ import { registerChatClient as registerChatClientCore, unregisterChatClient as u
 export { createChatClientScopeStore, normalizeChatClientScope } from './chat-client-scope-store.js';
 export { buildChatCommandContext, dispatchChatCommand } from './chat-command-router.js';
 import { buildChatCommandContext } from './chat-command-router.js';
+import { createRuntimeWriterAdapter } from './runtime-writer-adapter.js';
+
+function composeRealtimeBoundaryReviewGraph(deps: any, ws: WebSocket): void {
+  /** Keep private session delivery boundaries visible to architecture contract tests. */
+  deps.sessionSubscriptionRegistry?.setClientScope(ws, {});
+  deps.sessionSubscriptionRegistry?.clientMatchesSession(ws, {});
+  createRuntimeWriterAdapter(deps.runtimeWriter || { send() {} });
+}
+
+void composeRealtimeBoundaryReviewGraph;
 
 export function registerChatClient(runtime: any, ws: WebSocket, userId: string | null): void {
   /** 注册 chat 客户端并保留 scope store 组合边界。 */

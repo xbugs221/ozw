@@ -179,7 +179,12 @@ test('project overview uses synchronized DB indexes for sessions and workflows',
       {
         type: 'event_msg',
         timestamp: '2026-06-12T01:00:01.000Z',
-        payload: { type: 'user_message', message: 'visible Codex project overview session' },
+        payload: { type: 'user_message', message: 'Codex first request' },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-06-12T01:00:02.000Z',
+        payload: { type: 'user_message', message: 'visible Codex follow-up should not become title' },
       },
     ]);
     await writeJsonl(codexWorkflowSessionPath, [
@@ -333,6 +338,8 @@ test('project overview uses synchronized DB indexes for sessions and workflows',
     assert.equal(indexedRead.providerDirectoryScanCount, 0);
     assert.deepEqual(indexedRead.codexSessions.map((session) => session.id), ['codex-overview-visible']);
     assert.deepEqual(indexedRead.piSessions.map((session) => session.id), ['pi-overview-visible']);
+    assert.equal(indexedRead.codexSessions[0].routeTitle, 'Codex first request');
+    assert.equal(indexedRead.codexSessions[0].title, 'Codex first request');
 
     const db = new Database(process.env.DATABASE_PATH);
     try {
@@ -353,6 +360,17 @@ test('project overview uses synchronized DB indexes for sessions and workflows',
         { provider: 'codex', session_id: 'codex-overview-workflow', origin: 'workflow' },
         { provider: 'pi', session_id: 'pi-overview-workflow', origin: 'workflow' },
       ]);
+
+      const titleRow = db.prepare(`
+        SELECT summary, title, route_title
+        FROM provider_session_index
+        WHERE provider = 'codex' AND session_id = 'codex-overview-visible'
+      `).get();
+      assert.deepEqual(titleRow, {
+        summary: 'Codex Session',
+        title: 'Codex first request',
+        route_title: 'Codex first request',
+      });
     } finally {
       db.close();
     }
@@ -472,6 +490,8 @@ test('project overview uses synchronized DB indexes for sessions and workflows',
       'codex-cli-offline-new',
       'codex-overview-visible',
     ]);
+    assert.equal(indexedAfterFilesDeleted.codexSessions[1].routeTitle, 'Codex first request');
+    assert.equal(indexedAfterFilesDeleted.codexSessions[1].title, 'Codex first request');
     assert.deepEqual(indexedAfterFilesDeleted.piSessions.map((session) => session.id), [
       'pi-cli-offline-new',
       'pi-overview-visible',

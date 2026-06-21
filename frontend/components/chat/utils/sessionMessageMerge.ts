@@ -6,6 +6,7 @@ import type { ChatMessage } from '../types/types';
 import { dedupeAdjacentChatMessages } from './messageDedup';
 import { getIntrinsicMessageKey } from './messageKeys';
 import { convertSessionMessages } from './messageTransforms';
+import { isSubagentToolCall } from '../../../../shared/subagent-tool-utils.js';
 import {
   canRenderLiveRowForAcceptedTurn,
   shouldPreserveAcceptedOptimisticUser,
@@ -43,6 +44,7 @@ export function mergeSessionMessageDelta({
     return existingMessages;
   }
 
+  const incomingToolResults = collectIncomingToolResultPatches(incomingRawMessages);
   const convertedDelta = convertSessionMessages(incomingRawMessages);
   const firstDeltaIndexByKey = new Map<string, number>();
   convertedDelta.forEach((message, index) => {
@@ -55,15 +57,20 @@ export function mergeSessionMessageDelta({
   const filteredExistingMessages: ChatMessage[] = [];
   let didReplaceOrFilterExisting = false;
   for (const message of existingMessages) {
-    if (message.type === 'user' && message.deliveryStatus) {
+    const messageWithToolResult = applyIncomingToolResultPatch(message, incomingToolResults);
+    if (messageWithToolResult !== message) {
+      didReplaceOrFilterExisting = true;
+    }
+
+    if (messageWithToolResult.type === 'user' && messageWithToolResult.deliveryStatus) {
       const persistedUserIndex = convertedDelta.findIndex((candidate, index) => (
         !usedDeltaIndexes.has(index) &&
-        isPersistedUserMessageMatch(message, candidate)
+        isPersistedUserMessageMatch(messageWithToolResult, candidate)
       ));
       if (persistedUserIndex >= 0) {
         filteredExistingMessages.push(mergePersistedUserWithOptimistic(
           convertedDelta[persistedUserIndex],
-          message,
+          messageWithToolResult,
         ));
         usedDeltaIndexes.add(persistedUserIndex);
         didReplaceOrFilterExisting = true;
@@ -71,25 +78,30 @@ export function mergeSessionMessageDelta({
       }
     }
 
-    const key = getIntrinsicMessageKey(message);
+    const key = getIntrinsicMessageKey(messageWithToolResult);
     const replacementIndex = key ? firstDeltaIndexByKey.get(key) : undefined;
     if (replacementIndex !== undefined) {
-      filteredExistingMessages.push(convertedDelta[replacementIndex]);
+      const replacement = convertedDelta[replacementIndex];
+      if (shouldKeepLiveAssistantOverPersistedPartial(messageWithToolResult, replacement)) {
+        filteredExistingMessages.push(messageWithToolResult);
+      } else {
+        filteredExistingMessages.push(replacement);
+      }
       usedDeltaIndexes.add(replacementIndex);
       didReplaceOrFilterExisting = true;
       continue;
     }
 
     if (
-      isProviderFileUpdateLiveMessage(message) ||
-      isPersistedLiveAssistantDuplicate(message, convertedDelta) ||
-      isPersistedLiveToolDuplicate(message, convertedDelta)
+      isProviderFileUpdateLiveMessage(messageWithToolResult) ||
+      isPersistedLiveAssistantDuplicate(messageWithToolResult, convertedDelta) ||
+      isPersistedLiveToolDuplicate(messageWithToolResult, convertedDelta)
     ) {
       didReplaceOrFilterExisting = true;
       continue;
     }
 
-    filteredExistingMessages.push(message);
+    filteredExistingMessages.push(messageWithToolResult);
   }
   const existingKeys = new Set(
     filteredExistingMessages
@@ -98,6 +110,9 @@ export function mergeSessionMessageDelta({
   );
   const appended = convertedDelta.filter((message, index) => {
     if (usedDeltaIndexes.has(index)) {
+      return false;
+    }
+    if (isIncomingPersistedPartialCoveredByLive(message, filteredExistingMessages)) {
       return false;
     }
     const key = getIntrinsicMessageKey(message);
@@ -128,6 +143,22 @@ function normalizeUserMessageText(value: unknown): string {
 }
 
 /**
+ * Normalize assistant text for live/persisted coverage checks. Provider live
+ * rows can arrive as display text while JSONL replay keeps Markdown marks.
+ */
+function normalizeAssistantCoverageText(value: unknown): string {
+  return normalizeUserMessageText(value)
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Normalize tool payload values so live SDK cards can be matched against their
  * later JSONL replay even when object formatting differs.
  */
@@ -143,6 +174,203 @@ function normalizeToolPayloadText(value: unknown): string {
   } catch {
     return normalizeUserMessageText(String(value));
   }
+}
+
+type IncomingToolResultPatch = {
+  toolResult: NonNullable<ChatMessage['toolResult']>;
+  subagentTools?: unknown[];
+};
+
+/**
+ * Collect standalone tool_result rows that need to update an existing tool card.
+ */
+function collectIncomingToolResultPatches(incomingRawMessages: any[]): Map<string, IncomingToolResultPatch> {
+  /**
+   * Incremental refresh often receives the result row after the tool_use row was
+   * already rendered from a previous live or persisted batch.
+   */
+  const patches = new Map<string, IncomingToolResultPatch>();
+  for (const rawMessage of incomingRawMessages) {
+    if (rawMessage?.type === 'tool_result') {
+      const toolCallId = getIncomingToolCallId(rawMessage);
+      if (!toolCallId) {
+        continue;
+      }
+      const toolResult = buildIncomingToolResult({
+        content: normalizeIncomingToolResultContent(
+          rawMessage.output ?? rawMessage.content ?? rawMessage.result ?? rawMessage.toolResult,
+        ),
+        isError: Boolean(rawMessage.isError ?? rawMessage.error),
+        timestamp: rawMessage.timestamp,
+        toolUseResult: rawMessage.toolUseResult,
+      });
+      const patch: IncomingToolResultPatch = { toolResult };
+      if (Array.isArray(rawMessage.subagentTools)) {
+        patch.subagentTools = rawMessage.subagentTools;
+      }
+      patches.set(toolCallId, patch);
+      continue;
+    }
+
+    const contentParts = Array.isArray(rawMessage?.message?.content)
+      ? rawMessage.message.content
+      : [];
+    for (const part of contentParts) {
+      if (part?.type !== 'tool_result') {
+        continue;
+      }
+      const toolCallId = getIncomingToolCallId(part);
+      if (!toolCallId) {
+        continue;
+      }
+      const toolResult = buildIncomingToolResult({
+        content: normalizeIncomingToolResultContent(part.content ?? part.output ?? part.result),
+        isError: Boolean(part.is_error ?? part.isError ?? part.error),
+        timestamp: rawMessage.timestamp,
+        toolUseResult: rawMessage.toolUseResult,
+      });
+      const patch: IncomingToolResultPatch = { toolResult };
+      if (Array.isArray(rawMessage.subagentTools)) {
+        patch.subagentTools = rawMessage.subagentTools;
+      }
+      patches.set(toolCallId, patch);
+    }
+  }
+  return patches;
+}
+
+/**
+ * Build a result object while omitting undefined optional fields.
+ */
+function buildIncomingToolResult(input: {
+  content: unknown;
+  isError: boolean;
+  timestamp?: unknown;
+  toolUseResult?: unknown;
+}): NonNullable<ChatMessage['toolResult']> {
+  /**
+   * Some TypeScript configs treat explicit undefined differently from an
+   * omitted optional field, so only attach fields that are actually present.
+   */
+  const result: NonNullable<ChatMessage['toolResult']> = {
+    content: input.content,
+    isError: input.isError,
+  };
+  if (input.timestamp !== undefined) {
+    result.timestamp = input.timestamp as string | number | Date;
+  }
+  if (input.toolUseResult !== undefined) {
+    result.toolUseResult = input.toolUseResult;
+  }
+  return result;
+}
+
+/**
+ * Resolve the provider tool call id from common Codex and Pi field names.
+ */
+function getIncomingToolCallId(value: Record<string, unknown> | null | undefined): string {
+  /**
+   * Different read models use snake_case, camelCase, or provider-native names.
+   */
+  const id = value?.toolCallId ?? value?.tool_use_id ?? value?.toolUseId ?? value?.call_id ?? value?.callId ?? value?.id;
+  return typeof id === 'string' ? id : '';
+}
+
+/**
+ * Normalize result payloads into the same displayable content shape as persisted conversion.
+ */
+function normalizeIncomingToolResultContent(value: unknown): string {
+  /**
+   * Tool outputs may arrive as strings, arrays of chunks, or structured records
+   * with nested content/output fields.
+   */
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeIncomingToolResultContent(item)).filter(Boolean).join('\n');
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const nested = record.content ?? record.output ?? record.result ?? record.stdout ?? record.stderr ?? record.text;
+    if (nested !== undefined && nested !== value) {
+      return normalizeIncomingToolResultContent(nested);
+    }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+/**
+ * Attach a standalone result patch to an existing tool card by tool id.
+ */
+function applyIncomingToolResultPatch(
+  message: ChatMessage,
+  incomingToolResults: Map<string, IncomingToolResultPatch>,
+): ChatMessage {
+  /**
+   * Keep existing rows referentially stable unless a visible tool result changes.
+   */
+  if (!message.isToolUse || incomingToolResults.size === 0) {
+    return message;
+  }
+
+  const toolCallId = typeof message.toolCallId === 'string'
+    ? message.toolCallId
+    : (typeof message.toolId === 'string' ? message.toolId : '');
+  const patch = toolCallId ? incomingToolResults.get(toolCallId) : undefined;
+  if (!patch) {
+    return message;
+  }
+
+  const existingResult = message.toolResult;
+  const existingText = existingResult && typeof existingResult === 'object'
+    ? normalizeToolPayloadText((existingResult as Record<string, unknown>).content)
+    : '';
+  const incomingText = normalizeToolPayloadText(patch.toolResult.content);
+  const existingIsError = Boolean(
+    existingResult && typeof existingResult === 'object'
+      ? (existingResult as Record<string, unknown>).isError
+      : false,
+  );
+  if (existingResult && existingText === incomingText && existingIsError === Boolean(patch.toolResult.isError)) {
+    return message;
+  }
+
+  const nextMessage: ChatMessage = {
+    ...message,
+    toolResult: patch.toolResult,
+    toolError: Boolean(patch.toolResult.isError),
+    toolResultTimestamp: patch.toolResult.timestamp || message.timestamp,
+  };
+
+  if (
+    isSubagentToolCall(message.toolName, message.toolInput) &&
+    Array.isArray(patch.subagentTools)
+  ) {
+    const childTools = patch.subagentTools.map((tool: any) => ({
+      toolId: tool.toolId,
+      toolName: tool.toolName,
+      toolInput: tool.toolInput,
+      toolResult: tool.toolResult || null,
+      timestamp: new Date(tool.timestamp || patch.toolResult.timestamp || Date.now()),
+    }));
+    nextMessage.isSubagentContainer = true;
+    nextMessage.subagentState = {
+      childTools,
+      currentToolIndex: childTools.length > 0 ? childTools.length - 1 : -1,
+      isComplete: true,
+    };
+  }
+
+  return nextMessage;
 }
 
 /**
@@ -432,7 +660,7 @@ function isPersistedLiveAssistantDuplicate(
     return false;
   }
 
-  const localContent = normalizeUserMessageText(localMessage.content);
+  const localContent = normalizeAssistantCoverageText(localMessage.content);
   if (!localContent) {
     return false;
   }
@@ -442,8 +670,88 @@ function isPersistedLiveAssistantDuplicate(
     getViewMessageKind(persistedMessage) === 'assistant_text' &&
     isLiveAssistantContentCoveredByPersistedText(
       localContent,
-      normalizeUserMessageText(persistedMessage.content),
+      normalizeAssistantCoverageText(persistedMessage.content),
     )
+  ));
+}
+
+/**
+ * Check whether a local realtime thinking row has already been replayed from
+ * persisted provider history.
+ */
+function isPersistedLiveThinkingDuplicate(
+  localMessage: ChatMessage,
+  persistedMessages: ChatMessage[],
+): boolean {
+  if (
+    localMessage.type !== 'assistant' ||
+    !localMessage.isThinking ||
+    !LIVE_ASSISTANT_SOURCES.has(String(localMessage.source || ''))
+  ) {
+    return false;
+  }
+
+  const localContent = normalizeAssistantCoverageText(localMessage.content);
+  if (!localContent) {
+    return false;
+  }
+
+  return persistedMessages.some((persistedMessage) => (
+    persistedMessage.type === 'assistant' &&
+    persistedMessage.isThinking &&
+    isLiveAssistantContentCoveredByPersistedText(
+      localContent,
+      normalizeAssistantCoverageText(persistedMessage.content),
+    )
+  ));
+}
+
+/**
+ * Prefer the richer WS live draft while a follow-latest refresh returns only a
+ * short JSONL assistant partial for the same turn.
+ */
+function shouldKeepLiveAssistantOverPersistedPartial(
+  localMessage: ChatMessage,
+  incomingMessage: ChatMessage,
+): boolean {
+  if (
+    localMessage.type !== 'assistant' ||
+    incomingMessage.type !== 'assistant' ||
+    getViewMessageKind(localMessage) !== 'assistant_text' ||
+    getViewMessageKind(incomingMessage) !== 'assistant_text' ||
+    !LIVE_ASSISTANT_SOURCES.has(String(localMessage.source || ''))
+  ) {
+    return false;
+  }
+
+  const liveContent = normalizeAssistantCoverageText(localMessage.content);
+  const incomingContent = normalizeAssistantCoverageText(incomingMessage.content);
+  if (!liveContent || !incomingContent || incomingContent.length >= liveContent.length) {
+    return false;
+  }
+
+  return liveContent.startsWith(incomingContent);
+}
+
+/**
+ * Delta appends can contain a new persisted row with a different key from the
+ * active live overlay.  If it is only a prefix already shown by live text, drop
+ * the persisted partial and wait for a converged final row.
+ */
+function isIncomingPersistedPartialCoveredByLive(
+  incomingMessage: ChatMessage,
+  existingMessages: ChatMessage[],
+): boolean {
+  if (
+    incomingMessage.type !== 'assistant' ||
+    getViewMessageKind(incomingMessage) !== 'assistant_text' ||
+    LIVE_ASSISTANT_SOURCES.has(String(incomingMessage.source || ''))
+  ) {
+    return false;
+  }
+
+  return existingMessages.some((existingMessage) => (
+    shouldKeepLiveAssistantOverPersistedPartial(existingMessage, incomingMessage)
   ));
 }
 
@@ -513,6 +821,64 @@ function isPersistedLiveToolDuplicate(
     const persistedResult = getToolResultText(persistedMessage);
     return !localResult || Boolean(persistedResult);
   });
+}
+
+/**
+ * Decide whether one live row is covered by a same-kind persisted replay row.
+ */
+function isPersistedLiveDuplicate(
+  localMessage: ChatMessage,
+  persistedMessages: ChatMessage[],
+): boolean {
+  return isPersistedLiveAssistantDuplicate(localMessage, persistedMessages)
+    || isPersistedLiveThinkingDuplicate(localMessage, persistedMessages)
+    || isPersistedLiveToolDuplicate(localMessage, persistedMessages);
+}
+
+/**
+ * Decide whether one live row from a matched turn is superseded by the current
+ * persisted rows for that same turn.
+ */
+function shouldCoverLiveRowFromPersistedTurn(
+  localMessage: ChatMessage,
+  persistedTurnMessages: ChatMessage[],
+): boolean {
+  /**
+   * Assistant text is a final-answer draft, so any persisted assistant text in
+   * the same turn owns it. Thinking and tool rows are separate visible
+   * artifacts and require same-kind persisted coverage.
+   */
+  if (
+    localMessage.type === 'assistant' &&
+    getViewMessageKind(localMessage) === 'assistant_text' &&
+    LIVE_ASSISTANT_SOURCES.has(String(localMessage.source || ''))
+  ) {
+    return persistedTurnMessages.some((message) => (
+      message.type === 'assistant' &&
+      getViewMessageKind(message) === 'assistant_text' &&
+      Boolean(normalizeAssistantCoverageText(message.content))
+    ));
+  }
+
+  return isPersistedLiveDuplicate(localMessage, persistedTurnMessages);
+}
+
+/**
+ * Decide whether a late live row from an already-persisted owner turn is stale.
+ */
+function shouldCoverLateLiveRowFromPersistedTurn(
+  localMessage: ChatMessage,
+  persistedMessages: ChatMessage[],
+): boolean {
+  if (
+    localMessage.type === 'assistant' &&
+    getViewMessageKind(localMessage) === 'assistant_text' &&
+    LIVE_ASSISTANT_SOURCES.has(String(localMessage.source || ''))
+  ) {
+    return true;
+  }
+
+  return isPersistedLiveDuplicate(localMessage, persistedMessages);
 }
 
 /** Session-scoped store of converged live message keys so late-arriving
@@ -778,6 +1144,65 @@ function sortPersistedMessages(messages: ChatMessage[]): ChatMessage[] {
     .map(({ message }) => message);
 }
 
+function isAuthoritativeJsonlMessage(message: ChatMessage): boolean {
+  return typeof message.messageKey === 'string' && message.messageKey.includes(':line:');
+}
+
+function shouldReplacePersistedAssistantDuplicate(existing: ChatMessage, incoming: ChatMessage): boolean {
+  const existingIsJsonl = isAuthoritativeJsonlMessage(existing);
+  const incomingIsJsonl = isAuthoritativeJsonlMessage(incoming);
+  if (incomingIsJsonl !== existingIsJsonl) {
+    return incomingIsJsonl;
+  }
+
+  return normalizeUserMessageText(incoming.content).length >= normalizeUserMessageText(existing.content).length;
+}
+
+/**
+ * Remove duplicate assistant text rows that already entered persisted history
+ * from both live overlay storage and authoritative JSONL replay.
+ */
+function dedupePersistedAssistantTextWithinTurns(messages: ChatMessage[]): ChatMessage[] {
+  const deduped: ChatMessage[] = [];
+  const assistantIndexByCoverage = new Map<string, number>();
+
+  const resetTurnCoverage = () => {
+    assistantIndexByCoverage.clear();
+  };
+
+  for (const message of messages) {
+    if (message.type === 'user') {
+      resetTurnCoverage();
+      deduped.push(message);
+      continue;
+    }
+
+    if (message.type !== 'assistant' || getViewMessageKind(message) !== 'assistant_text') {
+      deduped.push(message);
+      continue;
+    }
+
+    const coverageText = normalizeAssistantCoverageText(message.content);
+    if (!coverageText) {
+      deduped.push(message);
+      continue;
+    }
+
+    const existingIndex = assistantIndexByCoverage.get(coverageText);
+    if (existingIndex === undefined) {
+      assistantIndexByCoverage.set(coverageText, deduped.length);
+      deduped.push(message);
+      continue;
+    }
+
+    if (shouldReplacePersistedAssistantDuplicate(deduped[existingIndex], message)) {
+      deduped[existingIndex] = message;
+    }
+  }
+
+  return deduped;
+}
+
 /**
  * Merge persisted history with local in-flight messages from the same session.
  */
@@ -789,7 +1214,7 @@ export function mergePersistedAndOptimisticMessages(
   const { preservePreviousMessages = true, sessionId } = options;
   const crossCallConvergedLiveKeys: Set<string> | undefined =
     sessionId ? getSessionConvergedLiveKeys(sessionId) : undefined;
-  const mergedMessages = sortPersistedMessages(persistedMessages);
+  const mergedMessages = dedupePersistedAssistantTextWithinTurns(sortPersistedMessages(persistedMessages));
   const matchedPersistedIndexes = new Set<number>();
 
   /**
@@ -856,9 +1281,16 @@ export function mergePersistedAndOptimisticMessages(
 
         if (persistedTurnMessageCount > 0) {
           usersWithPersistedAssistantsPrevIndexes.add(previousIndex);
-          // Cover live assistant/tool rows that follow this user in the
-          // previous frame. Once the read model has any assistant/tool rows
-          // for the turn, live-only rows from that turn are stale.
+          const persistedTurnMessages = mergedMessages.slice(matchIndex + 1);
+          const nextPersistedUserIdx = persistedTurnMessages.findIndex((candidate) => candidate.type === 'user');
+          const persistedTurnWindow = nextPersistedUserIdx >= 0
+            ? persistedTurnMessages.slice(0, nextPersistedUserIdx)
+            : persistedTurnMessages;
+          // Cover assistant text once the final persisted answer owns the turn,
+          // but require same-kind persisted coverage for Pi thinking/tool rows.
+          // A lagging read model may replay the final assistant text before it
+          // has replayed Pi thinking/tool rows, and those live rows must stay
+          // visible until their own persisted rows arrive.
           const nextUserIdx = previousMessages.findIndex(
             (m, i) => i > previousIndex && m.type === 'user',
           );
@@ -868,6 +1300,7 @@ export function mergePersistedAndOptimisticMessages(
             if (
               turnMessage.type === 'assistant'
               && LIVE_ASSISTANT_SOURCES.has(String(turnMessage.source || ''))
+              && shouldCoverLiveRowFromPersistedTurn(turnMessage, persistedTurnWindow)
             ) {
               coveredLocalIndexes.add(index);
               const turnKey = getIntrinsicMessageKey(turnMessage);
@@ -970,9 +1403,12 @@ export function mergePersistedAndOptimisticMessages(
         continue;
       }
 
-      if (usersWithPersistedAssistantsPrevIndexes.has(ownerIdx)) {
-        // The owning user's turn already has persisted assistants.
-        // This live assistant is a stale duplicate — cover it.
+      if (
+        usersWithPersistedAssistantsPrevIndexes.has(ownerIdx) &&
+        shouldCoverLateLiveRowFromPersistedTurn(message, persistedMessages)
+      ) {
+        // The owning user's turn already has persisted state that supersedes
+        // this live row, so a late duplicate should not be reinserted.
         coveredLocalIndexes.add(index);
         if (messageKey) {
           convergedMessageKeys.add(messageKey);
@@ -1008,8 +1444,7 @@ export function mergePersistedAndOptimisticMessages(
     }
 
     if (
-      isPersistedLiveAssistantDuplicate(message, persistedMessages)
-      || isPersistedLiveToolDuplicate(message, persistedMessages)
+      isPersistedLiveDuplicate(message, persistedMessages)
     ) {
       return;
     }

@@ -240,10 +240,10 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
                   </div>
                 )}
 
-                {Boolean(message.toolInput) && (
+                {(Boolean(message.toolInput) || message.isSubagentContainer) && (
                   <ToolRenderer
                     toolName={message.toolName || 'UnknownTool'}
-                    toolInput={message.toolInput}
+                    toolInput={message.toolInput ?? {}}
                     toolResult={message.toolResult}
                     toolId={toolRenderId}
                     mode="input"

@@ -9,6 +9,7 @@ import {
 } from '../../domains/provider-runtime/provider-session-binding.js';
 import { createRuntimeWriterAdapter as defaultCreateRuntimeWriterAdapter } from './runtime-writer-adapter.js';
 import type { ChatInboundMessage } from './chat-message-schema.js';
+import { appendAttachmentNote } from '../../chat-attachments.js';
 import {
     createChatClientScopeStore,
     normalizeChatClientScope,
@@ -19,6 +20,17 @@ import { dispatchChatCommand as routeChatCommand } from './chat-command-router.j
 type LooseRecord = Record<string, any>;
 
 const chatClientScopes = createChatClientScopeStore();
+
+/**
+ * Build the exact text sent to providers so native runtime paths receive the
+ * same uploaded-file instructions as legacy direct provider calls.
+ */
+function buildProviderPromptText(command: string, attachments: unknown): string {
+    const uploadedAttachments = Array.isArray(attachments)
+        ? attachments as Record<string, unknown>[]
+        : [];
+    return appendAttachmentNote(command || '', uploadedAttachments);
+}
 
 /**
  * 记录某个浏览器窗口拥有或订阅的会话作用域。
@@ -98,7 +110,7 @@ export function unregisterChatClient(runtime: any, ws: WebSocket): void {
  * 创建聊天协议命令分发器。
  */
 export function createChatCommandDispatcher(deps: any, ws: WebSocket, request: any) {
-    const { connectedClients, chatClientUsers, broadcastChatEvent, finalizeManualSessionRoute, initManualSessionRoute, acceptChatRequestId, resolveChatProjectOptions, extractProjectDirectory, resolveCbwSessionStartContext, resolveCbwRouteSessionIdFromProviderSession, getSessionModelState, sendNativeMessage, sendMessageAccepted, abortNativeSession, broadcastSessionModelStateUpdated, isCbwRouteSessionId, normalizeManualProvider, getNativeSessionStatus, getActiveNativeSessions, createRuntimeWriterAdapter, sessionSubscriptionRegistry } = deps;
+    const { connectedClients, chatClientUsers, broadcastChatEvent, finalizeManualSessionRoute, initManualSessionRoute, updateManualSessionTitleFromFirstRequest, acceptChatRequestId, resolveChatProjectOptions, extractProjectDirectory, resolveCbwSessionStartContext, resolveCbwRouteSessionIdFromProviderSession, getSessionModelState, sendNativeMessage, sendMessageAccepted, abortNativeSession, broadcastSessionModelStateUpdated, isCbwRouteSessionId, normalizeManualProvider, getNativeSessionStatus, getActiveNativeSessions, createRuntimeWriterAdapter, sessionSubscriptionRegistry, broadcastProjectListInvalidated } = deps;
     const adaptRuntimeWriter = typeof createRuntimeWriterAdapter === 'function'
         ? createRuntimeWriterAdapter
         : defaultCreateRuntimeWriterAdapter;
@@ -245,7 +257,47 @@ export function createChatCommandDispatcher(deps: any, ws: WebSocket, request: a
             console.warn('[ManualSession] Failed to finalize manual session draft:', error.message);
         }
 
+        if (finalized && typeof broadcastProjectListInvalidated === 'function') {
+            await broadcastProjectListInvalidated({
+                reason: 'manual-session-provider-bound',
+                changedProjectPath: projectPath || '',
+            });
+        }
+
         return finalized;
+    }
+
+    async function updateManualRouteTitleFromCommand({
+        projectName,
+        projectPath,
+        provider,
+        ozwSessionId,
+        command,
+    }: LooseRecord) {
+        /**
+         * Persist the first real user request as the visible manual cN title
+         * when the route still uses its generated 会话N placeholder.
+         */
+        if (!ozwSessionId || !String(command || '').trim() || typeof updateManualSessionTitleFromFirstRequest !== 'function') {
+            return;
+        }
+        try {
+            const result = await updateManualSessionTitleFromFirstRequest(
+                projectName || '',
+                projectPath || '',
+                ozwSessionId,
+                provider === 'pi' ? 'pi' : 'codex',
+                command,
+            );
+            if (result?.updated && typeof broadcastProjectListInvalidated === 'function') {
+                await broadcastProjectListInvalidated({
+                    reason: 'manual-session-first-request-title',
+                    changedProjectPath: projectPath || '',
+                });
+            }
+        } catch (error: any) {
+            console.warn('[ManualSession] Failed to update first request title:', error.message);
+        }
     }
 
     function resolveLifecycleProviderSessionId(payload: LooseRecord, ozwSessionId: string) {
@@ -430,6 +482,13 @@ export function createChatCommandDispatcher(deps: any, ws: WebSocket, request: a
                             });
                             return;
                         }
+                        await updateManualRouteTitleFromCommand({
+                            projectName: codexProviderOptions?.projectName || data.options?.projectName || '',
+                            projectPath: codexProviderOptions?.projectPath || codexProviderOptions?.cwd || '',
+                            provider: 'codex',
+                            ozwSessionId,
+                            command: data.command || '',
+                        });
                     }
                     console.log('[DEBUG] Codex request:', data.command || '[Continue/Resume]');
                     console.log('📁 Project:', codexProviderOptions?.projectPath || codexProviderOptions?.cwd || 'Unknown');
@@ -448,13 +507,17 @@ export function createChatCommandDispatcher(deps: any, ws: WebSocket, request: a
                         ...codexProviderOptions,
                         reasoningEffort: sessionModelState.reasoningEffort || codexProviderOptions?.reasoningEffort,
                     };
+                    const codexPromptText = buildProviderPromptText(
+                        data.command || '',
+                        codexOptions?.attachments ?? data.options?.attachments,
+                    );
                     const effectiveSessionId = codexOptions?.sessionId || data.sessionId || ozwSessionId;
                     const result = await sendNativeMessage({
                         provider: 'codex',
                         sessionId: ozwSessionId || effectiveSessionId || `codex-${Date.now()}`,
                         providerSessionId: codexManualRuntime?.providerSessionId || '',
                         projectPath: codexOptions?.projectPath || codexOptions?.cwd || '',
-                        text: data.command || '',
+                        text: codexPromptText,
                         runningBehavior: data.options?.runningBehavior || (data.options?.activePolicy === 'queue' ? 'queue' : undefined),
                         model: codexOptions?.model || '',
                         reasoningEffort: codexOptions?.reasoningEffort || '',
@@ -542,19 +605,30 @@ export function createChatCommandDispatcher(deps: any, ws: WebSocket, request: a
                             });
                             return;
                         }
+                        await updateManualRouteTitleFromCommand({
+                            projectName: piProviderOptions?.projectName || data.options?.projectName || '',
+                            projectPath: piProviderOptions?.projectPath || piProviderOptions?.cwd || '',
+                            provider: 'pi',
+                            ozwSessionId,
+                            command: data.command || '',
+                        });
                     }
                     console.log('[DEBUG] Pi request:', data.command || '[Continue/Resume]');
                     console.log('📁 Project:', piProviderOptions?.projectPath || piProviderOptions?.cwd || 'Unknown');
                     if (ozwSessionId) {
                         // User messages are no longer persisted to conf.json pending state.
                     }
+                    const piPromptText = buildProviderPromptText(
+                        data.command || '',
+                        piProviderOptions?.attachments ?? data.options?.attachments,
+                    );
                     const effectiveSessionId = piProviderOptions?.sessionId || data.sessionId || ozwSessionId;
                     const result = await sendNativeMessage({
                         provider: 'pi',
                         sessionId: ozwSessionId || effectiveSessionId || `pi-${Date.now()}`,
                         providerSessionId: piManualRuntime?.providerSessionId || '',
                         projectPath: piProviderOptions?.projectPath || piProviderOptions?.cwd || '',
-                        text: data.command || '',
+                        text: piPromptText,
                         runningBehavior: data.options?.runningBehavior || (data.options?.activePolicy === 'steer' ? 'steer' : data.options?.activePolicy === 'followUp' ? 'followUp' : undefined),
                         model: piProviderOptions?.model || data.options?.model || '',
                         thinkingLevel: piProviderOptions?.thinkingLevel || data.options?.thinkingLevel || '',

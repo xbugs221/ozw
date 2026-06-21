@@ -1,0 +1,304 @@
+{
+  "summary": "统一收敛 provider/shared 边界、核心 runtime 巨型模块、后端安全入口、工具注册表、性能热点和 oz-flow validation 边界。",
+  "coverage": [
+    {
+      "spec": "Provider transcript shared 边界：后端不再导入前端 chat reducer，active/live store 移除类型逃逸。",
+      "tests": [
+        "T29-CORE-BOUNDARY",
+        "T29-PROVIDER-RUNTIME-BOUNDARY"
+      ],
+      "evidence": [
+        "E29-CORE-AUDIT",
+        "E29-PROVIDER-RUNTIME-BOUNDARY-REPORT"
+      ],
+      "risk": "reducer 行为仍由现有消息合并回归补充覆盖。"
+    },
+    {
+      "spec": "Chat runtime 拆分：session、realtime、composer 主 hook 只保留装配职责。",
+      "tests": [
+        "T29-CORE-BOUNDARY",
+        "T29-CHAT-REGRESSION",
+        "T29-HIGH-RISK-MODULE-REFACTOR"
+      ],
+      "evidence": [
+        "E29-CORE-AUDIT",
+        "E29-CHAT-REPORT",
+        "E29-HIGH-RISK-MODULE-REFACTOR-REPORT"
+      ],
+      "risk": "真实 streaming 行为需要后续端到端路径复核。"
+    },
+    {
+      "spec": "Project overview runtime 拆分：面板 runtime 降低职责密度，批量操作保持 provider-aware。",
+      "tests": [
+        "T29-CORE-BOUNDARY",
+        "T29-PROJECT-OVERVIEW-E2E",
+        "T29-HIGH-RISK-MODULE-REFACTOR",
+        "T29-PROJECT-REFRESH-COORDINATION"
+      ],
+      "evidence": [
+        "E29-CORE-AUDIT",
+        "E29-OVERVIEW-REPORT",
+        "E29-HIGH-RISK-MODULE-REFACTOR-REPORT",
+        "E29-PROJECT-REFRESH-COORDINATION-REPORT"
+      ],
+      "risk": "本地项目状态差异可能影响 Playwright 环境稳定性。"
+    },
+    {
+      "spec": "Agent route 安全拆分：route 只做 HTTP 绑定，GitHub token 不进入 URL、日志或进程参数。",
+      "tests": [
+        "T29-CORE-BOUNDARY",
+        "T29-AGENT-ROUTE"
+      ],
+      "evidence": [
+        "E29-CORE-AUDIT",
+        "E29-AGENT-LOG"
+      ],
+      "risk": "实际远端 GitHub 权限仍需人工账号级配置确认。"
+    },
+    {
+      "spec": "Server runtime 拆分：server lifecycle 模块化，HTTP route deps 类型化。",
+      "tests": [
+        "T29-CORE-BOUNDARY",
+        "T29-BACKEND-TYPE",
+        "T29-HIGH-RISK-MODULE-REFACTOR",
+        "T29-BACKEND-REALTIME-BOUNDARY"
+      ],
+      "evidence": [
+        "E29-CORE-AUDIT",
+        "E29-BACKEND-REPORT",
+        "E29-HIGH-RISK-MODULE-REFACTOR-REPORT",
+        "E29-BACKEND-REALTIME-BOUNDARY-REPORT"
+      ],
+      "risk": "启动顺序仍需 build 和真实 server smoke 测试补充。"
+    },
+    {
+      "spec": "Tool registry 拆分：工具族配置分离，payload config 不公开 any。",
+      "tests": [
+        "T29-CORE-BOUNDARY",
+        "T29-TOOL-RUNTIME"
+      ],
+      "evidence": [
+        "E29-CORE-AUDIT",
+        "E29-TOOL-REPORT"
+      ],
+      "risk": "复杂 provider payload 样例可能还需要随实现扩充。"
+    },
+    {
+      "spec": "性能边界：全量消息分块加载，项目刷新用稳定签名，并保留文件提及和消息虚拟化保护。",
+      "tests": [
+        "T29-PERF-BOUNDARY",
+        "T29-PROJECT-REFRESH-COORDINATION"
+      ],
+      "evidence": [
+        "E29-PERF-AUDIT",
+        "E29-PROJECT-REFRESH-COORDINATION-REPORT"
+      ],
+      "risk": "大 session 的实际耗时需要在开发环境中持续观察。"
+    },
+    {
+      "spec": "工作流 validation 边界：oz-flow validation 锁定验收命令和系统健康检查。",
+      "tests": [
+        "T29-CORE-BOUNDARY"
+      ],
+      "evidence": [
+        "E29-CORE-AUDIT"
+      ],
+      "risk": "长耗时测试需要 CI 或本地资源支持。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "T29-CORE-BOUNDARY",
+      "source": "change_contract",
+      "path": "docs/changes/29-收敛核心架构债和性能边界/tests/core-boundary-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/29-收敛核心架构债和性能边界/tests/core-boundary-contract.test.ts",
+      "purpose": "生成 E29-CORE-AUDIT 和 test-results/29-core-boundary/source-audit.json，静态验证 shared 边界、热点文件规模、关键拆分模块、类型边界和 oz-flow validation。",
+      "assertions": [
+        "后端 provider runtime 不再导入 frontend chat reducer，并通过 E29-CORE-AUDIT 记录 shared/provider-runtime-transcript.ts 使用情况。",
+        "chat、project overview、agent、server 和 tool registry 热点文件低于维护预算，拆分模块存在性写入 test-results/29-core-boundary/source-audit.json。",
+        "oz-flow.yaml validation 包含提案结构校验、两个源码契约、类型检查、目标回归、Playwright 和 build，避免重构后系统无法运行。"
+      ],
+      "expected_initial_failure": "当前源码仍存在后端反向导入、巨型 runtime 文件、缺失拆分模块和 oz-flow validation 边界不足。"
+    },
+    {
+      "id": "T29-PERF-BOUNDARY",
+      "source": "change_contract",
+      "path": "docs/changes/29-收敛核心架构债和性能边界/tests/performance-boundary-contract.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/29-收敛核心架构债和性能边界/tests/performance-boundary-contract.test.ts",
+      "purpose": "生成 E29-PERF-AUDIT 和 test-results/29-performance-boundary/source-audit.json，静态验证消息加载、项目刷新和 UI 性能保护。",
+      "assertions": [
+        "loadAllMessages 不再通过 null limit 一次拉取全部历史，并有固定 page size 的分块加载模块。",
+        "projectRefreshReducer 使用稳定签名比较，不再对 sessions、workflows、codexSessions、piSessions 做深层 JSON.stringify 比较。",
+        "文件提及按需扫描、depth<=2、showHidden=false 和消息虚拟化窗口上限继续保留，并写入 test-results/29-performance-boundary/source-audit.json。"
+      ],
+      "expected_initial_failure": "当前源码仍使用无限量全量加载和 JSON.stringify 项目刷新比较。"
+    },
+    {
+      "id": "T29-CHAT-REGRESSION",
+      "source": "existing_regression",
+      "path": "tests/specs/chat-message-merge-core.spec.ts",
+      "command": "mkdir -p test-results/29-chat-regression && pnpm exec tsx --test tests/specs/chat-message-merge-core.spec.ts > test-results/29-chat-regression/report.txt 2>&1",
+      "purpose": "生成 E29-CHAT-REPORT 和 test-results/29-chat-regression/report.txt，验证 chat 消息合并核心在 runtime 拆分后行为不变。",
+      "assertions": [
+        "持久化、live 和 optimistic Codex 消息仍附着到原始 turn，不因 session runtime 拆分改变顺序或归属。",
+        "test-results/29-chat-regression/report.txt 记录 chat-message-merge-core 真实回归测试结果。"
+      ]
+    },
+    {
+      "id": "T29-PROJECT-OVERVIEW-E2E",
+      "source": "root_e2e",
+      "path": "tests/e2e/project-overview-real-performance.spec.ts",
+      "command": "mkdir -p test-results/29-project-overview && pnpm exec playwright test tests/e2e/project-overview-real-performance.spec.ts --reporter=list > test-results/29-project-overview/report.txt 2>&1",
+      "purpose": "生成 E29-OVERVIEW-REPORT 和 test-results/29-project-overview/report.txt，用真实项目概览业务流验证刷新、选择和批量操作。",
+      "assertions": [
+        "项目概览在真实项目数据上完成刷新、选择和批量操作路径，不只检查组件存在。",
+        "test-results/29-project-overview/report.txt 记录 project overview Playwright 业务流结果。"
+      ]
+    },
+    {
+      "id": "T29-AGENT-ROUTE",
+      "source": "existing_regression",
+      "path": "tests/backend/agent-route.test.ts",
+      "command": "mkdir -p test-results/29-agent-route && pnpm exec tsx --test tests/backend/agent-route.test.ts > test-results/29-agent-route/report.txt 2>&1",
+      "purpose": "生成 E29-AGENT-LOG 和 test-results/29-agent-route/report.txt，验证 agent route 的认证、路径、GitHub 操作失败和 session 启动行为。",
+      "assertions": [
+        "agent route 拆分后仍能清理临时 clone，并保持路径安全判断和 writer 事件适配行为。",
+        "test-results/29-agent-route/report.txt 记录 agent route 回归测试结果。"
+      ]
+    },
+    {
+      "id": "T29-BACKEND-TYPE",
+      "source": "existing_regression",
+      "path": "tests/specs/backend-type-module-boundary.spec.ts",
+      "command": "mkdir -p test-results/29-backend-type && pnpm exec tsx --test tests/specs/backend-type-module-boundary.spec.ts > test-results/29-backend-type/report.txt 2>&1",
+      "purpose": "生成 E29-BACKEND-REPORT 和 test-results/29-backend-type/report.txt，验证后端类型模块边界和 route deps 类型约束。",
+      "assertions": [
+        "后端核心启动链路、Codex runtime 和消息处理文件不通过 suppression 或静默 catch 掩盖运行风险。",
+        "test-results/29-backend-type/report.txt 记录 backend-type-module-boundary 回归测试结果。"
+      ]
+    },
+    {
+      "id": "T29-TOOL-RUNTIME",
+      "source": "existing_regression",
+      "path": "tests/unit/chat-tool-runtime.test.ts",
+      "command": "mkdir -p test-results/29-tool-runtime && pnpm exec vitest run --config vitest.config.ts tests/unit/chat-tool-runtime.test.ts > test-results/29-tool-runtime/report.txt 2>&1",
+      "purpose": "生成 E29-TOOL-REPORT 和 test-results/29-tool-runtime/report.txt，验证工具展示配置、payload 解析和状态文案行为。",
+      "assertions": [
+        "工具配置拆分后仍保留 fallback 命名、隐藏结果、exec 输出解析和 workflow/project-scoped message 隔离。",
+        "test-results/29-tool-runtime/report.txt 记录 chat-tool-runtime vitest 回归结果。"
+      ]
+    },
+    {
+      "id": "T29-HIGH-RISK-MODULE-REFACTOR",
+      "source": "existing_regression",
+      "path": "tests/specs/high-risk-module-refactor.spec.ts",
+      "command": "mkdir -p test-results/29-high-risk-module-refactor && pnpm exec tsx --test tests/specs/high-risk-module-refactor.spec.ts > test-results/29-high-risk-module-refactor/report.txt 2>&1",
+      "purpose": "生成 E29-HIGH-RISK-MODULE-REFACTOR-REPORT 和 test-results/29-high-risk-module-refactor/report.txt，验证 chat runtime、project overview runtime 和 server bootstrap 等高风险入口在本次拆分后仍保持薄边界。",
+      "assertions": [
+        "ProjectOverview、chat session/composer/realtime 和 backend bootstrap/file route 入口继续委托到拆分模块，不回退为巨型入口。",
+        "test-results/29-high-risk-module-refactor/report.txt 记录 high-risk-module-refactor 规格回归结果。"
+      ]
+    },
+    {
+      "id": "T29-BACKEND-REALTIME-BOUNDARY",
+      "source": "existing_regression",
+      "path": "tests/specs/backend-realtime-boundary.spec.ts",
+      "command": "mkdir -p test-results/29-backend-realtime-boundary && pnpm exec tsx --test tests/specs/backend-realtime-boundary.spec.ts > test-results/29-backend-realtime-boundary/report.txt 2>&1",
+      "purpose": "生成 E29-BACKEND-REALTIME-BOUNDARY-REPORT 和 test-results/29-backend-realtime-boundary/report.txt，验证 server runtime 和 agent route 边界变化后，realtime/backend 协议边界仍由专门模块承载。",
+      "assertions": [
+        "chat websocket 继续委托 realtime dispatcher，provider runtime mapper/session store 保持独立边界。",
+        "test-results/29-backend-realtime-boundary/report.txt 记录 backend-realtime-boundary 规格回归结果。"
+      ]
+    },
+    {
+      "id": "T29-PROJECT-REFRESH-COORDINATION",
+      "source": "existing_regression",
+      "path": "tests/specs/project-refresh-coordination.spec.ts",
+      "command": "mkdir -p test-results/29-project-refresh-coordination && pnpm exec tsx --test tests/specs/project-refresh-coordination.spec.ts > test-results/29-project-refresh-coordination/report.txt 2>&1",
+      "purpose": "生成 E29-PROJECT-REFRESH-COORDINATION-REPORT 和 test-results/29-project-refresh-coordination/report.txt，验证项目刷新稳定签名改动后，多窗口刷新协同和重任务限流行为不回归。",
+      "assertions": [
+        "同一 invalidation 的多窗口刷新仍只选出一个 owner，隐藏窗口复用快照，新版本 invalidation 不复用旧快照。",
+        "test-results/29-project-refresh-coordination/report.txt 记录 project-refresh-coordination 规格回归结果。"
+      ]
+    },
+    {
+      "id": "T29-PROVIDER-RUNTIME-BOUNDARY",
+      "source": "existing_regression",
+      "path": "tests/specs/provider-runtime-boundary.spec.ts",
+      "command": "mkdir -p test-results/29-provider-runtime-boundary && pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts > test-results/29-provider-runtime-boundary/report.txt 2>&1",
+      "purpose": "生成 E29-PROVIDER-RUNTIME-BOUNDARY-REPORT 和 test-results/29-provider-runtime-boundary/report.txt，验证 provider transcript reducer/runtime 边界迁移后 provider runtime 行为不回归。",
+      "assertions": [
+        "provider runtime 的 transcript、active turn 和 provider event 边界继续由共享/后端模块承载，不回退到前端 reducer 或单体 runtime。",
+        "test-results/29-provider-runtime-boundary/report.txt 记录 provider-runtime-boundary 规格回归结果。"
+      ]
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "E29-CORE-AUDIT",
+      "kind": "state_snapshot",
+      "path": "test-results/29-core-boundary/source-audit.json",
+      "purpose": "核心边界契约测试生成的文件规模、模块存在性、导入边界和 oz-flow validation 快照。"
+    },
+    {
+      "id": "E29-PERF-AUDIT",
+      "kind": "state_snapshot",
+      "path": "test-results/29-performance-boundary/source-audit.json",
+      "purpose": "性能边界契约测试生成的全量消息加载、项目刷新和 UI 保护快照。"
+    },
+    {
+      "id": "E29-CHAT-REPORT",
+      "kind": "runtime_log",
+      "path": "test-results/29-chat-regression/report.txt",
+      "purpose": "chat 消息合并与 runtime 拆分回归报告。"
+    },
+    {
+      "id": "E29-OVERVIEW-REPORT",
+      "kind": "runtime_log",
+      "path": "test-results/29-project-overview/report.txt",
+      "purpose": "项目概览真实业务流的 Playwright 运行报告。"
+    },
+    {
+      "id": "E29-AGENT-LOG",
+      "kind": "runtime_log",
+      "path": "test-results/29-agent-route/report.txt",
+      "purpose": "agent route 安全边界和错误映射回归报告。"
+    },
+    {
+      "id": "E29-BACKEND-REPORT",
+      "kind": "runtime_log",
+      "path": "test-results/29-backend-type/report.txt",
+      "purpose": "后端类型模块和 route deps 类型约束报告。"
+    },
+    {
+      "id": "E29-TOOL-REPORT",
+      "kind": "runtime_log",
+      "path": "test-results/29-tool-runtime/report.txt",
+      "purpose": "工具展示配置和 payload 解析回归报告。"
+    },
+    {
+      "id": "E29-HIGH-RISK-MODULE-REFACTOR-REPORT",
+      "kind": "runtime_log",
+      "path": "test-results/29-high-risk-module-refactor/report.txt",
+      "purpose": "高风险核心模块拆分后的入口边界回归报告。"
+    },
+    {
+      "id": "E29-BACKEND-REALTIME-BOUNDARY-REPORT",
+      "kind": "runtime_log",
+      "path": "test-results/29-backend-realtime-boundary/report.txt",
+      "purpose": "后端 realtime 协议和 provider runtime 边界回归报告。"
+    },
+    {
+      "id": "E29-PROJECT-REFRESH-COORDINATION-REPORT",
+      "kind": "runtime_log",
+      "path": "test-results/29-project-refresh-coordination/report.txt",
+      "purpose": "多窗口项目刷新协同和稳定签名回归报告。"
+    },
+    {
+      "id": "E29-PROVIDER-RUNTIME-BOUNDARY-REPORT",
+      "kind": "runtime_log",
+      "path": "test-results/29-provider-runtime-boundary/report.txt",
+      "purpose": "provider runtime/transcript 边界回归报告。"
+    }
+  ]
+}

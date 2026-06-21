@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS provider_session_index (
     normalized_project_path TEXT NOT NULL,
     summary TEXT,
     title TEXT,
+    route_title TEXT,
     model TEXT,
     thread TEXT,
     session_file_name TEXT,

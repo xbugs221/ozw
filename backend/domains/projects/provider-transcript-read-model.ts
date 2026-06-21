@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 import readline from 'readline';
 
+import { normalizeCodexFunctionCall } from '../../../shared/codex-message-normalizer.js';
 import { normalizeProjectPath, type LooseRecord } from './project-config-read-model.js';
 
 type JsonlCursor = {
@@ -59,7 +60,6 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
   let model = '';
   let messageCount = 0;
   let firstUserMessage = '';
-  let lastUserMessage = '';
   let sourceSessionId = '';
   let hasSessionMeta = false;
   for await (const record of readJsonlRecords(filePath)) {
@@ -79,7 +79,6 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     if (record.type === 'event_msg' && record.payload?.type === 'user_message') {
       messageCount += 1;
       firstUserMessage ||= stringifyMessageContent(record.payload.message);
-      lastUserMessage = stringifyMessageContent(record.payload.message) || lastUserMessage;
     }
     if (record.type === 'response_item' && record.payload?.type === 'message') {
       messageCount += 1;
@@ -89,6 +88,9 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     return null;
   }
   const { thread, sessionFileName } = deriveCodexThreadFromJsonlPath(filePath);
+  const firstUserTitle = firstUserMessage ? summarizeText(firstUserMessage) : '';
+  const firstUserRouteTitle = firstUserMessage ? summarizeText(firstUserMessage, 20, false) : '';
+  const fallbackTitle = firstUserTitle || 'Codex Session';
   return {
     id: thread,
     provider: 'codex',
@@ -98,9 +100,9 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     createdAt: firstTimestamp || lastTimestamp || new Date().toISOString(),
     lastActivity: lastTimestamp || firstTimestamp || new Date().toISOString(),
     updated_at: lastTimestamp || firstTimestamp || new Date().toISOString(),
-    summary: hasSessionMeta ? 'Codex Session' : (firstUserMessage ? summarizeText(firstUserMessage) : 'Codex Session'),
-    title: hasSessionMeta ? 'Codex Session' : (firstUserMessage ? summarizeText(firstUserMessage) : 'Codex Session'),
-    routeTitle: lastUserMessage ? summarizeText(lastUserMessage, 20, false) : 'Codex Session',
+    summary: hasSessionMeta ? 'Codex Session' : fallbackTitle,
+    title: fallbackTitle,
+    routeTitle: firstUserRouteTitle || fallbackTitle,
     messageCount,
     messageCountKnown: true,
     filePath,
@@ -185,6 +187,9 @@ export async function getCodexSessionMessages(
         if (content) {
           userEchoKeys.add(content);
         }
+      }
+      if (message.type === 'assistant' && collapseAdjacentCodexAssistantDuplicate(messages, message)) {
+        continue;
       }
       messages.push(message);
     }
@@ -413,6 +418,71 @@ async function findSessionFile(files: string[], sessionId: string): Promise<stri
 }
 
 /**
+ * Read the visible text payload used for duplicate transcript rows.
+ */
+function getTextMessageContent(message: LooseRecord): string {
+  return String(message.message?.content || '').trim();
+}
+
+/**
+ * Convert provider timestamps to a comparable millisecond value.
+ */
+function readTimestampMs(value: unknown): number | null {
+  const parsed = new Date(String(value || '')).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Collapse Codex's paired event_msg/response_item assistant records. The
+ * response_item copy keeps phase metadata, so prefer it when both are present.
+ */
+function collapseAdjacentCodexAssistantDuplicate(messages: LooseRecord[], message: LooseRecord): boolean {
+  const content = getTextMessageContent(message);
+  if (!content) {
+    return false;
+  }
+
+  const previous = messages[messages.length - 1];
+  if (!previous || previous.type !== 'assistant' || getTextMessageContent(previous) !== content) {
+    return false;
+  }
+
+  const previousTime = readTimestampMs(previous.timestamp);
+  const currentTime = readTimestampMs(message.timestamp);
+  if (previousTime !== null && currentTime !== null && Math.abs(currentTime - previousTime) > 5000) {
+    return false;
+  }
+
+  if (!previous.message?.phase && message.message?.phase) {
+    messages[messages.length - 1] = message;
+  }
+  return true;
+}
+
+/**
+ * Convert Codex function-like payloads into the shared tool_use row contract.
+ */
+function codexFunctionPayloadToToolUse(
+  payload: LooseRecord,
+  sessionId: string,
+  lineNumber: number,
+  timestamp: unknown,
+): LooseRecord {
+  const normalized = normalizeCodexFunctionCall(payload);
+  const callId = String(normalized.toolCallId || '');
+  return {
+    type: 'tool_use',
+    provider: 'codex',
+    timestamp,
+    messageKey: `codex:${sessionId}:line:${lineNumber}:tool:${callId || 'call'}`,
+    toolName: normalized.toolName,
+    toolInput: normalized.toolInput,
+    toolCallId: callId || undefined,
+    status: payload.status,
+  };
+}
+
+/**
  * Convert one Codex JSONL record to normalized message rows.
  */
 function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumber: number): LooseRecord[] {
@@ -457,18 +527,7 @@ function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumbe
     }] : [];
   }
   if (record.type === 'response_item' && record.payload?.type === 'update' && record.payload?.update?.type === 'functionCall') {
-    const update = record.payload.update;
-    const callId = String(update.id || update.call_id || update.callId || '');
-    return [{
-      type: 'tool_use',
-      provider: 'codex',
-      timestamp: record.timestamp,
-      messageKey: `codex:${sessionId}:line:${lineNumber}:tool:${callId || 'call'}`,
-      toolName: String(update.name || 'UnknownTool'),
-      toolInput: update.arguments ?? update.input ?? '',
-      toolCallId: callId || undefined,
-      status: update.status,
-    }];
+    return [codexFunctionPayloadToToolUse(record.payload.update, sessionId, lineNumber, record.timestamp)];
   }
   if (record.type === 'response_item' && record.payload?.type === 'command_execution') {
     const callId = String(record.payload.id || record.payload.call_id || '');
@@ -539,18 +598,11 @@ function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumbe
       },
     ];
   }
-  if (record.type === 'response_item' && record.payload?.type === 'function_call') {
-    const callId = String(record.payload.call_id || record.payload.callId || record.payload.id || '');
-    return [{
-      type: 'tool_use',
-      provider: 'codex',
-      timestamp: record.timestamp,
-      messageKey: `codex:${sessionId}:line:${lineNumber}:tool:${callId || 'call'}`,
-      toolName: String(record.payload.name || 'UnknownTool'),
-      toolInput: record.payload.arguments ?? record.payload.input ?? '',
-      toolCallId: callId || undefined,
-      status: record.payload.status,
-    }];
+  if (
+    record.type === 'response_item'
+    && (record.payload?.type === 'function_call' || record.payload?.type === 'custom_tool_call')
+  ) {
+    return [codexFunctionPayloadToToolUse(record.payload, sessionId, lineNumber, record.timestamp)];
   }
   if (record.type === 'response_item' && record.payload?.type === 'function_call_output') {
     const callId = String(record.payload.call_id || record.payload.callId || record.payload.id || '');

@@ -6,17 +6,25 @@
 /**
  * 注册后端诊断相关 HTTP 路由。
  */
+import type {
+    AuthMiddleware,
+    FsPromisesDeps,
+    HttpRouteApp,
+    OsDeps,
+    PathDeps,
+} from './route-deps.js';
+
 export interface DiagnosticsRouteDeps {
-    app: any;
-    authenticateToken: any;
-    buildRuntimeReadinessReport: any;
-    checkCodexCredentials: any;
-    getCodexModelCatalog: any;
-    getPiModelCatalog: any;
-    resolveCodexCliPath: any;
-    fsPromises: any;
-    os: any;
-    path: any;
+    app: HttpRouteApp;
+    authenticateToken: AuthMiddleware;
+    buildRuntimeReadinessReport: () => Promise<unknown>;
+    checkCodexCredentials: () => Promise<{ authenticated: boolean; email?: string }>;
+    getCodexModelCatalog: () => Promise<{ defaultModel?: string; source?: string }>;
+    getPiModelCatalog: () => Promise<{ models: unknown[] }>;
+    resolveCodexCliPath: () => string;
+    fsPromises: FsPromisesDeps;
+    os: OsDeps;
+    path: PathDeps;
 }
 
 export function registerDiagnosticsRoutes(deps: DiagnosticsRouteDeps): void {

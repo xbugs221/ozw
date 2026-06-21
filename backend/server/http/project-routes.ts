@@ -3,35 +3,48 @@
  * 业务意义：route module 直接声明自身依赖，避免通过宽泛依赖隐藏权限边界。
  */
 
-type LooseRecord = Record<string, any>;
+import type {
+    AuthMiddleware,
+    HeavyReadCoalescer,
+    HttpRouteApp,
+    ProjectInvalidationEvent,
+    ProjectLike,
+    WorkflowLike,
+} from './route-deps.js';
 
 export interface ProjectRouteDeps {
-    app: any;
-    authenticateToken: any;
-    heavyReadCoalescer: any;
-    getProjects: any;
-    broadcastProgress: any;
-    summarizeProjectForList: any;
-    ensureGoRunnerWatchersForProjects: any;
-    watchGoWorkflowRun: any;
-    resolveProjectOverviewTarget: any;
-    buildProjectOverviewReadModel: any;
-    attachWorkflowMetadata: any;
-    attachProjectOverviewWorkflowMetadata?: any;
-    getCodexSessions: any;
-    getPiSessions: any;
-    extractProjectDirectory: any;
-    renameProject: any;
-    deleteProject: any;
-    addProjectManually: any;
-    broadcastProjectListInvalidated: any;
+    app: HttpRouteApp;
+    authenticateToken: AuthMiddleware;
+    heavyReadCoalescer: HeavyReadCoalescer;
+    getProjects: (broadcastProgress?: unknown, options?: { lightweightList?: boolean }) => Promise<ProjectLike[]>;
+    broadcastProgress: unknown;
+    summarizeProjectForList: (project: ProjectLike) => ProjectLike;
+    ensureGoRunnerWatchersForProjects: (projects: ProjectLike[], watchGoWorkflowRun: (project: ProjectLike, workflow: WorkflowLike) => Promise<unknown>) => Promise<unknown>;
+    watchGoWorkflowRun: (project: ProjectLike, workflow: WorkflowLike) => Promise<unknown>;
+    resolveProjectOverviewTarget: (projectName: string, projectPathHint: unknown) => Promise<ProjectLike | null>;
+    buildProjectOverviewReadModel: (project: ProjectLike, options: {
+        summarizeProjectForList: (project: ProjectLike) => ProjectLike;
+        attachWorkflowMetadata: (projects: ProjectLike[]) => Promise<ProjectLike[]>;
+        getCodexSessions: (projectPath?: string) => Promise<unknown[]> | unknown[];
+        getPiSessions: (projectPath?: string) => Promise<unknown[]> | unknown[];
+    }) => Promise<ProjectLike>;
+    attachWorkflowMetadata: (projects: ProjectLike[]) => Promise<ProjectLike[]>;
+    attachProjectOverviewWorkflowMetadata?: (projects: ProjectLike[]) => Promise<ProjectLike[]>;
+    syncProjectWorkflowOverviewIndex?: (projectPath: string) => Promise<unknown>;
+    getCodexSessions: (projectPath?: string) => Promise<unknown[]> | unknown[];
+    getPiSessions: (projectPath?: string) => Promise<unknown[]> | unknown[];
+    extractProjectDirectory: (projectName: string) => Promise<string>;
+    renameProject: (projectName: string, displayName: string, projectPath?: string) => Promise<unknown>;
+    deleteProject: (projectName: string, force: boolean, projectPath?: string) => Promise<unknown>;
+    addProjectManually: (projectPath: string) => Promise<ProjectLike>;
+    broadcastProjectListInvalidated: (event: ProjectInvalidationEvent) => unknown;
 }
 
 /**
  * 注册项目相关 HTTP 路由。
  */
 export function registerProjectRoutes(deps: ProjectRouteDeps): void {
-    const { app, authenticateToken, heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList, ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget, buildProjectOverviewReadModel, attachWorkflowMetadata, attachProjectOverviewWorkflowMetadata, getCodexSessions, getPiSessions, extractProjectDirectory, renameProject, deleteProject, addProjectManually, broadcastProjectListInvalidated } = deps;
+    const { app, authenticateToken, heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList, ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget, buildProjectOverviewReadModel, attachWorkflowMetadata, attachProjectOverviewWorkflowMetadata, syncProjectWorkflowOverviewIndex, getCodexSessions, getPiSessions, extractProjectDirectory, renameProject, deleteProject, addProjectManually, broadcastProjectListInvalidated } = deps;
 
 const listProjectsHandler = async (req: any, res: any) => {
     try {
@@ -59,6 +72,11 @@ const getProjectOverviewHandler = async (req: any, res: any) => {
             );
             if (!project) {
                 return null;
+            }
+
+            const projectPath = project.fullPath || project.path || '';
+            if (projectPath && typeof syncProjectWorkflowOverviewIndex === 'function') {
+                await syncProjectWorkflowOverviewIndex(projectPath);
             }
 
             return buildProjectOverviewReadModel(project, {

@@ -21,7 +21,18 @@ import {
   mergePersistedAndOptimisticMessages,
   mergeSessionMessageDelta,
 } from '../../frontend/components/chat/utils/sessionMessageMerge.ts';
+import { convertSessionMessages } from '../../frontend/components/chat/utils/messageTransforms.ts';
 import { mergeSessionMessagesByIdentityPreservingOrder } from '../../frontend/components/chat/utils/sessionMessageDedup.ts';
+import { getIntrinsicMessageKey } from '../../frontend/components/chat/utils/messageKeys.ts';
+import { shouldDeferFollowLatestRefresh } from '../../frontend/components/chat/utils/liveTurnMergePolicy.ts';
+import {
+  getMaxSessionMessageRawLineCursor,
+  getSessionMessageRawLineCursor,
+  resolveSessionMessageRawLineCursor,
+} from '../../frontend/components/chat/session/sessionMessageLoader.ts';
+import { getSessionViewIdentityKey } from '../../frontend/components/chat/session/sessionIdentity.ts';
+import { normalizeCodexFunctionCall } from '../../shared/codex-message-normalizer.ts';
+import { reduceNativeRuntimeEvent } from '../../frontend/components/chat/utils/nativeRuntimeTranscript.ts';
 
 const REPO_ROOT = process.cwd();
 const REQUIRED_REDUCER_MODULES = [
@@ -337,6 +348,420 @@ test('accepted Codex live turn renders before JSONL history catches up', () => {
   );
 });
 
+test('Codex live assistant with different item ids updates one in-flight bubble', () => {
+  /**
+   * Business case: during a running response, providers can replay the same
+   * assistant text under a final item id after an in-progress item id. The UI
+   * must update the in-flight bubble instead of rendering the response twice.
+   */
+  let messages: ChatMessage[] = [
+    row({
+      type: 'user',
+      content: '解释响应中重复渲染',
+      deliveryStatus: 'persisted',
+      clientRequestId: 'live-duplicate-turn',
+      messageKey: 'user-live-duplicate-turn',
+    }),
+  ];
+
+  messages = chatMessageReducer(
+    { messages },
+    {
+      type: 'liveRuntimeEventReceived',
+      event: {
+        type: 'codex-response',
+        data: {
+          type: 'item',
+          itemType: 'agent_message',
+          itemId: 'streaming-agent-item',
+          status: 'in_progress',
+          delta: { text: '响应过程中不应该重复显示。' },
+          message: { role: 'assistant' },
+        },
+      },
+    },
+  ).messages;
+
+  messages = chatMessageReducer(
+    { messages },
+    {
+      type: 'liveRuntimeEventReceived',
+      event: {
+        type: 'codex-response',
+        data: {
+          type: 'item',
+          itemType: 'agent_message',
+          itemId: 'completed-agent-item',
+          status: 'completed',
+          message: { role: 'assistant', content: '响应过程中不应该重复显示。' },
+        },
+      },
+    },
+  ).messages;
+
+  assert.equal(countText(messages, '响应过程中不应该重复显示。'), 1);
+});
+
+test('Pi live subagent result and delayed input render as one tool card', () => {
+  /**
+   * Business case: Pi can send a tool result and later echo the matching tool
+   * input through WS with a different transport item id. The UI must merge both
+   * fragments into one subagent card before a page refresh replays JSONL.
+   */
+  let messages: ChatMessage[] = [
+    row({
+      type: 'user',
+      content: '用 subagent 检查 live 工具卡合并',
+      deliveryStatus: 'persisted',
+      clientRequestId: 'pi-subagent-live-merge',
+      messageKey: 'user-pi-subagent-live-merge',
+    }),
+  ];
+
+  messages = reduceNativeRuntimeEvent(messages, {
+    type: 'pi-response',
+    data: {
+      type: 'item',
+      itemType: 'tool_result',
+      itemId: 'pi-result-envelope',
+      tool_call_id: 'pi-subagent-call-1',
+      tool: 'subagent',
+      result: 'review completed',
+      status: 'completed',
+    },
+  }) as ChatMessage[];
+
+  messages = reduceNativeRuntimeEvent(messages, {
+    type: 'pi-response',
+    data: {
+      type: 'item',
+      itemType: 'tool_call',
+      itemId: 'pi-input-envelope',
+      call_id: 'pi-subagent-call-1',
+      tool: 'subagent',
+      arguments: {
+        agent: 'reviewer',
+        task: 'check websocket merge',
+      },
+      status: 'running',
+    },
+  }) as ChatMessage[];
+
+  const toolCards = messages.filter((message) => message.isToolUse);
+  assert.equal(toolCards.length, 1, 'live input/result fragments must not create duplicate tool cards');
+  assert.equal(toolCards[0].isSubagentContainer, true);
+  assert.equal(toolCards[0].subagentState?.isComplete, true);
+  assert.equal(toolCards[0].status, 'completed');
+  assert.match(String(toolCards[0].toolInput), /reviewer/);
+  assert.equal(toolCards[0].toolResult?.content, 'review completed');
+});
+
+test('persisted Pi subagent tool_use becomes a subagent container', () => {
+  /**
+   * Business case: after refresh, Pi `subagent` tool calls should render through
+   * the same dedicated container as legacy Task/Agent calls.
+   */
+  const converted = convertSessionMessages([
+    {
+      type: 'message',
+      provider: 'pi',
+      timestamp: '2026-06-20T10:00:00.000Z',
+      messageKey: 'pi-subagent-message',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'pi-subagent-call-2',
+            name: 'subagent',
+            input: {
+              agent: 'reviewer',
+              task: 'inspect persisted subagent rendering',
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  assert.equal(converted.length, 1);
+  assert.equal(converted[0].isToolUse, true);
+  assert.equal(converted[0].isSubagentContainer, true);
+  assert.match(String(converted[0].toolInput), /persisted subagent/);
+});
+
+test('session view identity changes for same id across provider and route aliases', () => {
+  /**
+   * Business case: new-session navigation must clear visible messages when the
+   * URL/view changes, even if a provider id or cN alias shape is reused.
+   */
+  const project = {
+    name: 'ozw',
+    fullPath: '/home/zzl/projects/ozw',
+    path: '/home/zzl/projects/ozw',
+  } as any;
+
+  const codexC1 = {
+    id: 'c1',
+    routeIndex: 1,
+    __provider: 'codex',
+    createdAt: '2026-06-20T10:00:00.000Z',
+  } as any;
+  const piC1 = {
+    ...codexC1,
+    __provider: 'pi',
+  } as any;
+  const codexC2 = {
+    ...codexC1,
+    id: 'c2',
+    routeIndex: 2,
+  } as any;
+
+  assert.notEqual(
+    getSessionViewIdentityKey(project, codexC1),
+    getSessionViewIdentityKey(project, piC1),
+  );
+  assert.notEqual(
+    getSessionViewIdentityKey(project, codexC1),
+    getSessionViewIdentityKey(project, codexC2),
+  );
+  assert.equal(
+    getSessionViewIdentityKey(project, codexC1),
+    getSessionViewIdentityKey(project, { ...codexC1 }),
+  );
+});
+
+test('follow latest tail refresh does not append short persisted partial beside live assistant', () => {
+  /**
+   * Clicking the follow-latest button refreshes the JSONL tail while the same
+   * provider turn may still be streaming over WS. A short persisted partial
+   * must not create a second dynamic assistant bubble next to the live one.
+   */
+  const messages = [
+    row({
+      type: 'user',
+      content: '点击跟随后动态响应不要重复',
+      deliveryStatus: 'persisted',
+      clientRequestId: 'follow-live-dup',
+      messageKey: 'optimistic:follow-live-dup',
+      timestamp: '2026-06-18T20:15:00.000Z',
+    }),
+    row({
+      type: 'assistant',
+      content: '动态响应正在持续输出，用户刚刚点了跟随按钮。',
+      source: 'codex-live',
+      clientRequestId: 'follow-live-dup',
+      messageKey: 'codex:live-follow-stream',
+      timestamp: '2026-06-18T20:15:01.000Z',
+    }),
+  ];
+
+  const merged = mergeSessionMessageDelta({
+    existingMessages: messages,
+    incomingRawMessages: [
+      {
+        type: 'message',
+        provider: 'codex',
+        clientRequestId: 'follow-live-dup',
+        messageKey: 'codex:line:42:msg:0',
+        timestamp: '2026-06-18T20:15:02.000Z',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: '动态响应',
+            },
+          ],
+        },
+      },
+    ],
+    sessionId: 'follow-live-dup-session',
+  });
+
+  assert.deepEqual(
+    visibleTexts(merged),
+    ['点击跟随后动态响应不要重复', '动态响应正在持续输出，用户刚刚点了跟随按钮。'],
+  );
+  assert.equal(merged.filter((message) => message.type === 'assistant' && !message.isToolUse).length, 1);
+});
+
+test('follow latest does not request JSONL refresh while native live turn owns the visible tail', () => {
+  /**
+   * Business case: clicking follow-latest during a running native provider
+   * response should only move the viewport. The active WS live bubble remains
+   * the current-turn source until completion or reconnect/external refresh.
+   */
+  const liveMessages = [
+    row({
+      type: 'assistant',
+      content: '正在通过 WS live 输出',
+      source: 'codex-live',
+      messageKey: 'codex:live-follow-owner',
+    }),
+  ];
+
+  assert.equal(
+    shouldDeferFollowLatestRefresh({
+      messages: liveMessages,
+      isRealtimeConnected: true,
+      isTurnRunning: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldDeferFollowLatestRefresh({
+      messages: liveMessages,
+      isRealtimeConnected: false,
+      isTurnRunning: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldDeferFollowLatestRefresh({
+      messages: liveMessages,
+      isRealtimeConnected: true,
+      isTurnRunning: false,
+    }),
+    false,
+  );
+});
+
+test('follow latest tail refresh dedupes live assistant when persisted text only adds markdown code marks', () => {
+  /**
+   * Real Codex app-server streams may first send plain live text, then replay
+   * the same assistant row from JSONL with inline-code markdown. The transcript
+   * should converge to one assistant bubble instead of rendering both sources.
+   */
+  const liveText = '我看到这条 FOLLOW_DUP_REAL_TEST_20260618... 已经作为用户消息发出来了，刚才点击命令被中断。';
+  const persistedText = '我看到这条 `FOLLOW_DUP_REAL_TEST_20260618...` 已经作为用户消息发出来了，刚才点击命令被中断。';
+  const merged = mergeSessionMessageDelta({
+    existingMessages: [
+      row({
+        type: 'user',
+        content: 'FOLLOW_DUP_REAL_TEST_20260618 请只回复一句中文',
+        deliveryStatus: 'persisted',
+        messageKey: 'optimistic:follow-markdown-dedupe',
+      }),
+      row({
+        type: 'assistant',
+        content: liveText,
+        source: 'codex-live',
+        messageKey: 'codex:msg_live_markdown_dedupe',
+      }),
+    ],
+    incomingRawMessages: [
+      {
+        type: 'message',
+        provider: 'codex',
+        messageKey: 'codex:session:line:1181:msg:0',
+        timestamp: '2026-06-18T20:20:00.000Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: persistedText }],
+        },
+      },
+    ],
+    sessionId: 'follow-markdown-dedupe-session',
+  });
+
+  assert.equal(merged.filter((message) => message.type === 'assistant' && !message.isToolUse).length, 1);
+  assert.deepEqual(visibleTexts(merged), [
+    'FOLLOW_DUP_REAL_TEST_20260618 请只回复一句中文',
+    persistedText,
+  ]);
+});
+
+test('persisted reload dedupes live overlay and JSONL assistant rows in the same turn', () => {
+  /**
+   * After refresh, a previously live Codex row can be loaded together with the
+   * authoritative JSONL line for the same assistant text. The persisted
+   * transcript should keep the JSONL row only.
+   */
+  const liveText = '我看到这条 FOLLOW_DUP_REAL_TEST_20260618... 已经作为用户消息发出来了，刚才点击命令被中断。';
+  const persistedText = '我看到这条 `FOLLOW_DUP_REAL_TEST_20260618...` 已经作为用户消息发出来了，刚才点击命令被中断。';
+  const merged = mergePersistedAndOptimisticMessages([
+    row({
+      type: 'user',
+      content: 'FOLLOW_DUP_REAL_TEST_20260618 请只回复一句中文',
+      deliveryStatus: 'persisted',
+      messageKey: 'codex:session:line:1180:msg:0',
+    }),
+    row({
+      type: 'assistant',
+      content: liveText,
+      messageKey: 'codex:msg_0cc31214e5e98958016a33e2760c108191ad7285c9f161c31a',
+    }),
+    row({
+      type: 'assistant',
+      content: persistedText,
+      messageKey: 'codex:session:line:1181:msg:0',
+    }),
+  ], [], { sessionId: 'persisted-live-overlay-dedupe' });
+
+  assert.equal(merged.filter((message) => message.type === 'assistant' && !message.isToolUse).length, 1);
+  assert.deepEqual(visibleTexts(merged), [
+    'FOLLOW_DUP_REAL_TEST_20260618 请只回复一句中文',
+    persistedText,
+  ]);
+});
+
+test('assistant rows from one live turn do not share react row identity', () => {
+  /**
+   * A single provider turn can render multiple assistant rows with the same
+   * clientRequestId while streaming. React row identity must use row/tool
+   * fields instead of the shared request id.
+   */
+  const firstAssistant = row({
+    type: 'assistant',
+    content: '第一段动态响应',
+    clientRequestId: 'chatreq-same-turn',
+    messageKey: 'codex:live:first',
+  });
+  const secondAssistant = row({
+    type: 'assistant',
+    content: '第二段动态响应',
+    clientRequestId: 'chatreq-same-turn',
+    messageKey: 'codex:live:second',
+  });
+
+  assert.notEqual(
+    getIntrinsicMessageKey(firstAssistant),
+    getIntrinsicMessageKey(secondAssistant),
+  );
+});
+
+test('persisted upload note restores user attachment marker after refresh', () => {
+  /**
+   * Business case: provider history stores uploaded files as a hidden prompt
+   * note. Refresh must keep the user-visible attachment marker so users can see
+   * what the agent received.
+   */
+  const converted = convertSessionMessages([
+    {
+      type: 'message',
+      provider: 'codex',
+      timestamp: '2026-06-10T12:30:00.000Z',
+      messageKey: 'persisted-upload-user',
+      message: {
+        role: 'user',
+        content: [
+          '请读取附件',
+          '',
+          '[User uploaded files for this message]',
+          'The files were saved to local paths below. Inspect them directly and decide how to parse them.',
+          '1. docs/upload.txt -> /home/zzl/ozw-uploads/u1/b1/docs/upload.txt (text/plain, 42 bytes)',
+        ].join('\n'),
+      },
+    },
+  ]);
+
+  assert.equal(converted.length, 1);
+  assert.equal(converted[0].content, '请读取附件');
+  assert.equal(converted[0].attachments?.[0]?.relativePath, 'docs/upload.txt');
+  assert.equal(converted[0].attachments?.[0]?.absolutePath, '/home/zzl/ozw-uploads/u1/b1/docs/upload.txt');
+});
+
 test('accepted Pi live turn renders before JSONL history catches up', () => {
   /**
    * Business case: Pi streams assistant text before its persisted session file
@@ -530,6 +955,79 @@ test('empty persisted assistant replay cannot erase a non-empty Codex live draft
     ['explain stream stability', 'The response is final and stable.'],
     'non-empty persisted final should replace the live draft exactly once',
   );
+});
+
+test('final-only persisted Pi refresh preserves live thinking and tool rows', () => {
+  const previous = [
+    row({
+      type: 'user',
+      content: 'inspect pi live ws render',
+      clientRequestId: 'pi-live-turn',
+      deliveryStatus: 'sent',
+      turnAnchorKey: 'pi-live-turn',
+      timestamp: '2026-06-19T10:00:00.000Z',
+    }),
+    row({
+      type: 'assistant',
+      content: 'pi thinking still live',
+      source: 'pi-live',
+      provider: 'pi',
+      isThinking: true,
+      messageKey: 'pi:live-thinking',
+      turnAnchorKey: 'pi-live-turn',
+      timestamp: '2026-06-19T10:00:01.000Z',
+    }),
+    row({
+      type: 'assistant',
+      content: '',
+      source: 'pi-live',
+      provider: 'pi',
+      isToolUse: true,
+      toolName: 'Bash',
+      toolInput: 'printf "pi live tool"',
+      toolCallId: 'pi-live-tool',
+      toolId: 'pi-live-tool',
+      toolResult: { content: 'pi live tool output', isError: false },
+      messageKey: 'pi:live-tool',
+      turnAnchorKey: 'pi-live-turn',
+      timestamp: '2026-06-19T10:00:02.000Z',
+    }),
+    row({
+      type: 'assistant',
+      content: 'pi live final draft',
+      source: 'pi-live',
+      provider: 'pi',
+      messageKey: 'pi:live-final',
+      turnAnchorKey: 'pi-live-turn',
+      timestamp: '2026-06-19T10:00:03.000Z',
+    }),
+  ];
+  const persisted = [
+    row({
+      type: 'user',
+      content: 'inspect pi live ws render',
+      clientRequestId: 'pi-live-turn',
+      deliveryStatus: 'persisted',
+      turnAnchorKey: 'pi-live-turn',
+      messageKey: 'pi:persisted-user',
+      timestamp: '2026-06-19T10:00:00.000Z',
+    }),
+    row({
+      type: 'assistant',
+      content: 'pi persisted final',
+      provider: 'pi',
+      messageKey: 'pi:persisted-final',
+      turnAnchorKey: 'pi-live-turn',
+      timestamp: '2026-06-19T10:00:04.000Z',
+    }),
+  ];
+
+  const merged = mergePersistedAndOptimisticMessages(persisted, previous, { sessionId: 'pi-final-only-refresh' });
+
+  assert.equal(countText(merged, 'pi thinking still live'), 1);
+  assert.equal(merged.filter((message) => message.isToolUse && message.toolName === 'Bash').length, 1);
+  assert.equal(countText(merged, 'pi persisted final'), 1);
+  assert.equal(countText(merged, 'pi live final draft'), 0);
 });
 
 test('equal-timestamp persisted turns keep user and assistant grouped by turn anchor', () => {
@@ -761,6 +1259,118 @@ test('raw cursor session refresh replaces existing identity without moving it to
     ['raw-u1', 'raw-a1', 'raw-u2', 'raw-a2', 'raw-a3'],
   );
   assert.equal((mergedRows[1].message as Record<string, string>).content, '第一轮完整回复');
+});
+
+test('session refresh cursor follows raw transcript line keys instead of visible message count', () => {
+  const rawMessages = [
+    { messageKey: 'codex:fixture-session:line:18:user' },
+    { messageKey: 'codex:fixture-session:line:27:tool:read-file-1' },
+    { messageKey: 'codex:fixture-session:line:33:tool-result:read-file-1' },
+  ];
+
+  assert.equal(getSessionMessageRawLineCursor(rawMessages[1]), 27);
+  assert.equal(getMaxSessionMessageRawLineCursor(rawMessages), 33);
+  assert.equal(
+    resolveSessionMessageRawLineCursor(rawMessages, 3),
+    33,
+    'latest refresh must not use the three visible rows as the JSONL afterLine cursor',
+  );
+  assert.equal(resolveSessionMessageRawLineCursor([], 40), 40);
+});
+
+test('standalone read and write tool results update existing tool cards during refresh', () => {
+  const existingMessages = [
+    row({
+      type: 'assistant',
+      content: '',
+      timestamp: '2026-06-12T08:00:00.000Z',
+      provider: 'codex',
+      source: 'codex-live',
+      messageKey: 'codex:live-read-file',
+      isToolUse: true,
+      toolName: 'Read',
+      toolInput: JSON.stringify({ file_path: '/repo/src/app.ts' }),
+      toolCallId: 'read-file-1',
+      toolId: 'read-file-1',
+      toolResult: null,
+    }),
+    row({
+      type: 'assistant',
+      content: '',
+      timestamp: '2026-06-12T08:00:01.000Z',
+      provider: 'codex',
+      source: 'codex-live',
+      messageKey: 'codex:live-write-file',
+      isToolUse: true,
+      toolName: 'Write',
+      toolInput: JSON.stringify({ file_path: '/repo/src/out.ts', content: 'export const ok = true;' }),
+      toolCallId: 'write-file-1',
+      toolId: 'write-file-1',
+      toolResult: null,
+    }),
+  ];
+
+  const nextMessages = mergeSessionMessageDelta({
+    existingMessages,
+    incomingRawMessages: [
+      {
+        type: 'tool_result',
+        timestamp: '2026-06-12T08:00:02.000Z',
+        provider: 'codex',
+        messageKey: 'codex:fixture-session:line:33:tool-result:read-file-1',
+        toolCallId: 'read-file-1',
+        output: 'export const value = 1;',
+      },
+      {
+        type: 'tool_result',
+        timestamp: '2026-06-12T08:00:03.000Z',
+        provider: 'codex',
+        messageKey: 'codex:fixture-session:line:34:tool-result:write-file-1',
+        toolCallId: 'write-file-1',
+        output: 'file written',
+      },
+    ],
+    sessionId: 'spec-chat-merge-standalone-tool-results',
+  });
+
+  assert.equal(nextMessages.length, 2, 'result-only refresh must not append duplicate tool cards');
+  assert.equal(nextMessages[0].toolName, 'Read');
+  assert.equal(nextMessages[0].toolResult?.content, 'export const value = 1;');
+  assert.equal(nextMessages[1].toolName, 'Write');
+  assert.equal(nextMessages[1].toolResult?.content, 'file written');
+  assert.notEqual(nextMessages[0], existingMessages[0], 'updated read card must be copied instead of mutated');
+  assert.equal(existingMessages[0].toolResult, null, 'old read card object must stay immutable');
+});
+
+test('apply_patch FileChanges rows carry per-file diff snapshots for editor open', () => {
+  /**
+   * Real Codex apply_patch calls render as compact FileChanges rows. Clicking an
+   * edited file should still have old/new text so the editor opens a diff.
+   */
+  const normalized = normalizeCodexFunctionCall({
+    name: 'apply_patch',
+    arguments: JSON.stringify({
+      patch: [
+        '*** Begin Patch',
+        '*** Update File: docs/example.md',
+        '@@',
+        '-old value',
+        '+new value',
+        ' shared context',
+        '*** End Patch',
+      ].join('\n'),
+    }),
+    call_id: 'patch-1',
+  });
+
+  const toolInput = normalized.toolInput as {
+    changes: Array<{ path: string; old_string?: string; new_string?: string }>;
+  };
+
+  assert.equal(normalized.toolName, 'FileChanges');
+  assert.equal(toolInput.changes[0]?.path, 'docs/example.md');
+  assert.equal(toolInput.changes[0]?.old_string, 'old value\nshared context');
+  assert.equal(toolInput.changes[0]?.new_string, 'new value\nshared context');
 });
 
 test('session message delta replaces covered live assistant instead of duplicating dynamic push', () => {

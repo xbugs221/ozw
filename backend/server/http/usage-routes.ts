@@ -3,10 +3,19 @@
  * 业务意义：route module 直接声明自身依赖，避免通过宽泛依赖隐藏权限边界。
  */
 
-type LooseRecord = Record<string, any>;
+import type {
+    AuthMiddleware,
+    HttpRouteApp,
+    OsDeps,
+} from './route-deps.js';
 
 export interface UsageRouteDeps {
-    app: any; authenticateToken: any; normalizeManualProvider: any; getUsageRemaining: any; os: any; getCodexSessionTokenUsage: any;
+    app: HttpRouteApp;
+    authenticateToken: AuthMiddleware;
+    normalizeManualProvider: (provider: unknown) => string;
+    getUsageRemaining: (provider: string) => Promise<unknown>;
+    os: OsDeps;
+    getCodexSessionTokenUsage: (sessionId: string, options: { homeDir: string }) => Promise<unknown | null>;
 }
 
 /**

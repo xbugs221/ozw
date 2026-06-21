@@ -122,7 +122,53 @@ export function resolveSessionRoutingContext(
  * Resolve the session id used for server message API calls.
  */
 export function getSessionLoadId(session: ProjectSession | null): string {
+  /**
+   * Provider-backed manual sessions are displayed through a stable cN route.
+   * The cN messages endpoint is the only endpoint that can merge active-turn
+   * overlay rows with provider JSONL, so route identity wins over provider id.
+   */
+  const routeIndex = Number(session?.routeIndex);
+  if (Number.isInteger(routeIndex) && routeIndex > 0) {
+    return `c${routeIndex}`;
+  }
   return session?.id || '';
+}
+
+/**
+ * Build the frontend view identity used to clear and hydrate visible messages.
+ */
+export function getSessionViewIdentityKey(
+  selectedProject: Project | null,
+  selectedSession: ProjectSession | null,
+): string | null {
+  /**
+   * A URL route can change without a provider session id changing, especially
+   * around cN aliases and draft sessions. Include the routing context so the
+   * chat pane tracks the actual view, not only the provider id.
+   */
+  if (!selectedProject || !selectedSession) {
+    return null;
+  }
+
+  const context = resolveSessionRoutingContext(selectedProject, selectedSession);
+  const routeIndex = Number(selectedSession.routeIndex);
+  const routeKey = Number.isInteger(routeIndex) && routeIndex > 0 ? `c${routeIndex}` : '';
+  const loadId = getSessionLoadId(selectedSession) || selectedSession.id || '';
+  const createdAt =
+    typeof selectedSession.createdAt === 'string' ? selectedSession.createdAt :
+      (typeof selectedSession.created_at === 'string' ? selectedSession.created_at : '');
+
+  return [
+    context.projectName || selectedProject.name || '',
+    context.projectPath || selectedProject.fullPath || selectedProject.path || '',
+    context.provider || 'unknown-provider',
+    loadId,
+    selectedSession.id || '',
+    routeKey,
+    context.workflowId || '',
+    context.workflowStageKey || '',
+    createdAt,
+  ].join('\u001f');
 }
 
 /**

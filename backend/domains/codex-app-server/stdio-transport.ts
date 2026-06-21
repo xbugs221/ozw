@@ -134,7 +134,7 @@ export function createStdioAppServerTransport(options: StdioTransportOptions = {
       initializedPromise = sendRawRequest('initialize', {
         clientInfo: {
           name: 'ozw',
-          title: 'CBW',
+          title: 'OZW',
           version: 'v2026.06.01',
         },
         capabilities: {

@@ -12,18 +12,77 @@ import type { RunningBehavior } from './runtime-router.js';
 
 const FAKE_PI_TURN_DELAY_MS = 5000;
 
+type FakePiTurnArtifacts = {
+  marker: string;
+  toolCallId: string;
+  thinking: string;
+  command: string;
+  result: string;
+  response: string;
+};
+
 /**
  * 判断当前进程是否应使用 fake Pi runtime。
  */
 export function shouldUseFakePiRuntime(): boolean {
-  return process.env.CCFLOW_FAKE_RUNNER === '1' || process.env.CBW_FAKE_PI_RUNTIME === '1';
+  return process.env.CCFLOW_FAKE_RUNNER === '1' || process.env.OZW_FAKE_PI_RUNTIME === '1';
 }
 
 const windowlessSetTimeout = (callback: () => void | Promise<void>, delayMs: number) => {
   setTimeout(() => { void callback(); }, delayMs);
 };
 
-async function appendFakePiTranscript(session: PiSessionRecord, providerSessionId: string, text: string): Promise<void> {
+function extractFakePiMarker(text: string): string {
+  /**
+   * Keep fake runtime rows concise while preserving a stable prompt marker.
+   */
+  const explicitMarker = text.match(/pi live ws turn \d+ \d+/)?.[0];
+  if (explicitMarker) {
+    return explicitMarker;
+  }
+  return text.replace(/\s+/g, ' ').trim().slice(0, 80) || 'pi fake turn';
+}
+
+function buildFakePiTurnArtifacts(providerSessionId: string, text: string): FakePiTurnArtifacts {
+  /**
+   * Build deterministic thinking, tool, and final response payloads for one turn.
+   */
+  const marker = extractFakePiMarker(text);
+  const safeMarker = marker.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'turn';
+  const toolCallId = `${providerSessionId}-${safeMarker}-${Date.now()}-tool`;
+  const command = `printf "fake pi tool for ${marker}"`;
+  return {
+    marker,
+    toolCallId,
+    thinking: `fake pi thinking: ${marker}`,
+    command,
+    result: `fake pi tool result for ${marker}: websocket payload reached the provider runtime.`,
+    response: [
+      `fake pi response: ${marker}`,
+      'I inspected the live WebSocket rendering path and kept this answer long enough to exercise merge timing.',
+      'The visible transcript should retain the reasoning row, the tool card, and the final assistant text while JSONL catches up.',
+      `fake pi long live conclusion for ${marker}: live rows must remain visible before and after the read-model refresh.`,
+    ].join('\n\n'),
+  };
+}
+
+function recordFakePiLiveEvent(session: PiSessionRecord, providerSessionId: string, data: Record<string, unknown>): void {
+  /**
+   * Send one fake runtime event and mirror it into refresh-recovery snapshots.
+   */
+  session.writer?.send(toProviderRuntimeResponseEvent({ provider: 'pi', data, sessionId: providerSessionId }));
+  recordProviderLiveTranscriptEvent('pi', providerSessionId, session.projectPath, data);
+  if (session.ozwSessionId !== providerSessionId) {
+    recordProviderLiveTranscriptEvent('pi', session.ozwSessionId, session.projectPath, data);
+  }
+}
+
+async function appendFakePiTranscript(
+  session: PiSessionRecord,
+  providerSessionId: string,
+  text: string,
+  artifacts: FakePiTurnArtifacts,
+): Promise<void> {
   /**
    * Persist fake Pi JSONL in the same shape the production read model scans.
    */
@@ -55,11 +114,39 @@ async function appendFakePiTranscript(session: PiSessionRecord, providerSessionI
   }));
   rows.push(JSON.stringify({
     type: 'message',
-    id: `${providerSessionId}-assistant-${Date.now()}`,
+    id: `${providerSessionId}-assistant-plan-${Date.now()}`,
     timestamp: new Date(Date.now() + 1).toISOString(),
     message: {
       role: 'assistant',
-      content: [{ type: 'text', text: `fake pi response: ${text}` }],
+      content: [
+        { type: 'thinking', text: artifacts.thinking },
+        {
+          type: 'toolCall',
+          id: artifacts.toolCallId,
+          name: 'Bash',
+          input: { command: artifacts.command },
+        },
+      ],
+    },
+  }));
+  rows.push(JSON.stringify({
+    type: 'message',
+    id: `${providerSessionId}-tool-result-${Date.now()}`,
+    timestamp: new Date(Date.now() + 2).toISOString(),
+    message: {
+      role: 'toolResult',
+      toolCallId: artifacts.toolCallId,
+      toolName: 'Bash',
+      content: artifacts.result,
+    },
+  }));
+  rows.push(JSON.stringify({
+    type: 'message',
+    id: `${providerSessionId}-assistant-final-${Date.now()}`,
+    timestamp: new Date(Date.now() + 3).toISOString(),
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: artifacts.response }],
     },
   }));
 
@@ -71,9 +158,10 @@ export function runFakePiTurn(session: PiSessionRecord, text: string, runningBeh
 }): { accepted: boolean; providerSessionId: string } {
   /**
    * Simulate Pi streaming semantics for browser tests without real Pi credentials.
-   */
+  */
   const providerSessionId = session.fakeProviderSessionId || `provider_${session.ozwSessionId}`;
   session.fakeProviderSessionId = providerSessionId;
+  const artifacts = buildFakePiTurnArtifacts(providerSessionId, text);
   const wasRunning = (session.status as string) === 'running';
   const behavior = wasRunning ? (runningBehavior || 'steer') : undefined;
   session.status = 'running';
@@ -107,18 +195,55 @@ export function runFakePiTurn(session: PiSessionRecord, text: string, runningBeh
     clientRequestId: options.clientRequestId || null,
   }));
 
+  windowlessSetTimeout(() => {
+    if ((session.status as string) === 'aborted') return;
+    recordFakePiLiveEvent(session, providerSessionId, {
+      type: 'item',
+      itemType: 'reasoning',
+      itemId: `${artifacts.toolCallId}-thinking`,
+      status: 'completed',
+      message: { role: 'assistant', content: artifacts.thinking },
+    });
+  }, 100);
+
+  windowlessSetTimeout(() => {
+    if ((session.status as string) === 'aborted') return;
+    recordFakePiLiveEvent(session, providerSessionId, {
+      type: 'item',
+      itemType: 'tool_call',
+      itemId: artifacts.toolCallId,
+      tool: 'Bash',
+      input: { command: artifacts.command },
+      status: 'running',
+    });
+  }, 200);
+
+  windowlessSetTimeout(() => {
+    if ((session.status as string) === 'aborted') return;
+    recordFakePiLiveEvent(session, providerSessionId, {
+      type: 'item',
+      itemType: 'tool_result',
+      itemId: artifacts.toolCallId,
+      tool: 'Bash',
+      result: artifacts.result,
+      status: 'completed',
+    });
+  }, 300);
+
   windowlessSetTimeout(async () => {
     if ((session.status as string) === 'aborted') return;
-    await appendFakePiTranscript(session, providerSessionId, text);
+    await appendFakePiTranscript(session, providerSessionId, text, artifacts);
     const finalData = {
       type: 'item',
       itemType: 'agent_message',
       itemId: `${providerSessionId}-${Date.now()}`,
-      message: { role: 'assistant', content: `fake pi response: ${text}` },
+      message: { role: 'assistant', content: artifacts.response },
     };
-    recordProviderLiveTranscriptEvent('pi', providerSessionId, session.projectPath, finalData);
+    recordFakePiLiveEvent(session, providerSessionId, finalData);
     completeProviderLiveTranscriptSnapshot('pi', providerSessionId, session.projectPath);
-    session.writer?.send(toProviderRuntimeResponseEvent({ provider: 'pi', data: finalData, sessionId: providerSessionId }));
+    if (session.ozwSessionId !== providerSessionId) {
+      completeProviderLiveTranscriptSnapshot('pi', session.ozwSessionId, session.projectPath);
+    }
     session.writer?.send(toProviderRuntimeCompleteEvent({ provider: 'pi', sessionId: providerSessionId, actualSessionId: providerSessionId }));
     session.writer?.send(toProviderSessionStatusEvent({
       provider: 'pi',

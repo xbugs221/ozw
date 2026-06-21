@@ -1,6 +1,7 @@
 import { getChunks } from '@codemirror/merge';
 import { EditorView, showPanel } from '@codemirror/view';
 import type { CodeEditorFile } from '../types/types';
+import { focusDiffPosition, getDiffPosition, hasComparableDiffText } from './diffNavigation';
 
 type EditorToolbarLabels = {
   changes: string;
@@ -73,7 +74,8 @@ export const createEditorToolbarPanelExtension = ({
       const hasDiff = Boolean(file.diffInfo && showDiff);
       const chunksData = hasDiff ? getChunks(view.state) : null;
       const chunks = chunksData?.chunks || [];
-      const chunkCount = chunks.length;
+      const fallbackDiffCount = hasDiff && chunks.length === 0 && hasComparableDiffText(file) ? 1 : 0;
+      const chunkCount = chunks.length || fallbackDiffCount;
       const maxChunkIndex = Math.max(0, chunkCount - 1);
       currentIndex = Math.max(0, Math.min(currentIndex, maxChunkIndex));
       const escapedLabels = {
@@ -157,11 +159,10 @@ export const createEditorToolbarPanelExtension = ({
 
           currentIndex = currentIndex > 0 ? currentIndex - 1 : chunks.length - 1;
           const chunk = chunks[currentIndex];
+          const position = chunk ? chunk.fromB : getDiffPosition(view, file, currentIndex);
 
-          if (chunk) {
-            view.dispatch({
-              effects: EditorView.scrollIntoView(chunk.fromB, { y: 'center' }),
-            });
+          if (position !== null) {
+            focusDiffPosition(view, position);
           }
 
           updatePanel();
@@ -174,11 +175,10 @@ export const createEditorToolbarPanelExtension = ({
 
           currentIndex = currentIndex < chunks.length - 1 ? currentIndex + 1 : 0;
           const chunk = chunks[currentIndex];
+          const position = chunk ? chunk.fromB : getDiffPosition(view, file, currentIndex);
 
-          if (chunk) {
-            view.dispatch({
-              effects: EditorView.scrollIntoView(chunk.fromB, { y: 'center' }),
-            });
+          if (position !== null) {
+            focusDiffPosition(view, position);
           }
 
           updatePanel();

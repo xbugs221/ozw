@@ -23,16 +23,16 @@ async function withTemporaryAuthHome(testBody, options = {}) {
   const run = async () => {
     const originalHome = process.env.HOME;
     const originalDatabasePath = process.env.DATABASE_PATH;
-    const originalLocalhostBypass = process.env.CBW_TRUST_LOCALHOST_AUTH;
+    const originalLocalhostBypass = process.env.OZW_TRUST_LOCALHOST_AUTH;
     const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-auth-localhost-test-'));
     const tempDatabasePath = path.join(tempHome, '.ozw', 'auth.db');
 
     process.env.HOME = tempHome;
     process.env.DATABASE_PATH = tempDatabasePath;
     if (Object.prototype.hasOwnProperty.call(options, 'trustLocalhostAuth')) {
-      process.env.CBW_TRUST_LOCALHOST_AUTH = String(options.trustLocalhostAuth);
+      process.env.OZW_TRUST_LOCALHOST_AUTH = String(options.trustLocalhostAuth);
     } else {
-      delete process.env.CBW_TRUST_LOCALHOST_AUTH;
+      delete process.env.OZW_TRUST_LOCALHOST_AUTH;
     }
 
     try {
@@ -52,9 +52,9 @@ async function withTemporaryAuthHome(testBody, options = {}) {
       }
 
       if (originalLocalhostBypass) {
-        process.env.CBW_TRUST_LOCALHOST_AUTH = originalLocalhostBypass;
+        process.env.OZW_TRUST_LOCALHOST_AUTH = originalLocalhostBypass;
       } else {
-        delete process.env.CBW_TRUST_LOCALHOST_AUTH;
+        delete process.env.OZW_TRUST_LOCALHOST_AUTH;
       }
 
       await fs.rm(tempHome, { recursive: true, force: true });
@@ -236,7 +236,7 @@ test('localhost direct access can be disabled explicitly', async () => {
         ...process.env,
         HOME: tempHome,
         DATABASE_PATH: tempDatabasePath,
-        CBW_TRUST_LOCALHOST_AUTH: 'false',
+        OZW_TRUST_LOCALHOST_AUTH: 'false',
         JWT_SECRET: process.env.JWT_SECRET || 'localhost-disabled-test-secret',
       },
       encoding: 'utf8',
