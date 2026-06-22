@@ -45,7 +45,10 @@ export function mergeSessionMessageDelta({
   }
 
   const incomingToolResults = collectIncomingToolResultPatches(incomingRawMessages);
-  const convertedDelta = convertSessionMessages(incomingRawMessages);
+  const convertedDelta = overlayPersistedToolShellsWithLiveResults(
+    convertSessionMessages(incomingRawMessages),
+    existingMessages,
+  );
   const firstDeltaIndexByKey = new Map<string, number>();
   convertedDelta.forEach((message, index) => {
     const key = getIntrinsicMessageKey(message);
@@ -383,6 +386,102 @@ function getToolResultText(message: ChatMessage): string {
   }
 
   return normalizeToolPayloadText((result as Record<string, unknown>).content);
+}
+
+/**
+ * Return whether two tool rows describe the same provider call.
+ */
+function isSameToolIdentity(leftMessage: ChatMessage, rightMessage: ChatMessage): boolean {
+  /**
+   * Prefer call ids because Codex live and JSONL replay can format tool input
+   * differently; fall back to name/input for older provider rows without ids.
+   */
+  const leftToolId = normalizeToolPayloadText(leftMessage.toolCallId || leftMessage.toolId);
+  const rightToolId = normalizeToolPayloadText(rightMessage.toolCallId || rightMessage.toolId);
+  if (leftToolId || rightToolId) {
+    return Boolean(leftToolId && rightToolId && leftToolId === rightToolId);
+  }
+
+  const leftName = normalizeToolPayloadText(leftMessage.toolName);
+  const rightName = normalizeToolPayloadText(rightMessage.toolName);
+  if (!leftName || leftName !== rightName) {
+    return false;
+  }
+
+  return normalizeToolPayloadText(leftMessage.toolInput) === normalizeToolPayloadText(rightMessage.toolInput);
+}
+
+/**
+ * Copy a live result onto a newly replayed persisted tool shell.
+ */
+function overlayLiveToolResult(
+  persistedMessage: ChatMessage,
+  liveMessage: ChatMessage,
+): ChatMessage {
+  /**
+   * Incremental JSONL refresh can expose the function_call line before the
+   * function_call_output line.  The live row already owns the visible output,
+   * so carry that result onto the canonical persisted shell.
+   */
+  const liveResult = liveMessage.toolResult;
+  if (!liveResult || typeof liveResult !== 'object') {
+    return persistedMessage;
+  }
+
+  return {
+    ...persistedMessage,
+    toolResult: liveResult as NonNullable<ChatMessage['toolResult']>,
+    toolError: Boolean((liveResult as Record<string, unknown>).isError),
+    toolResultTimestamp: liveMessage.toolResultTimestamp || liveMessage.timestamp || persistedMessage.timestamp,
+    toolName: persistedMessage.toolName || liveMessage.toolName,
+    toolInput: persistedMessage.toolInput || liveMessage.toolInput,
+    toolId: persistedMessage.toolId || liveMessage.toolId,
+    toolCallId: persistedMessage.toolCallId || liveMessage.toolCallId,
+  };
+}
+
+/**
+ * Preserve live tool output while JSONL replay is still catching up.
+ */
+function overlayPersistedToolShellsWithLiveResults(
+  persistedMessages: ChatMessage[],
+  previousMessages: ChatMessage[],
+): ChatMessage[] {
+  /**
+   * This keeps the user-visible transcript stable in the common ordering:
+   * live function_call_output arrives, then persisted function_call arrives,
+   * then persisted function_call_output arrives.
+   */
+  const liveToolsWithResults = previousMessages.filter((message) => (
+    message.type === 'assistant' &&
+    message.isToolUse &&
+    LIVE_ASSISTANT_SOURCES.has(String(message.source || '')) &&
+    Boolean(getToolResultText(message))
+  ));
+  if (liveToolsWithResults.length === 0) {
+    return persistedMessages;
+  }
+
+  let changed = false;
+  const overlaid = persistedMessages.map((message) => {
+    if (
+      message.type !== 'assistant' ||
+      !message.isToolUse ||
+      Boolean(getToolResultText(message))
+    ) {
+      return message;
+    }
+
+    const liveMatch = liveToolsWithResults.find((candidate) => isSameToolIdentity(message, candidate));
+    if (!liveMatch) {
+      return message;
+    }
+
+    changed = true;
+    return overlayLiveToolResult(message, liveMatch);
+  });
+
+  return changed ? overlaid : persistedMessages;
 }
 
 /**
@@ -796,9 +895,6 @@ function isPersistedLiveToolDuplicate(
     return false;
   }
 
-  const localToolId = normalizeToolPayloadText(localMessage.toolCallId || localMessage.toolId);
-  const localName = normalizeToolPayloadText(localMessage.toolName);
-  const localInput = normalizeToolPayloadText(localMessage.toolInput);
   const localResult = getToolResultText(localMessage);
 
   return persistedMessages.some((persistedMessage) => {
@@ -806,15 +902,7 @@ function isPersistedLiveToolDuplicate(
       return false;
     }
 
-    const persistedToolId = normalizeToolPayloadText(persistedMessage.toolCallId || persistedMessage.toolId);
-    const sameToolIdentity = Boolean(localToolId && persistedToolId && localToolId === persistedToolId)
-      || (
-        localName.length > 0 &&
-        localName === normalizeToolPayloadText(persistedMessage.toolName) &&
-        localInput === normalizeToolPayloadText(persistedMessage.toolInput)
-      );
-
-    if (!sameToolIdentity) {
+    if (!isSameToolIdentity(localMessage, persistedMessage)) {
       return false;
     }
 
@@ -1214,7 +1302,11 @@ export function mergePersistedAndOptimisticMessages(
   const { preservePreviousMessages = true, sessionId } = options;
   const crossCallConvergedLiveKeys: Set<string> | undefined =
     sessionId ? getSessionConvergedLiveKeys(sessionId) : undefined;
-  const mergedMessages = dedupePersistedAssistantTextWithinTurns(sortPersistedMessages(persistedMessages));
+  const effectivePersistedMessages = overlayPersistedToolShellsWithLiveResults(
+    persistedMessages,
+    previousMessages,
+  );
+  const mergedMessages = dedupePersistedAssistantTextWithinTurns(sortPersistedMessages(effectivePersistedMessages));
   const matchedPersistedIndexes = new Set<number>();
 
   /**
@@ -1405,7 +1497,7 @@ export function mergePersistedAndOptimisticMessages(
 
       if (
         usersWithPersistedAssistantsPrevIndexes.has(ownerIdx) &&
-        shouldCoverLateLiveRowFromPersistedTurn(message, persistedMessages)
+        shouldCoverLateLiveRowFromPersistedTurn(message, effectivePersistedMessages)
       ) {
         // The owning user's turn already has persisted state that supersedes
         // this live row, so a late duplicate should not be reinserted.
@@ -1419,7 +1511,7 @@ export function mergePersistedAndOptimisticMessages(
   }
 
   const persistedKeys = new Set(
-    persistedMessages.map((m) => getIntrinsicMessageKey(m)).filter((k): k is string => Boolean(k)),
+    effectivePersistedMessages.map((m) => getIntrinsicMessageKey(m)).filter((k): k is string => Boolean(k)),
   );
 
   previousMessages.forEach((message, previousIndex) => {
@@ -1444,7 +1536,7 @@ export function mergePersistedAndOptimisticMessages(
     }
 
     if (
-      isPersistedLiveDuplicate(message, persistedMessages)
+      isPersistedLiveDuplicate(message, effectivePersistedMessages)
     ) {
       return;
     }

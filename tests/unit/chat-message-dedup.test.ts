@@ -257,6 +257,25 @@ test('dedupeAdjacentChatMessages ignores render messageKey differences for optim
   assert.equal(dedupedMessages[0].deliveryStatus, 'persisted');
 });
 
+test('dedupeAdjacentChatMessages collapses repeated persisted user echoes from follow refresh', () => {
+  const messages = Array.from({ length: 6 }, (_, index) => ({
+    type: 'user',
+    content: '另外，检查一下ws live路径的消息显示规则，观测到它又重复显示内容了（刷新后不重复）',
+    timestamp: `2026-06-22T02:30:49.${String(index).padStart(3, '0')}Z`,
+    messageKey: `codex:c42:line:${120 + index}:msg:0`,
+    deliveryStatus: 'persisted' as const,
+  }));
+
+  const dedupedMessages = dedupeAdjacentChatMessages(messages);
+
+  assert.equal(dedupedMessages.length, 1);
+  assert.equal(
+    dedupedMessages[0].content,
+    '另外，检查一下ws live路径的消息显示规则，观测到它又重复显示内容了（刷新后不重复）',
+  );
+  assert.equal(dedupedMessages[0].deliveryStatus, 'persisted');
+});
+
 test('mergePersistedAndOptimisticMessages matches persisted user row despite different messageKey', () => {
   const mergedMessages = mergePersistedAndOptimisticMessages(
     [

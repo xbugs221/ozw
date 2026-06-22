@@ -108,6 +108,29 @@ function stripUserUploadNoteForDisplay(content: string): string {
   return content.slice(0, markerIndex).trimEnd();
 }
 
+const PROVIDER_INTERNAL_USER_BLOCK_TAGS = ['environment_context', 'system-reminder'];
+
+/**
+ * Detect provider-facing user rows that must stay out of the visible transcript.
+ */
+function isProviderInternalUserContent(content: string): boolean {
+  /**
+   * Follow-up runs can replay injected context as role=user rows before the
+   * backend filter is available, so the browser adapter keeps a defensive
+   * allow-list of complete internal wrapper blocks.
+   */
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  return PROVIDER_INTERNAL_USER_BLOCK_TAGS.some((tagName) => {
+    const openTag = new RegExp(`^<${tagName}(?:\\s[^>]*)?>`, 'i');
+    const closeTag = new RegExp(`</${tagName}>\\s*$`, 'i');
+    return openTag.test(trimmed) && closeTag.test(trimmed);
+  });
+}
+
 /**
  * Recover persisted upload metadata so refreshed user bubbles still show the
  * attached files even though provider-facing instructions stay hidden.
@@ -619,6 +642,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
       const parsedAttachments = parseUserUploadNoteAttachments(content);
       const shouldSkip =
         (!displayContent && parsedAttachments.length === 0) ||
+        isProviderInternalUserContent(displayContent) ||
         displayContent.startsWith('<command-name>') ||
         displayContent.startsWith('<command-message>') ||
         displayContent.startsWith('<command-args>') ||

@@ -103,11 +103,28 @@ function assistantMessage(timestamp, text) {
  * @returns {Record<string, unknown>}
  */
 function userMessage(timestamp, text) {
+  /** docstring: 生成 Codex response_item 用户 echo，模拟 provider JSONL 落盘。 */
   return responseItem(timestamp, {
     type: 'message',
     role: 'user',
     content: [{ type: 'input_text', text }],
   });
+}
+
+/**
+ * Build a visible event_msg user row.
+ *
+ * @param {string} timestamp
+ * @param {string} text
+ * @returns {Record<string, unknown>}
+ */
+function userEventMessage(timestamp, text) {
+  /** docstring: 生成 Codex event_msg 用户输入，用于验证 response_item/user echo 去重。 */
+  return {
+    type: 'event_msg',
+    timestamp,
+    payload: { type: 'user_message', message: text },
+  };
 }
 
 /**
@@ -251,6 +268,19 @@ async function countBodyText(page, needle) {
 }
 
 /**
+ * Count plain-text occurrences in the visible chat transcript.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} needle
+ * @returns {Promise<number>}
+ */
+async function countTranscriptText(page, needle) {
+  /** docstring: 只检查聊天 transcript，避免侧栏标题影响用户气泡数量断言。 */
+  const text = (await page.getByTestId('chat-scroll-container').last().textContent()) || '';
+  return text.split(needle).length - 1;
+}
+
+/**
  * Expand a completed tool output details block and assert its persisted output.
  *
  * @param {import('@playwright/test').Page} page
@@ -385,6 +415,89 @@ test.describe('Codex JSONL 单一来源消息渲染', () => {
     await expect(page.locator('body')).toContainText('printf complete-card');
     await expectToolOutput(page, 'call_complete_card', 'complete-card output');
     await expect.poll(() => countBodyText(page, 'printf complete-card')).toBe(1);
+  });
+
+  test('续发刷新隐藏 Codex 环境上下文并保持工具卡唯一', async ({ page }) => {
+    /** Scenario: Follow-up refresh hides provider-facing context and merges live output with persisted tool shell */
+    const sessionId = 'jsonl-single-source-followup-context-hidden-tool-dedup';
+    const firstPrompt = '第一轮真实用户需求。';
+    const followUpPrompt = '重写 docs 文档，把在新设备上完整复现流程所需的步骤写明。';
+    const environmentContext = [
+      '<environment_context>',
+      '<current_date>2026-06-22</current_date>',
+      '<timezone>Asia/Makassar</timezone>',
+      '<filesystem><workspace_roots><root>/home/zzl/projects/ald_proj/aiida-dspaw</root></workspace_roots></filesystem>',
+      '</environment_context>',
+    ].join('\n');
+    const callId = 'call_followup_context_tool';
+    const command = "rtk jq '.known_gap, .commands' test-results/15-slurm-li-acwfvs-rerun/aiida-nm-computer-code-preflight.json";
+
+    await writeCodexSession({
+      sessionId,
+      entries: [
+        sessionMeta(sessionId),
+        userMessage('2026-04-24T10:04:10.000Z', firstPrompt),
+        assistantMessage('2026-04-24T10:04:11.000Z', '第一轮已经完成。'),
+      ],
+    });
+
+    await openCodexSession(page, sessionId);
+    await page.evaluate(({ callId: liveCallId, command: liveCommand }) => {
+      window.__emitCodexNotification?.({
+        type: 'codex-response',
+        data: {
+          type: 'item',
+          itemType: 'function_call',
+          itemId: liveCallId,
+          call_id: liveCallId,
+          name: 'exec_command',
+          arguments: JSON.stringify({ cmd: liveCommand }),
+        },
+      });
+      window.__emitCodexNotification?.({
+        type: 'codex-response',
+        data: {
+          type: 'item',
+          itemType: 'function_call_output',
+          itemId: liveCallId,
+          call_id: liveCallId,
+          output: 'known_gap: docs replay gap\ncommands: rtk jq\n',
+        },
+      });
+    }, { callId, command });
+    await expect(page.getByTestId('codex-tool-card').filter({ hasText: command })).toHaveCount(1);
+
+    await appendCodexEntries(sessionId, [
+      userMessage('2026-04-24T10:04:12.000Z', followUpPrompt),
+      userEventMessage('2026-04-24T10:04:12.002Z', followUpPrompt),
+      userMessage('2026-04-24T10:04:13.000Z', environmentContext),
+      userEventMessage('2026-04-24T10:04:13.002Z', environmentContext),
+      toolCall('2026-04-24T10:04:14.000Z', callId, command),
+    ]);
+    await notifyJsonlChanged(page);
+
+    await expect.poll(() => countTranscriptText(page, followUpPrompt)).toBe(1);
+    await expect(page.getByTestId('chat-scroll-container')).not.toContainText('<environment_context>');
+    await expect(page.getByTestId('chat-scroll-container')).not.toContainText('Asia/Makassar');
+    await expect.poll(() => countTranscriptText(page, command)).toBe(1);
+    await expectToolOutput(page, callId, 'known_gap: docs replay gap');
+
+    await appendCodexEntries(sessionId, [
+      toolOutput('2026-04-24T10:04:15.000Z', callId, 'known_gap: docs replay gap\ncommands: rtk jq\n'),
+    ]);
+    await notifyJsonlChanged(page);
+
+    await expect.poll(() => countTranscriptText(page, followUpPrompt)).toBe(1);
+    await expect.poll(() => countTranscriptText(page, command)).toBe(1);
+    await expectToolOutput(page, callId, 'known_gap: docs replay gap');
+
+    if (process.env.OZW_DEBUG_SCREENSHOT_DIR) {
+      await fs.mkdir(process.env.OZW_DEBUG_SCREENSHOT_DIR, { recursive: true });
+      await page.screenshot({
+        path: path.join(process.env.OZW_DEBUG_SCREENSHOT_DIR, 'followup-context-hidden-tool-dedup.png'),
+        fullPage: true,
+      });
+    }
   });
 
   test('完成的工具卡片刷新后仍只渲染一次', async ({ page }) => {

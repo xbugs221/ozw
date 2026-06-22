@@ -107,6 +107,21 @@ function hasConflictingPersistedMessageKey(previousMessage: ChatMessage, nextMes
     return false;
   }
 
+  if (previousMessage.type === 'user' && nextMessage.type === 'user') {
+    const previousTimestamp = toTimestampMs(previousMessage.timestamp);
+    const nextTimestamp = toTimestampMs(nextMessage.timestamp);
+    const isSamePromptEcho = normalizeText(previousMessage.content) === normalizeText(nextMessage.content)
+      && normalizeText(previousMessage.reasoning) === normalizeText(nextMessage.reasoning)
+      && getAttachmentSignature(previousMessage) === getAttachmentSignature(nextMessage)
+      && previousTimestamp !== null
+      && nextTimestamp !== null
+      && Math.abs(nextTimestamp - previousTimestamp) <= 1000;
+
+    if (isSamePromptEcho) {
+      return false;
+    }
+  }
+
   return previousMessage.deliveryStatus === 'persisted'
     && nextMessage.deliveryStatus === 'persisted'
     && typeof previousMessage.messageKey === 'string'

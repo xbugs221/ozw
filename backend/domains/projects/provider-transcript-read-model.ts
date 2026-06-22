@@ -77,8 +77,11 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
       cwd = record.cwd;
     }
     if (record.type === 'event_msg' && record.payload?.type === 'user_message') {
-      messageCount += 1;
-      firstUserMessage ||= stringifyMessageContent(record.payload.message);
+      const content = stringifyMessageContent(record.payload.message);
+      if (!isCodexInternalUserContent(content)) {
+        messageCount += 1;
+        firstUserMessage ||= content;
+      }
     }
     if (record.type === 'response_item' && record.payload?.type === 'message') {
       messageCount += 1;
@@ -488,6 +491,9 @@ function codexFunctionPayloadToToolUse(
 function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumber: number): LooseRecord[] {
   if (record.type === 'event_msg' && record.payload?.type === 'user_message') {
     const content = stringifyMessageContent(record.payload.message);
+    if (isCodexInternalUserContent(content)) {
+      return [];
+    }
     return content ? [{
       type: 'user',
       provider: 'codex',
@@ -518,6 +524,9 @@ function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumbe
   }
   if (record.type === 'response_item' && record.payload?.type === 'message' && record.payload?.role === 'user') {
     const content = stringifyMessageContent(record.payload.content);
+    if (isCodexInternalUserContent(content)) {
+      return [];
+    }
     return content ? [{
       type: 'user',
       provider: 'codex',
@@ -791,6 +800,29 @@ function stringifyMessageContent(content: unknown): string {
     return String(record.text || record.content || record.message || '');
   }
   return '';
+}
+
+const CODEX_INTERNAL_USER_BLOCK_TAGS = ['environment_context', 'system-reminder'];
+
+/**
+ * Detect provider-facing Codex user blocks that should not become chat bubbles.
+ */
+function isCodexInternalUserContent(content: string): boolean {
+  /**
+   * Codex can persist injected context as role=user rows during follow-up
+   * turns.  Only hide complete known wrapper blocks so ordinary user text that
+   * mentions these tag names remains visible.
+   */
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  return CODEX_INTERNAL_USER_BLOCK_TAGS.some((tagName) => {
+    const openTag = new RegExp(`^<${tagName}(?:\\s[^>]*)?>`, 'i');
+    const closeTag = new RegExp(`</${tagName}>\\s*$`, 'i');
+    return openTag.test(trimmed) && closeTag.test(trimmed);
+  });
 }
 
 /**

@@ -284,6 +284,71 @@ test('getCodexSessionMessages collapses duplicated Codex user echo records', asy
   });
 });
 
+test('getCodexSessionMessages hides Codex environment context user rows', async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const sessionId = 'codex-environment-context-hidden';
+    const sessionsDir = path.join(tempHome, '.codex', 'sessions', '2026', '06', '22');
+    const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+    const prompt = '续发真实用户需求，环境上下文不应显示';
+    const environmentContext = [
+      '<environment_context>',
+      '<current_date>2026-06-22</current_date>',
+      '<timezone>Asia/Makassar</timezone>',
+      '<filesystem><workspace_roots><root>/home/zzl/projects/ozw</root></workspace_roots></filesystem>',
+      '</environment_context>',
+    ].join('\n');
+
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-06-22T03:22:21.000Z',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: prompt }],
+          },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-06-22T03:22:21.002Z',
+          payload: {
+            type: 'user_message',
+            message: prompt,
+          },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-06-22T03:22:23.000Z',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: environmentContext }],
+          },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-06-22T03:22:23.001Z',
+          payload: {
+            type: 'user_message',
+            message: environmentContext,
+          },
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    const result = await getCodexSessionMessages(sessionId, null, 0, null);
+    const userMessages = result.messages.filter((message) => message.type === 'user');
+
+    assert.equal(userMessages.length, 1);
+    assert.equal(userMessages[0].message.content, prompt);
+    assert.equal(JSON.stringify(result.messages).includes('<environment_context>'), false);
+  });
+});
+
 test('getCodexSessionMessages collapses paired Codex assistant event and response item records', async () => {
   await withTemporaryHome(async (tempHome) => {
     const sessionId = 'codex-duplicate-assistant-event';
