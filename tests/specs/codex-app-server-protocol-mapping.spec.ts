@@ -348,6 +348,10 @@ test('cold start with placeholder cN providerSessionId starts new thread', async
     requests.some((r) => r.method === 'thread/start'),
     'must start new thread when providerSessionId is placeholder cN',
   );
+  const threadStart = requests.find((r) => r.method === 'thread/start');
+  assert.equal(threadStart.params.multiAgentMode, 'proactive');
+  const turnStart = requests.find((r) => r.method === 'turn/start');
+  assert.equal(turnStart.params.multiAgentMode, 'proactive');
   assert.ok(
     !requests.some((r) => r.method === 'thread/resume'),
     'must not resume when providerSessionId is placeholder cN',

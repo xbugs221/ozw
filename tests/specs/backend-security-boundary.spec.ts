@@ -269,7 +269,7 @@ test('API keys are stored as hash and validated by token comparison', async () =
   });
 });
 
-test('Codex app-server thread/start must use YOLO sandbox and approval policy', async () => {
+test('Codex app-server thread/start must use YOLO sandbox, approval policy, and proactive multi-agent mode', async () => {
   const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
   const transport = {
     async request(method: string, params: Record<string, unknown>) {
@@ -297,12 +297,18 @@ test('Codex app-server thread/start must use YOLO sandbox and approval policy', 
   assert.ok(threadStart, 'thread/start should be called for a new Codex app-server session');
   assert.equal(threadStart.params.sandbox, 'danger-full-access');
   assert.equal(threadStart.params.approvalPolicy, 'never');
+  assert.equal(threadStart.params.multiAgentMode, 'proactive');
+
+  const turnStart = requests.find((request) => request.method === 'turn/start');
+  assert.ok(turnStart, 'turn/start should be called for a new Codex app-server session');
+  assert.equal(turnStart.params.multiAgentMode, 'proactive');
 
   evidenceRows.push({
     id: 'codex-app-server-thread-start-policy',
     passed: true,
     sandbox: threadStart.params.sandbox,
     approvalPolicy: threadStart.params.approvalPolicy,
+    multiAgentMode: threadStart.params.multiAgentMode,
   });
 });
 

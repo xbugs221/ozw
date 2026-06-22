@@ -1105,7 +1105,7 @@ async function startServer() {
                 console.info(`[SessionVisibility] Periodic scan enabled (${scanIntervalMs}ms)`);
             }
 
-            console.info('[WorkflowAutoRunner] Disabled; oz flow is the workflow state machine.');
+            console.info('[WorkflowRuntime] oz flow is the workflow state machine.');
 
             try {
                 const backfillResult = await backfillProjectIndex();

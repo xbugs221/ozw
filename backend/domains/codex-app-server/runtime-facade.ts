@@ -33,6 +33,8 @@ type CodexRuntimePolicy = {
   approvalPolicy: string;
 };
 
+const CODEX_MULTI_AGENT_MODE = 'proactive';
+
 type RuntimeDependencies = {
   sessionManager: CodexAppServerSessionManager;
   getTransport: () => CodexAppServerTransport;
@@ -132,6 +134,7 @@ export async function sendCodexAppServerMessage(input: {
       cwd: input.projectPath || null,
       sandbox,
       approvalPolicy,
+      multiAgentMode: CODEX_MULTI_AGENT_MODE,
     });
     const thread = (threadResult as Record<string, any>)?.thread;
     if (thread?.id) {
@@ -193,6 +196,7 @@ export async function sendCodexAppServerMessage(input: {
     input: buildUserInput(input.text),
     model: input.model || null,
     effort: input.reasoningEffort || null,
+    multiAgentMode: CODEX_MULTI_AGENT_MODE,
   });
   const turn = (turnResult as Record<string, any>)?.turn;
   if (turn?.id) {
@@ -298,10 +302,18 @@ export function createCodexAppServerRuntimeForTest(options: {
       const session = sessionManager.getOrCreateSession(input.ozwSessionId, projectPath, writer);
 
       if (!session.providerThreadId) {
-        const threadResult = await transport.request('thread/start', { model: input.model, cwd: projectPath });
+        const threadResult = await transport.request('thread/start', {
+          model: input.model,
+          cwd: projectPath,
+          multiAgentMode: CODEX_MULTI_AGENT_MODE,
+        });
         session.providerThreadId = ((threadResult as Record<string, any>)?.thread?.id) || null;
         subscribeSessionNotifications(session, transport);
-        const turnResult = await transport.request('turn/start', { threadId: session.providerThreadId, input: buildUserInput(input.text) });
+        const turnResult = await transport.request('turn/start', {
+          threadId: session.providerThreadId,
+          input: buildUserInput(input.text),
+          multiAgentMode: CODEX_MULTI_AGENT_MODE,
+        });
         const turnId = (turnResult as Record<string, any>)?.turn?.id;
         if (turnId) {
           session.activeTurnId = turnId;
@@ -322,7 +334,11 @@ export function createCodexAppServerRuntimeForTest(options: {
         return;
       }
 
-      const turnResult = await transport.request('turn/start', { threadId: session.providerThreadId, input: buildUserInput(input.text) });
+      const turnResult = await transport.request('turn/start', {
+        threadId: session.providerThreadId,
+        input: buildUserInput(input.text),
+        multiAgentMode: CODEX_MULTI_AGENT_MODE,
+      });
       const turnId = (turnResult as Record<string, any>)?.turn?.id;
       if (turnId) {
         session.activeTurnId = turnId;
