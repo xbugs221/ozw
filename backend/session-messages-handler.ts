@@ -10,6 +10,7 @@ import {
   getProviderCompletedTranscriptSnapshot,
   getProviderLiveTranscriptSnapshot,
 } from './domains/provider-runtime/live-transcript-store.js';
+import { filterRenderableMessages, type ChatMessageLike } from '../shared/provider-runtime-transcript.js';
 
 type MessageRecord = Record<string, any>;
 type ProviderName = "codex" | "pi";
@@ -258,7 +259,8 @@ export function mergeAndDedupMessagesWithCoverage(jsonlMessages: MessageRecord[]
   const seen = new Set<string>();
   const result: MessageRecord[] = [];
 
-  const normalizedLive = liveMessages.map(normalizeLiveMessageToJsonlShape);
+  const renderableLiveMessages = filterRenderableMessages(liveMessages as ChatMessageLike[]);
+  const normalizedLive = renderableLiveMessages.map(normalizeLiveMessageToJsonlShape);
   let uncoveredCount = 0;
 
   // JSONL first (stable history), then normalized live snapshot (current running turn)
@@ -321,6 +323,7 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
         const parsedLimit = limit ? parseInt(limit, 10) : null;
         const parsedOffset = offset ? parseInt(offset, 10) : 0;
         const parsedAfterLine = afterLine != null ? parseInt(afterLine, 10) : null;
+        const isIncrementalRead = parsedAfterLine !== null;
 
         let resolvedProvider: ProviderName | null = provider === 'codex' ? 'codex' : provider === 'pi' ? 'pi' : null;
         let projectPath = '';
@@ -361,6 +364,9 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
                             ? await readCodexMessages(providerSessionIdForMerge, parsedLimit, parsedOffset, parsedAfterLine)
                             : await readPiMessages(providerSessionIdForMerge, parsedLimit, parsedOffset, parsedAfterLine);
                         const jsonlMessages = (jsonlResult && typeof jsonlResult === 'object') ? (jsonlResult.messages || []) : [];
+                        if (isIncrementalRead) {
+                            return res.json(jsonlResult && typeof jsonlResult === 'object' ? jsonlResult : { messages: Array.isArray(jsonlResult) ? jsonlResult : [] });
+                        }
                         if (jsonlMessages.length > 0) {
                             if (cNProvider === 'pi') {
                                 clearProviderLiveTranscriptSnapshot(sessionId, projectPath);
@@ -371,8 +377,14 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
                             return res.json({ messages: merged, total: merged.length, hasMore: false, source: activeOverlay ? 'history+active-turn-overlay' : 'merged-jsonl+live' });
                         }
                     } catch {
+                        if (isIncrementalRead) {
+                            return res.json({ messages: [], total: 0, hasMore: false, offset: parsedOffset, limit: parsedLimit, nextRawLineOffset: parsedAfterLine });
+                        }
                         // JSONL not available yet — fall back to live snapshot alone.
                     }
+                }
+                if (isIncrementalRead) {
+                    return res.json({ messages: [], total: 0, hasMore: false, offset: parsedOffset, limit: parsedLimit, nextRawLineOffset: parsedAfterLine });
                 }
                 const activeOverlay = getProviderActiveTurnOverlay(cNProvider, sessionId, projectPath);
                 const liveMessages = activeOverlay
@@ -395,6 +407,10 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
             const nativeResult = cNProvider === 'codex'
                 ? await readCodexMessages(providerSessionId, parsedLimit, parsedOffset, parsedAfterLine)
                 : await readPiMessages(providerSessionId, parsedLimit, parsedOffset, parsedAfterLine);
+
+            if (isIncrementalRead) {
+                return res.json(nativeResult && typeof nativeResult === 'object' ? nativeResult : { messages: Array.isArray(nativeResult) ? nativeResult : [] });
+            }
 
             // After a successful JSONL read, clear the snapshot bridge so
             // subsequent requests always get the full JSONL history.

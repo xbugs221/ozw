@@ -25,6 +25,11 @@ import { promises as fs } from 'node:fs';
 import { handleGetSessionMessages, mergeAndDedupMessages } from '../../backend/session-messages-handler.ts';
 import { seedRunningCodexSessionForTest, seedRunningPiSessionForTest } from '../../backend/native-agent-runtime.js';
 import {
+  clearProviderActiveTurnOverlay,
+  recordProviderActiveTurnRuntimeEvent,
+  recordProviderActiveTurnUser,
+} from '../../backend/domains/provider-runtime/active-turn-store.ts';
+import {
   clearProjectDirectoryCache,
   createManualSessionDraft,
   finalizeManualSessionRoute,
@@ -214,6 +219,43 @@ async function writeProjectConfig(homeDir, projectName, projectPath) {
   try { config = JSON.parse(await fs.readFile(cfgPath, 'utf8')); } catch {}
   config[projectName] = { originalPath: projectPath };
   await fs.writeFile(cfgPath, JSON.stringify(config, null, 2));
+}
+
+/**
+ * Seed a disposable active-turn overlay that mirrors rows already covered by
+ * persisted provider history plus one empty pending thinking row.
+ */
+function seedCoveredActiveTurnOverlay(provider, routeSessionId, projectPath, userText, assistantText) {
+  recordProviderActiveTurnUser({
+    provider,
+    sessionId: routeSessionId,
+    projectPath,
+    clientRequestId: `${provider}-covered-client`,
+    turnAnchorKey: `${provider}-covered-anchor`,
+    userText,
+  });
+  recordProviderActiveTurnRuntimeEvent({
+    provider,
+    sessionId: routeSessionId,
+    projectPath,
+    event: {
+      type: 'item',
+      itemType: 'thinking',
+      itemId: `${provider}-empty-thinking`,
+      message: { role: 'assistant', content: '' },
+    },
+  });
+  recordProviderActiveTurnRuntimeEvent({
+    provider,
+    sessionId: routeSessionId,
+    projectPath,
+    event: {
+      type: 'item',
+      itemType: 'agent_message',
+      itemId: `${provider}-covered-assistant`,
+      message: { role: 'assistant', content: assistantText },
+    },
+  });
 }
 
 test('handleGetSessionMessages with provider=pi returns Pi messages from native Pi session', async () => {
@@ -693,6 +735,155 @@ test('running Codex cN session with JSONL + live transcript returns merged-jsonl
     const keys = body.messages.map((message) => message.messageKey).filter(Boolean);
     assert.equal(keys.length, new Set(keys).size, 'Merged Codex response must not duplicate message keys');
   } finally {
+    if (prevHome) process.env.HOME = prevHome; else delete process.env.HOME;
+    if (prevCoHome !== undefined) process.env.CCFLOW_CO_HOME = prevCoHome; else delete process.env.CCFLOW_CO_HOME;
+    if (prevXdgStateHome !== undefined) process.env.XDG_STATE_HOME = prevXdgStateHome; else delete process.env.XDG_STATE_HOME;
+    await fs.rm(tempHome, { recursive: true, force: true });
+  }
+});
+
+test('Codex cN afterLine refresh returns persisted tail without repeating active-turn overlay', async () => {
+  const tempHome = path.join(os.tmpdir(), `ozw-ep-codex-afterline-overlay-${Date.now()}`);
+  const coHome = path.join(tempHome, '.local', 'state', 'ozw', 'co');
+  const xdgStateHome = path.join(tempHome, '.local', 'state');
+  const prevHome = process.env.HOME;
+  const prevCoHome = process.env.CCFLOW_CO_HOME;
+  const prevXdgStateHome = process.env.XDG_STATE_HOME;
+  let routeSessionId = '';
+  let projectPath = '';
+
+  process.env.HOME = tempHome;
+  process.env.CCFLOW_CO_HOME = coHome;
+  process.env.XDG_STATE_HOME = xdgStateHome;
+
+  try {
+    const projectName = 'ep-codex-afterline-overlay';
+    projectPath = path.join(tempHome, 'projects', projectName);
+    await fs.mkdir(projectPath, { recursive: true });
+    await writeProjectConfig(tempHome, projectName, projectPath);
+
+    const providerSid = 'codex-provider-afterline-overlay';
+    await writeCodexNativeSession(tempHome, providerSid, projectPath);
+
+    const draft = await createManualSessionDraft(projectName, projectPath, 'codex', 'Codex afterLine overlay');
+    routeSessionId = draft.id;
+    await finalizeManualSessionRoute(projectName, routeSessionId, providerSid, 'codex', projectPath);
+    seedCoveredActiveTurnOverlay(
+      'codex',
+      routeSessionId,
+      projectPath,
+      'Codex native workflow user message',
+      'Codex native workflow reply',
+    );
+    clearProjectDirectoryCache();
+
+    const req = {
+      params: { projectName, sessionId: routeSessionId },
+      query: { provider: 'codex', projectPath, afterLine: '2' },
+    };
+    const res = createMockRes();
+    await handleGetSessionMessages(req, res);
+
+    assert.equal(res.getStatus(), 200);
+    const body = res.getJson();
+    assert.notEqual(
+      body.source,
+      'history+active-turn-overlay',
+      'Codex afterLine refresh must keep pure tail semantics instead of replaying active-turn overlay',
+    );
+    assert.deepEqual(
+      body.messages.map((message) => message.messageKey),
+      ['codex:codex-provider-afterline-overlay:line:3:msg:0'],
+      'Codex afterLine refresh should return only the new persisted JSONL row',
+    );
+    assert.equal(
+      body.messages.some((message) => message.clientRequestId === 'codex-covered-client'),
+      false,
+      'Codex afterLine refresh must not repeat the optimistic active-turn user',
+    );
+    assert.equal(
+      body.messages.some((message) => message.type === 'thinking' && !message.message?.content),
+      false,
+      'Codex afterLine refresh must not return empty active-turn thinking rows',
+    );
+  } finally {
+    if (routeSessionId) clearProviderActiveTurnOverlay('codex', routeSessionId, projectPath);
+    if (prevHome) process.env.HOME = prevHome; else delete process.env.HOME;
+    if (prevCoHome !== undefined) process.env.CCFLOW_CO_HOME = prevCoHome; else delete process.env.CCFLOW_CO_HOME;
+    if (prevXdgStateHome !== undefined) process.env.XDG_STATE_HOME = prevXdgStateHome; else delete process.env.XDG_STATE_HOME;
+    await fs.rm(tempHome, { recursive: true, force: true });
+  }
+});
+
+test('Pi cN afterLine refresh returns persisted tail without repeating active-turn overlay', async () => {
+  const tempHome = path.join(os.tmpdir(), `ozw-ep-pi-afterline-overlay-${Date.now()}`);
+  const coHome = path.join(tempHome, '.local', 'state', 'ozw', 'co');
+  const xdgStateHome = path.join(tempHome, '.local', 'state');
+  const prevHome = process.env.HOME;
+  const prevCoHome = process.env.CCFLOW_CO_HOME;
+  const prevXdgStateHome = process.env.XDG_STATE_HOME;
+  let routeSessionId = '';
+  let projectPath = '';
+
+  process.env.HOME = tempHome;
+  process.env.CCFLOW_CO_HOME = coHome;
+  process.env.XDG_STATE_HOME = xdgStateHome;
+
+  try {
+    const projectName = 'ep-pi-afterline-overlay';
+    projectPath = path.join(tempHome, 'projects', projectName);
+    await fs.mkdir(projectPath, { recursive: true });
+    await writeProjectConfig(tempHome, projectName, projectPath);
+
+    const providerSid = 'pi-provider-afterline-overlay';
+    await writePiNativeSession(tempHome, providerSid, projectPath);
+
+    const draft = await createManualSessionDraft(projectName, projectPath, 'pi', 'Pi afterLine overlay');
+    routeSessionId = draft.id;
+    await finalizeManualSessionRoute(projectName, routeSessionId, providerSid, 'pi', projectPath);
+    seedCoveredActiveTurnOverlay(
+      'pi',
+      routeSessionId,
+      projectPath,
+      'Pi native workflow user message',
+      'Pi native workflow reply',
+    );
+    clearProjectDirectoryCache();
+
+    const req = {
+      params: { projectName, sessionId: routeSessionId },
+      query: { provider: 'pi', projectPath, afterLine: '2' },
+    };
+    const res = createMockRes();
+    await handleGetSessionMessages(req, res);
+
+    assert.equal(res.getStatus(), 200);
+    const body = res.getJson();
+    assert.notEqual(
+      body.source,
+      'history+active-turn-overlay',
+      'Pi afterLine refresh must keep pure tail semantics instead of replaying active-turn overlay',
+    );
+    assert.deepEqual(
+      body.messages.map((message) => message.messageKey),
+      [
+        'pi:pi-provider-afterline-overlay:line:3:thinking:0',
+        'pi:pi-provider-afterline-overlay:line:3:msg:1',
+      ],
+      'Pi afterLine refresh should return only the new persisted JSONL rows',
+    );
+    assert.equal(
+      body.messages.some((message) => message.clientRequestId === 'pi-covered-client'),
+      false,
+      'Pi afterLine refresh must not repeat the optimistic active-turn user',
+    );
+    assert.equal(
+      body.messages.some((message) => message.type === 'thinking' && !message.message?.content),
+      false,
+      'Pi afterLine refresh must not return empty active-turn thinking rows',
+    );
+  } finally {
+    if (routeSessionId) clearProviderActiveTurnOverlay('pi', routeSessionId, projectPath);
     if (prevHome) process.env.HOME = prevHome; else delete process.env.HOME;
     if (prevCoHome !== undefined) process.env.CCFLOW_CO_HOME = prevCoHome; else delete process.env.CCFLOW_CO_HOME;
     if (prevXdgStateHome !== undefined) process.env.XDG_STATE_HOME = prevXdgStateHome; else delete process.env.XDG_STATE_HOME;
