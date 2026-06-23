@@ -531,10 +531,11 @@ test('file-backed tool cards expose accessible open-file controls', async () => 
   assert.match(fileChangesHtml, /src\/changed\.ts/, 'FileChanges must keep project-relative display paths');
 });
 
-test('final assistant image links stay on the workspace file preview route', async () => {
+test('unverified final assistant image file links render as plain text', async () => {
   /**
-   * Final replies often point at generated screenshots before the file tree
-   * index has reloaded, so image links must still use the workspace open flow.
+   * Final replies can point at mistyped generated screenshots; until the
+   * selected project file tree confirms the target exists, the UI must avoid
+   * browser navigation affordances for filesystem-looking hrefs.
    */
   const selectedProject: Project = {
     name: 'matx',
@@ -551,7 +552,31 @@ test('final assistant image links stay on the workspace file preview route', asy
   }), 'codex', selectedProject, () => undefined);
   await writeEvidence('codex-final-image-link.html', html);
 
-  assert.match(html, /href="\/home\/zzl\/projects\/matx\/test-results\/final-view\.png"/, 'image link href must remain visible');
-  assert.doesNotMatch(html, /target="_blank"/, 'workspace image links must be intercepted instead of opening a blank browser tab');
+  assert.doesNotMatch(html, /href="\/home\/zzl\/projects\/matx\/test-results\/final-view\.png"/, 'unverified image path must not render as a link');
+  assert.doesNotMatch(html, /target="_blank"/, 'unverified image path must not open a blank browser tab');
   assert.match(visibleTextFromHtml(html), /test-results\/final-view\.png/, 'final answer must keep the image path visible');
+});
+
+test('Codex goal completion notifications render as a milestone banner', async () => {
+  /**
+   * A task_complete row marks a finished agent goal, so the transcript should
+   * make it visually distinct from ordinary commentary progress lines.
+   */
+  const html = await renderMessage(row({
+    type: 'assistant',
+    provider: 'codex',
+    source: 'codex-history',
+    content: '已创建一个覆盖四类需求的 oz 提案。',
+    isTaskNotification: true,
+    taskStatus: 'completed',
+    taskKind: 'goal_complete',
+    durationMs: 498014,
+    messageKey: 'codex:goal-complete-banner',
+  }), 'codex');
+  await writeEvidence('codex-goal-completion-banner.html', html);
+
+  assert.match(html, /data-testid="goal-completion-banner"/, 'goal completion must render through the milestone banner');
+  assert.match(visibleTextFromHtml(html), /Goal completed/, 'banner must name the completed goal state');
+  assert.match(visibleTextFromHtml(html), /8m 18s/, 'banner must show the task duration');
+  assert.match(visibleTextFromHtml(html), /已创建一个覆盖四类需求的 oz 提案。/, 'banner must keep the completion summary visible');
 });

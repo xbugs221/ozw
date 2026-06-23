@@ -184,6 +184,14 @@ const normalizeToolInput = (value: unknown): string => {
 };
 
 /**
+ * Keep optional timing metadata numeric after JSON transport normalization.
+ */
+const toOptionalNumber = (value: unknown): number | undefined => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : undefined;
+};
+
+/**
  * Convert Codex commentary updates into compact status rows so progress
  * messages do not overwhelm the main assistant transcript.
  */
@@ -622,6 +630,28 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
   });
 
   rawMessages.forEach((message) => {
+    if (message.isTaskNotification) {
+      const notificationContent = typeof message.content === 'string'
+        ? message.content
+        : (typeof message.message?.content === 'string' ? message.message.content : '');
+      converted.push({
+        type: 'assistant',
+        content: unescapeWithMathProtection(notificationContent),
+        timestamp: message.timestamp || new Date().toISOString(),
+        provider: message.provider,
+        messageKey: message.messageKey,
+        clientRequestId: getClientRequestId(message),
+        ...getStoredOrderFields(message),
+        isTaskNotification: true,
+        taskStatus: typeof message.taskStatus === 'string' ? message.taskStatus : undefined,
+        taskKind: typeof message.taskKind === 'string' ? message.taskKind : undefined,
+        completedAt: message.completedAt,
+        durationMs: toOptionalNumber(message.durationMs),
+        timeToFirstTokenMs: toOptionalNumber(message.timeToFirstTokenMs),
+      });
+      return;
+    }
+
     if (message.message?.role === 'user' && message.message?.content) {
       let content = '';
       if (Array.isArray(message.message.content)) {

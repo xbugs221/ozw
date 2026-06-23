@@ -436,6 +436,70 @@ function readTimestampMs(value: unknown): number | null {
 }
 
 /**
+ * Convert Codex task completion epoch values into the transcript timestamp
+ * format already used by message rows.
+ */
+function readCodexTaskCompletedAt(value: unknown): string | undefined {
+  const numericValue = Number(value);
+  if (Number.isFinite(numericValue) && numericValue > 0) {
+    const epochMs = numericValue > 1_000_000_000_000 ? numericValue : numericValue * 1000;
+    return new Date(epochMs).toISOString();
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = new Date(value).getTime();
+    if (Number.isFinite(parsed)) {
+      return new Date(parsed).toISOString();
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Preserve numeric Codex timing fields without leaking NaN into the API.
+ */
+function readOptionalNumber(value: unknown): number | undefined {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : undefined;
+}
+
+/**
+ * Build a short, visible summary from the final assistant answer that preceded
+ * Codex's task_complete event.
+ */
+function summarizeTaskCompletionMessage(message: unknown): string {
+  const content = stringifyMessageContent(message);
+  const lines = content.split(/\r?\n/);
+
+  for (const line of lines) {
+    let normalized = line
+      .trim()
+      .replace(/^[-*]\s+/, '')
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^\*\*(.+?)\*\*$/, '$1')
+      .trim();
+
+    if (!normalized || /^问[:：]/.test(normalized)) {
+      continue;
+    }
+
+    const answerMatch = normalized.match(/^答[:：]\s*(.+)$/);
+    if (answerMatch) {
+      normalized = answerMatch[1].trim();
+    }
+
+    if (/^(需求\/问题|原因分析|做法|成果|问|答)[:：]?$/.test(normalized)) {
+      continue;
+    }
+
+    return summarizeText(normalized, 140, false);
+  }
+
+  return 'Goal completed';
+}
+
+/**
  * Collapse Codex's paired event_msg/response_item assistant records. The
  * response_item copy keeps phase metadata, so prefer it when both are present.
  */
@@ -511,6 +575,23 @@ function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumbe
       messageKey: `codex:${sessionId}:line:${lineNumber}:msg:0`,
       message: { role: 'assistant', content },
     }] : [];
+  }
+  if (record.type === 'event_msg' && record.payload?.type === 'task_complete') {
+    const durationMs = readOptionalNumber(record.payload.duration_ms);
+    const timeToFirstTokenMs = readOptionalNumber(record.payload.time_to_first_token_ms);
+    return [{
+      type: 'assistant',
+      provider: 'codex',
+      timestamp: record.timestamp,
+      messageKey: `codex:${sessionId}:line:${lineNumber}:task-complete:${record.payload.turn_id || 'goal'}`,
+      content: summarizeTaskCompletionMessage(record.payload.last_agent_message),
+      isTaskNotification: true,
+      taskStatus: 'completed',
+      taskKind: 'goal_complete',
+      completedAt: readCodexTaskCompletedAt(record.payload.completed_at),
+      durationMs,
+      timeToFirstTokenMs,
+    }];
   }
   if (record.type === 'response_item' && record.payload?.type === 'message' && record.payload?.role === 'assistant') {
     const content = stringifyMessageContent(record.payload.content);

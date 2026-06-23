@@ -13,10 +13,9 @@ import { useTranslation } from 'react-i18next';
 import { normalizeChatMarkdownFences } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
 import type { Project } from '../../../../types/app';
-import { parseWorkspaceFileReference } from '../../utils/workspaceLinks';
+import { isLikelyFileReferenceHref, parseWorkspaceFileReference } from '../../utils/workspaceLinks';
 import { api } from '../../../../utils/api';
 import type { ProjectFileNode } from '../../utils/fileMentionTree';
-import { isImageFile } from '../../../file-tree/utils/fileTreeUtils';
 import MarkdownMermaidBlock from '../../../code-editor/view/subcomponents/markdown/MarkdownMermaidBlock';
 
 type MarkdownProps = {
@@ -228,7 +227,7 @@ function createMarkdownComponents(
        */
       const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
         const workspaceLink = parseWorkspaceFileReference(href, selectedProject);
-        if (!workspaceLink || !onFileOpen) {
+        if (!workspaceLink || !onFileOpen || !openableFiles?.has(workspaceLink.filePath)) {
           return;
         }
 
@@ -238,10 +237,13 @@ function createMarkdownComponents(
 
       const workspaceLink = parseWorkspaceFileReference(href, selectedProject);
       const isKnownOpenableFile = Boolean(workspaceLink && openableFiles?.has(workspaceLink.filePath));
-      const isWorkspaceImage = Boolean(workspaceLink && isImageFile(workspaceLink.filePath));
-      const shouldIntercept = Boolean((isKnownOpenableFile || isWorkspaceImage) && onFileOpen);
+      const shouldIntercept = Boolean(isKnownOpenableFile && onFileOpen);
 
-      if (workspaceLink && !isKnownOpenableFile && !isWorkspaceImage) {
+      if (workspaceLink && !isKnownOpenableFile) {
+        return <span>{children}</span>;
+      }
+
+      if (!workspaceLink && isLikelyFileReferenceHref(href)) {
         return <span>{children}</span>;
       }
 

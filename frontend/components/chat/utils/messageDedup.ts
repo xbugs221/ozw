@@ -142,7 +142,8 @@ function isPlainTranscriptMessage(message: ChatMessage): boolean {
   return !message.isToolUse
     && !message.isStreaming
     && !message.isInteractivePrompt
-    && !message.isThinking;
+    && !message.isThinking
+    && !(message.isTaskNotification && message.taskKind === 'goal_complete');
 }
 
 /**

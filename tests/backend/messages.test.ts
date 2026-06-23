@@ -135,6 +135,72 @@ async function createCodexPhaseFixture(homeDir, sessionId) {
 }
 
 /**
+ * Write a Codex session file with the native task_complete event emitted when
+ * a long-running agent goal has finished.
+ */
+async function createCodexTaskCompleteFixture(homeDir, sessionId) {
+  const sessionsDir = path.join(homeDir, '.codex', 'sessions', '2026', '06', '22');
+  const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+
+  await fs.mkdir(sessionsDir, { recursive: true });
+  await fs.writeFile(
+    sessionFile,
+    [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-06-22T12:44:13.000Z',
+        payload: {
+          id: sessionId,
+          cwd: '/tmp/ozw-goal-complete-project',
+          model: 'gpt-5',
+        },
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-06-22T12:52:31.802Z',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [{
+            type: 'output_text',
+            text: [
+              '**需求/问题**',
+              '',
+              '已创建一个覆盖四类需求的 oz 提案。',
+              '',
+              '**成果**',
+              '',
+              '契约测试已跑。',
+            ].join('\n'),
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        timestamp: '2026-06-22T12:52:31.803Z',
+        payload: {
+          type: 'task_complete',
+          turn_id: '019eef5c-245b-7802-9696-1a51a6956a89',
+          last_agent_message: [
+            '**需求/问题**',
+            '',
+            '已创建一个覆盖四类需求的 oz 提案。',
+            '',
+            '**成果**',
+            '',
+            '契约测试已跑。',
+          ].join('\n'),
+          completed_at: 1782132751,
+          duration_ms: 498014,
+          time_to_first_token_ms: 3902,
+        },
+      }),
+    ].join('\n') + '\n',
+    'utf8',
+  );
+}
+
+/**
  * Write a Codex session file where app-server persisted an update envelope
  * around a functionCall item.
  */
@@ -233,6 +299,26 @@ test('getCodexSessionMessages maps Codex update functionCall envelopes to tool_u
       !JSON.stringify(result.messages).includes('"type":"update"'),
       'Codex update envelope must not leak to the frontend as raw JSON',
     );
+  });
+});
+
+test('getCodexSessionMessages maps Codex task_complete events to goal completion notifications', async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const sessionId = 'codex-task-complete-session';
+    await createCodexTaskCompleteFixture(tempHome, sessionId);
+
+    const result = await getCodexSessionMessages(sessionId, null, 0, null);
+    const completion = result.messages.find((message) => message.taskKind === 'goal_complete');
+
+    assert.ok(completion, 'task_complete must become a visible goal completion notification');
+    assert.equal(completion.type, 'assistant');
+    assert.equal(completion.isTaskNotification, true);
+    assert.equal(completion.taskStatus, 'completed');
+    assert.equal(completion.content, '已创建一个覆盖四类需求的 oz 提案。');
+    assert.equal(completion.durationMs, 498014);
+    assert.equal(completion.timeToFirstTokenMs, 3902);
+    assert.equal(completion.completedAt, '2026-06-22T12:52:31.000Z');
+    assert.equal(result.messages.filter((message) => message.taskKind === 'goal_complete').length, 1);
   });
 });
 

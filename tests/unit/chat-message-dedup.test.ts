@@ -155,6 +155,35 @@ test('dedupeAdjacentChatMessages replaces duplicate raw task notification with m
   assert.equal(dedupedMessages[0].isTaskNotification, undefined);
 });
 
+test('dedupeAdjacentChatMessages keeps goal completion notifications after one-line final answers', () => {
+  const content = '已创建一个覆盖四类需求的 oz 提案。';
+  const messages = [
+    {
+      type: 'assistant',
+      content,
+      timestamp: '2026-06-22T12:52:31.000Z',
+      messageKey: 'codex:c1:line:35000:msg:0',
+      deliveryStatus: 'persisted' as const,
+    },
+    {
+      type: 'assistant',
+      content,
+      timestamp: '2026-06-22T12:52:31.803Z',
+      messageKey: 'codex:c1:line:35001:task-complete:goal',
+      deliveryStatus: 'persisted' as const,
+      isTaskNotification: true,
+      taskStatus: 'completed',
+      taskKind: 'goal_complete',
+    },
+  ];
+
+  const dedupedMessages = dedupeAdjacentChatMessages(messages);
+
+  assert.equal(dedupedMessages.length, 2);
+  assert.equal(dedupedMessages[1].isTaskNotification, true);
+  assert.equal(dedupedMessages[1].taskKind, 'goal_complete');
+});
+
 test('dedupeAdjacentChatMessages collapses non-adjacent same-timestamp user echoes', () => {
   const messages = [
     {

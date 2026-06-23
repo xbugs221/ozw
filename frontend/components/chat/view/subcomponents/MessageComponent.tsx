@@ -60,6 +60,35 @@ type InteractiveOption = {
 };
 
 /**
+ * Format task runtime as a compact human-readable duration badge.
+ */
+function formatTaskDurationMs(value: unknown): string | null {
+  const durationMs = Number(value);
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
+    return null;
+  }
+
+  const totalSeconds = Math.round(durationMs / 1000);
+  if (totalSeconds <= 0) {
+    return '<1s';
+  }
+
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return `${minutes}m ${seconds}s`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes.toString().padStart(2, '0')}m`;
+}
+
+/**
  * Render a single chat transcript message using shared visual contracts for
  * provider-agnostic flags such as isThinking and isToolUse.
  */
@@ -150,6 +179,8 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
       ? t('messageTypes.pi')
       : t('messageTypes.assistant');
   const isCompletedTaskNotification = message.taskStatus === 'completed';
+  const isGoalCompletionNotification = isCompletedTaskNotification && message.taskKind === 'goal_complete';
+  const completedTaskDuration = useMemo(() => formatTaskDurationMs(message.durationMs), [message.durationMs]);
   const selectedProjectRoot = selectedProject?.fullPath || selectedProject?.path || '';
   const hideAssistantMetadata = isCodexLiveAssistant(message) || (isToolCard && isLiveToolSource(message.source));
 
@@ -197,14 +228,47 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
         </div>
       ) : message.isTaskNotification ? (
         /* Compact task notification on the left */
-        <div className="w-full">
-          <div className={isCompletedTaskNotification ? 'flex items-center gap-2 py-0.5' : 'py-0.5'}>
-            {isCompletedTaskNotification && (
-              <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 bg-green-400 dark:bg-green-500" />
-            )}
-            <span className={isCompletedTaskNotification ? 'text-xs text-gray-500 dark:text-gray-400' : 'text-sm text-gray-700 dark:text-gray-300'}>{message.content}</span>
+        isGoalCompletionNotification ? (
+          <div className="w-full py-1">
+            <div
+              data-testid="goal-completion-banner"
+              className="relative overflow-hidden rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-sm ring-1 ring-emerald-100 dark:border-emerald-800/70 dark:bg-emerald-950/30 dark:ring-emerald-900/60"
+            >
+              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400" />
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm dark:bg-emerald-500">
+                  <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.414l-7.25 7.25a1 1 0 01-1.414 0l-3.25-3.25a1 1 0 111.414-1.414l2.543 2.543 6.543-6.543a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-emerald-950 dark:text-emerald-100">Goal completed</span>
+                    {completedTaskDuration && (
+                      <span className="rounded-full border border-emerald-200 bg-white/80 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-100">
+                        {completedTaskDuration}
+                      </span>
+                    )}
+                  </div>
+                  {message.content && (
+                    <div className="mt-1 text-sm leading-6 text-emerald-900 dark:text-emerald-100/90">
+                      {message.content}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="w-full">
+            <div className={isCompletedTaskNotification ? 'flex items-center gap-2 py-0.5' : 'py-0.5'}>
+              {isCompletedTaskNotification && (
+                <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 bg-green-400 dark:bg-green-500" />
+              )}
+              <span className={isCompletedTaskNotification ? 'text-xs text-gray-500 dark:text-gray-400' : 'text-sm text-gray-700 dark:text-gray-300'}>{message.content}</span>
+            </div>
+          </div>
+        )
       ) : (
         /* Assistant/Error/Tool messages on the left */
         <div className="w-full">

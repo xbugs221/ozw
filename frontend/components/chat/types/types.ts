@@ -1,3 +1,7 @@
+/**
+ * PURPOSE: Shared chat view contracts used by session adapters, message
+ * transforms, and transcript rendering components.
+ */
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 import type { NewSessionOptions } from '../../../utils/workflowAutoStart';
 
@@ -47,7 +51,11 @@ export interface ChatMessage {
   reasoning?: string;
   isThinking?: boolean;
   isTaskNotification?: boolean;
+  taskKind?: string;
   taskStatus?: string;
+  completedAt?: string | number | Date;
+  durationMs?: number;
+  timeToFirstTokenMs?: number;
   isStreaming?: boolean;
   isInteractivePrompt?: boolean;
   isToolUse?: boolean;

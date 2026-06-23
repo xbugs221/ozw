@@ -1118,6 +1118,7 @@ function ChatInterface({
           autoExpandTools={autoExpandTools}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
+          isFollowingLatest={isFollowingLatest}
           selectedProject={selectedProject}
         />
 

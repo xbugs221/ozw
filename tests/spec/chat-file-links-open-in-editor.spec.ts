@@ -207,18 +207,25 @@ test('external links keep normal browser navigation instead of opening the edito
 test('unopenable workspace references render as plain text while external links stay clickable', async ({ page }) => {
   /** Scenario: Only workspace references that can open real files get link affordance */
   const openableFile = 'src/openable-link.ts';
+  const openableImage = 'images/openable-screenshot.png';
   const directoryOnly = 'src/folder-only';
   const missingFile = 'src/missing-link.ts';
+  const missingImage = 'images/missing-screenshot.png';
+  const outsideProjectFile = '/tmp/ozw-wrong-project/missing-link.ts';
   const sessionId = 'fixture-unopenable-workspace-links';
 
   await writeWorkspaceTextFile(openableFile, 'export const openableWorkspaceLink = true;\n');
+  await writeWorkspaceTextFile(openableImage, 'placeholder image bytes\n');
   await fs.mkdir(resolveFlowrkspacePath(directoryOnly), { recursive: true });
   await writeAssistantLinkSession({
     sessionId,
     assistantContent: [
       `Open [openable file](${openableFile}) for implementation details.`,
+      `Open [openable image](${openableImage}) for screenshot context.`,
       `Do not link [directory target](${directoryOnly}).`,
       `Do not link [missing target](${missingFile}).`,
+      `Do not link [missing image](${missingImage}).`,
+      `Do not link [outside project target](${outsideProjectFile}).`,
       'Do not link [plain label](just words).',
       'Keep [external docs](https://example.com/docs) as a browser link.',
     ].join('\n\n'),
@@ -228,10 +235,15 @@ test('unopenable workspace references render as plain text while external links 
 
   const openable = page.getByRole('link', { name: 'openable file' });
   await expect(openable).toBeVisible();
+  await expect(page.getByRole('link', { name: 'openable image' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'directory target' })).toHaveCount(0);
   await expect(page.getByText('directory target', { exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'missing target' })).toHaveCount(0);
   await expect(page.getByText('missing target', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'missing image' })).toHaveCount(0);
+  await expect(page.getByText('missing image', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'outside project target' })).toHaveCount(0);
+  await expect(page.getByText('outside project target', { exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'plain label' })).toHaveCount(0);
   await expect(page.getByText('plain label', { exact: true })).toBeVisible();
 

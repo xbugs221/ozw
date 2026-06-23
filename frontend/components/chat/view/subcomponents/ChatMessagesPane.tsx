@@ -65,6 +65,7 @@ interface ChatMessagesPaneProps {
   autoExpandTools?: boolean;
   showRawParameters?: boolean;
   showThinking?: boolean;
+  isFollowingLatest: boolean;
   selectedProject: Project;
 }
 
@@ -106,6 +107,7 @@ export default function ChatMessagesPane({
   autoExpandTools,
   showRawParameters,
   showThinking,
+  isFollowingLatest,
   selectedProject,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
@@ -114,6 +116,8 @@ export default function ChatMessagesPane({
   const generatedMessageKeyCounterRef = useRef(0);
   const measuredHeightsRef = useRef<Map<string, number>>(new Map());
   const pendingMeasurementFrameRef = useRef<number | null>(null);
+  const followLatestScrollFrameRef = useRef<number | null>(null);
+  const followLatestSecondScrollFrameRef = useRef<number | null>(null);
   const hasPendingMeasurementUpdateRef = useRef(false);
   const [measurementVersion, setMeasurementVersion] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
@@ -193,6 +197,43 @@ export default function ChatMessagesPane({
     setViewportHeight(element.clientHeight);
   }, []);
 
+  const scheduleFollowLatestMeasurementScroll = useCallback(() => {
+    /**
+     * Keep explicit follow mode pinned after virtual rows settle from estimated
+     * heights to measured tool/markdown heights.
+     */
+    if (!isFollowingLatest) {
+      return;
+    }
+
+    if (followLatestScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(followLatestScrollFrameRef.current);
+    }
+    if (followLatestSecondScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(followLatestSecondScrollFrameRef.current);
+      followLatestSecondScrollFrameRef.current = null;
+    }
+
+    const scrollToMeasuredBottom = () => {
+      const container = scrollContainerRef.current;
+      if (!container) {
+        return;
+      }
+      container.scrollTop = container.scrollHeight;
+      setScrollTop(container.scrollTop);
+      setViewportHeight(container.clientHeight);
+    };
+
+    followLatestScrollFrameRef.current = window.requestAnimationFrame(() => {
+      followLatestScrollFrameRef.current = null;
+      scrollToMeasuredBottom();
+      followLatestSecondScrollFrameRef.current = window.requestAnimationFrame(() => {
+        followLatestSecondScrollFrameRef.current = null;
+        scrollToMeasuredBottom();
+      });
+    });
+  }, [isFollowingLatest, scrollContainerRef]);
+
   const measureMessage = useCallback((messageKey: string, element: HTMLDivElement | null) => {
     if (!element) {
       return;
@@ -222,8 +263,20 @@ export default function ChatMessagesPane({
         window.cancelAnimationFrame(pendingMeasurementFrameRef.current);
         pendingMeasurementFrameRef.current = null;
       }
+      if (followLatestScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(followLatestScrollFrameRef.current);
+        followLatestScrollFrameRef.current = null;
+      }
+      if (followLatestSecondScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(followLatestSecondScrollFrameRef.current);
+        followLatestSecondScrollFrameRef.current = null;
+      }
     };
   }, []);
+
+  useLayoutEffect(() => {
+    scheduleFollowLatestMeasurementScroll();
+  }, [measurementVersion, scheduleFollowLatestMeasurementScroll]);
 
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;

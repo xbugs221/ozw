@@ -14,6 +14,8 @@ export type WorkspaceFileReference = {
 const HASH_LINE_SUFFIX_PATTERN = /#L(\d+)(?:C(\d+))?$/i;
 const COLON_LINE_SUFFIX_PATTERN = /:(\d+)(?::(\d+))?$/;
 const URI_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
+const FILE_EXTENSION_PATTERN = /(?:^|[\\/])[^\\/]+\.[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/;
 
 /**
  * Remove supported line suffixes while preserving the normalized workspace path.
@@ -88,11 +90,56 @@ function isBrowserLink(reference: string): boolean {
     return true;
   }
 
+  if (WINDOWS_ABSOLUTE_PATH_PATTERN.test(reference)) {
+    return false;
+  }
+
   if (reference.startsWith('#') || reference.startsWith('?') || reference.startsWith('//')) {
     return true;
   }
 
   return URI_SCHEME_PATTERN.test(reference);
+}
+
+/**
+ * Return true for POSIX or Windows absolute paths after separator normalization.
+ */
+function isAbsoluteWorkspacePath(pathValue: string): boolean {
+  return pathValue.startsWith('/') || WINDOWS_ABSOLUTE_PATH_PATTERN.test(pathValue);
+}
+
+/**
+ * Identify href values that are probably filesystem references, so unverified
+ * paths do not fall through to normal browser navigation.
+ */
+export function isLikelyFileReferenceHref(href: string | undefined): boolean {
+  const trimmedHref = String(href || '').trim();
+  if (!trimmedHref) {
+    return false;
+  }
+
+  const decodedHref = (() => {
+    try {
+      return decodeURIComponent(trimmedHref);
+    } catch {
+      return trimmedHref;
+    }
+  })();
+  const { filePath } = stripLineSuffix(decodedHref);
+  const normalizedFilePath = filePath.replace(/\\/g, '/');
+
+  if (!normalizedFilePath || isBrowserLink(normalizedFilePath)) {
+    return false;
+  }
+
+  return (
+    isAbsoluteWorkspacePath(normalizedFilePath) ||
+    normalizedFilePath.startsWith('./') ||
+    normalizedFilePath.startsWith('../') ||
+    normalizedFilePath.startsWith('~/') ||
+    normalizedFilePath.includes('/') ||
+    FILE_EXTENSION_PATTERN.test(normalizedFilePath)
+  );
 }
 
 /**
@@ -120,6 +167,9 @@ export function parseWorkspaceFileReference(
       return trimmedHref;
     }
   })();
+  if (isBrowserLink(decodedHref)) {
+    return null;
+  }
 
   const { filePath: rawFilePath, line, column } = stripLineSuffix(decodedHref);
   const normalizedProjectRoot = normalizePosixPath(projectRoot.replace(/\\/g, '/'));
@@ -129,7 +179,7 @@ export function parseWorkspaceFileReference(
     return null;
   }
 
-  if (normalizedFilePath.startsWith('/')) {
+  if (isAbsoluteWorkspacePath(normalizedFilePath)) {
     if (
       normalizedFilePath !== normalizedProjectRoot &&
       !normalizedFilePath.startsWith(`${normalizedProjectRoot}/`)
