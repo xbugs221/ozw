@@ -108,7 +108,36 @@ function stripUserUploadNoteForDisplay(content: string): string {
   return content.slice(0, markerIndex).trimEnd();
 }
 
-const PROVIDER_INTERNAL_USER_BLOCK_TAGS = ['environment_context', 'system-reminder'];
+const PROVIDER_INTERNAL_USER_BLOCK_TAGS = ['environment_context', 'system-reminder', 'codex_internal_context'];
+const PROVIDER_AGENTS_INSTRUCTIONS_PATTERN = /^# AGENTS\.md instructions\s*\n+\s*<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>\s*/i;
+
+/**
+ * Remove provider bootstrap instructions from persisted user transcript text.
+ */
+function cleanProviderUserContent(content: string): string {
+  /**
+   * docstring: Provider history may replay AGENTS.md, environment, or goal
+   * control blocks as role=user rows; the browser shows only authored text.
+   */
+  let visible = content.trim();
+  if (!visible) {
+    return '';
+  }
+
+  let changed = true;
+  while (changed) {
+    const before = visible;
+    visible = visible.replace(PROVIDER_AGENTS_INSTRUCTIONS_PATTERN, '').trim();
+    PROVIDER_INTERNAL_USER_BLOCK_TAGS.forEach((tagName) => {
+      const leadingBlock = new RegExp(`^<${tagName}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${tagName}>\\s*`, 'i');
+      const trailingBlock = new RegExp(`\\s*<${tagName}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${tagName}>\\s*$`, 'i');
+      visible = visible.replace(leadingBlock, '').replace(trailingBlock, '').trim();
+    });
+    changed = visible !== before;
+  }
+
+  return visible;
+}
 
 /**
  * Detect provider-facing user rows that must stay out of the visible transcript.
@@ -668,7 +697,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
         content = decodeHtmlEntities(String(message.message.content));
       }
 
-      const displayContent = stripUserUploadNoteForDisplay(content);
+      const displayContent = cleanProviderUserContent(stripUserUploadNoteForDisplay(content));
       const parsedAttachments = parseUserUploadNoteAttachments(content);
       const shouldSkip =
         (!displayContent && parsedAttachments.length === 0) ||

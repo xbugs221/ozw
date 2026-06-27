@@ -762,6 +762,50 @@ test('persisted upload note restores user attachment marker after refresh', () =
   assert.equal(converted[0].attachments?.[0]?.absolutePath, '/home/zzl/ozw-uploads/u1/b1/docs/upload.txt');
 });
 
+test('convertSessionMessages hides provider bootstrap content before first user prompt', () => {
+  /**
+   * Business case: Codex can replay AGENTS.md and environment bootstrap rows as
+   * user content. The chat surface must show only the text the user authored.
+   */
+  const agentsBootstrap = [
+    '# AGENTS.md instructions',
+    '',
+    '<INSTRUCTIONS>',
+    '# KISS',
+    '- 使用rtk前缀执行shell命令',
+    '</INSTRUCTIONS>',
+  ].join('\n');
+  const environmentContext = [
+    '<environment_context>',
+    '<cwd>/home/zzl/projects/ozw</cwd>',
+    '<timezone>Asia/Makassar</timezone>',
+    '</environment_context>',
+  ].join('\n');
+  const userPrompt = '修复前端两个问题';
+
+  const converted = convertSessionMessages([
+    {
+      type: 'message',
+      provider: 'codex',
+      timestamp: '2026-06-22T12:30:00.000Z',
+      messageKey: 'codex-bootstrap-user-row',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: agentsBootstrap },
+          { type: 'text', text: environmentContext },
+          { type: 'text', text: userPrompt },
+        ],
+      },
+    },
+  ]);
+
+  assert.equal(converted.length, 1);
+  assert.equal(converted[0].content, userPrompt);
+  assert.equal(visibleTexts(converted).join('\n').includes('AGENTS.md instructions'), false);
+  assert.equal(visibleTexts(converted).join('\n').includes('<environment_context>'), false);
+});
+
 test('accepted Pi live turn renders before JSONL history catches up', () => {
   /**
    * Business case: Pi streams assistant text before its persisted session file

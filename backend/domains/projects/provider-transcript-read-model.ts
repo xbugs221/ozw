@@ -21,6 +21,10 @@ type JsonlReadResult = {
   totalLines: number;
 };
 
+type CodexRecordContext = {
+  goalCompletionTurnIds: Set<string>;
+};
+
 const jsonlCursorCache = new Map<string, JsonlCursor>();
 
 /**
@@ -77,8 +81,8 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
       cwd = record.cwd;
     }
     if (record.type === 'event_msg' && record.payload?.type === 'user_message') {
-      const content = stringifyMessageContent(record.payload.message);
-      if (!isCodexInternalUserContent(content)) {
+      const content = cleanCodexUserContent(stringifyMessageContent(record.payload.message));
+      if (content && !isCodexInternalUserContent(content)) {
         messageCount += 1;
         firstUserMessage ||= content;
       }
@@ -180,8 +184,9 @@ export async function getCodexSessionMessages(
   const messages: LooseRecord[] = [];
   const userEchoKeys = new Set<string>();
   const transcript = await readJsonlRecordsForMessages(filePath, afterLine);
+  const codexContext = buildCodexRecordContext(transcript.records);
   for (const { record, lineNumber } of transcript.records) {
-    for (const message of codexRecordToMessages(record, String(sessionId), lineNumber)) {
+    for (const message of codexRecordToMessages(record, String(sessionId), lineNumber, codexContext)) {
       if (message.type === 'user') {
         const content = String(message.message?.content || '').trim();
         if (content && userEchoKeys.has(content)) {
@@ -465,6 +470,117 @@ function readOptionalNumber(value: unknown): number | undefined {
 }
 
 /**
+ * Parse JSON-like fields without throwing while reading historical transcripts.
+ */
+function parseLooseRecord(value: unknown): LooseRecord | null {
+  /**
+   * docstring: Codex function arguments and outputs can arrive as objects or
+   * JSON strings, so goal detection needs one tolerant parser.
+   */
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as LooseRecord;
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as LooseRecord
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the Codex turn id from records that carry one in different locations.
+ */
+function readCodexRecordTurnId(record: LooseRecord): string {
+  /**
+   * docstring: Goal completion is tied to the provider turn, not to a tool
+   * call id, so both task_complete and function_call metadata must normalize.
+   */
+  return String(record.payload?.turn_id || record.payload?.turnId || record.payload?.metadata?.turn_id || '');
+}
+
+/**
+ * Return true when a Codex tool call explicitly marks an active goal complete.
+ */
+function isCodexGoalCompletionCall(record: LooseRecord): boolean {
+  /**
+   * docstring: Normal Codex turns also emit task_complete; only update_goal
+   * with a complete status means the user-created goal has completed.
+   */
+  if (
+    record.type !== 'response_item'
+    || (record.payload?.type !== 'function_call' && record.payload?.type !== 'custom_tool_call')
+  ) {
+    return false;
+  }
+
+  const toolName = String(record.payload?.name || record.payload?.toolName || '').split('.').pop();
+  if (toolName !== 'update_goal') {
+    return false;
+  }
+
+  const args = parseLooseRecord(record.payload?.arguments ?? record.payload?.input) || {};
+  const status = String(args.status || '').toLowerCase();
+  return status === 'complete' || status === 'completed';
+}
+
+/**
+ * Build transcript-level context needed to classify Codex lifecycle events.
+ */
+function buildCodexRecordContext(records: JsonlReadResult['records']): CodexRecordContext {
+  /**
+   * docstring: Read all returned records once so task_complete mapping can
+   * distinguish ordinary turn completion from real /goal completion.
+   */
+  const goalCompletionTurnIds = new Set<string>();
+  const goalUpdateCallTurns = new Map<string, string>();
+
+  records.forEach(({ record }) => {
+    if (isCodexGoalCompletionCall(record)) {
+      const turnId = readCodexRecordTurnId(record);
+      const callId = String(record.payload?.call_id || record.payload?.callId || record.payload?.id || '');
+      if (turnId) {
+        goalCompletionTurnIds.add(turnId);
+      }
+      if (callId && turnId) {
+        goalUpdateCallTurns.set(callId, turnId);
+      }
+      return;
+    }
+
+    if (record.type !== 'response_item' || record.payload?.type !== 'function_call_output') {
+      return;
+    }
+    const callId = String(record.payload.call_id || record.payload.callId || record.payload.id || '');
+    const turnId = goalUpdateCallTurns.get(callId);
+    const output = parseLooseRecord(record.payload.output ?? record.payload.content ?? record.payload.result);
+    const status = String(output?.goal?.status || output?.status || '').toLowerCase();
+    if (turnId && (status === 'complete' || status === 'completed')) {
+      goalCompletionTurnIds.add(turnId);
+    }
+  });
+
+  return { goalCompletionTurnIds };
+}
+
+/**
+ * Decide whether a Codex task_complete record should become a goal banner.
+ */
+function isCodexGoalCompletionTask(record: LooseRecord, context: CodexRecordContext): boolean {
+  /**
+   * docstring: The UI milestone belongs only to completed /goal runs, never to
+   * the provider's routine task_complete marker for every assistant turn.
+   */
+  const turnId = readCodexRecordTurnId(record);
+  return Boolean(turnId && context.goalCompletionTurnIds.has(turnId));
+}
+
+/**
  * Build a short, visible summary from the final assistant answer that preceded
  * Codex's task_complete event.
  */
@@ -552,19 +668,24 @@ function codexFunctionPayloadToToolUse(
 /**
  * Convert one Codex JSONL record to normalized message rows.
  */
-function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumber: number): LooseRecord[] {
+function codexRecordToMessages(
+  record: LooseRecord,
+  sessionId: string,
+  lineNumber: number,
+  context: CodexRecordContext,
+): LooseRecord[] {
   if (record.type === 'event_msg' && record.payload?.type === 'user_message') {
-    const content = stringifyMessageContent(record.payload.message);
-    if (isCodexInternalUserContent(content)) {
+    const content = cleanCodexUserContent(stringifyMessageContent(record.payload.message));
+    if (!content || isCodexInternalUserContent(content)) {
       return [];
     }
-    return content ? [{
+    return [{
       type: 'user',
       provider: 'codex',
       timestamp: record.timestamp,
       messageKey: `codex:${sessionId}:line:${lineNumber}:msg:0`,
       message: { role: 'user', content },
-    }] : [];
+    }];
   }
   if (record.type === 'event_msg' && record.payload?.type === 'agent_message') {
     const content = stringifyMessageContent(record.payload.message);
@@ -577,6 +698,9 @@ function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumbe
     }] : [];
   }
   if (record.type === 'event_msg' && record.payload?.type === 'task_complete') {
+    if (!isCodexGoalCompletionTask(record, context)) {
+      return [];
+    }
     const durationMs = readOptionalNumber(record.payload.duration_ms);
     const timeToFirstTokenMs = readOptionalNumber(record.payload.time_to_first_token_ms);
     return [{
@@ -604,17 +728,17 @@ function codexRecordToMessages(record: LooseRecord, sessionId: string, lineNumbe
     }] : [];
   }
   if (record.type === 'response_item' && record.payload?.type === 'message' && record.payload?.role === 'user') {
-    const content = stringifyMessageContent(record.payload.content);
-    if (isCodexInternalUserContent(content)) {
+    const content = cleanCodexUserContent(stringifyMessageContent(record.payload.content));
+    if (!content || isCodexInternalUserContent(content)) {
       return [];
     }
-    return content ? [{
+    return [{
       type: 'user',
       provider: 'codex',
       timestamp: record.timestamp,
       messageKey: `codex:${sessionId}:line:${lineNumber}:msg:0`,
       message: { role: 'user', content },
-    }] : [];
+    }];
   }
   if (record.type === 'response_item' && record.payload?.type === 'update' && record.payload?.update?.type === 'functionCall') {
     return [codexFunctionPayloadToToolUse(record.payload.update, sessionId, lineNumber, record.timestamp)];
@@ -883,7 +1007,36 @@ function stringifyMessageContent(content: unknown): string {
   return '';
 }
 
-const CODEX_INTERNAL_USER_BLOCK_TAGS = ['environment_context', 'system-reminder'];
+const CODEX_INTERNAL_USER_BLOCK_TAGS = ['environment_context', 'system-reminder', 'codex_internal_context'];
+const CODEX_AGENTS_INSTRUCTIONS_PATTERN = /^# AGENTS\.md instructions\s*\n+\s*<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>\s*/i;
+
+/**
+ * Remove Codex bootstrap instructions from role=user transcript text.
+ */
+function cleanCodexUserContent(content: string): string {
+  /**
+   * docstring: First-turn Codex history can persist AGENTS.md and environment
+   * bootstrap content as role=user rows, but only user-authored text is visible.
+   */
+  let visible = content.trim();
+  if (!visible) {
+    return '';
+  }
+
+  let changed = true;
+  while (changed) {
+    const before = visible;
+    visible = visible.replace(CODEX_AGENTS_INSTRUCTIONS_PATTERN, '').trim();
+    CODEX_INTERNAL_USER_BLOCK_TAGS.forEach((tagName) => {
+      const leadingBlock = new RegExp(`^<${tagName}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${tagName}>\\s*`, 'i');
+      const trailingBlock = new RegExp(`\\s*<${tagName}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${tagName}>\\s*$`, 'i');
+      visible = visible.replace(leadingBlock, '').replace(trailingBlock, '').trim();
+    });
+    changed = visible !== before;
+  }
+
+  return visible;
+}
 
 /**
  * Detect provider-facing Codex user blocks that should not become chat bubbles.

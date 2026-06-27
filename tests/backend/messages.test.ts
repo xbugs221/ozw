@@ -138,64 +138,93 @@ async function createCodexPhaseFixture(homeDir, sessionId) {
  * Write a Codex session file with the native task_complete event emitted when
  * a long-running agent goal has finished.
  */
-async function createCodexTaskCompleteFixture(homeDir, sessionId) {
+async function createCodexTaskCompleteFixture(homeDir, sessionId, options = {}) {
   const sessionsDir = path.join(homeDir, '.codex', 'sessions', '2026', '06', '22');
   const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+  const { includeGoalUpdate = true } = options;
+  const turnId = '019eef5c-245b-7802-9696-1a51a6956a89';
+  const finalAnswer = [
+    '**需求/问题**',
+    '',
+    '已创建一个覆盖四类需求的 oz 提案。',
+    '',
+    '**成果**',
+    '',
+    '契约测试已跑。',
+  ].join('\n');
 
   await fs.mkdir(sessionsDir, { recursive: true });
-  await fs.writeFile(
-    sessionFile,
-    [
-      JSON.stringify({
-        type: 'session_meta',
-        timestamp: '2026-06-22T12:44:13.000Z',
+  const lines = [
+    {
+      type: 'session_meta',
+      timestamp: '2026-06-22T12:44:13.000Z',
+      payload: {
+        id: sessionId,
+        cwd: '/tmp/ozw-goal-complete-project',
+        model: 'gpt-5',
+      },
+    },
+    {
+      type: 'response_item',
+      timestamp: '2026-06-22T12:52:31.802Z',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{
+          type: 'output_text',
+          text: finalAnswer,
+        }],
+      },
+    },
+  ];
+
+  if (includeGoalUpdate) {
+    lines.push(
+      {
+        type: 'response_item',
+        timestamp: '2026-06-22T12:52:31.801Z',
         payload: {
-          id: sessionId,
-          cwd: '/tmp/ozw-goal-complete-project',
-          model: 'gpt-5',
+          type: 'function_call',
+          name: 'update_goal',
+          call_id: 'call-goal-complete',
+          arguments: JSON.stringify({ status: 'complete' }),
+          metadata: { turn_id: turnId },
         },
-      }),
-      JSON.stringify({
+      },
+      {
         type: 'response_item',
         timestamp: '2026-06-22T12:52:31.802Z',
         payload: {
-          type: 'message',
-          role: 'assistant',
-          content: [{
-            type: 'output_text',
-            text: [
-              '**需求/问题**',
-              '',
-              '已创建一个覆盖四类需求的 oz 提案。',
-              '',
-              '**成果**',
-              '',
-              '契约测试已跑。',
-            ].join('\n'),
-          }],
+          type: 'function_call_output',
+          call_id: 'call-goal-complete',
+          output: JSON.stringify({
+            goal: {
+              threadId: sessionId,
+              objective: '完成一个真实 /goal 任务',
+              status: 'complete',
+            },
+          }),
         },
-      }),
-      JSON.stringify({
-        type: 'event_msg',
-        timestamp: '2026-06-22T12:52:31.803Z',
-        payload: {
-          type: 'task_complete',
-          turn_id: '019eef5c-245b-7802-9696-1a51a6956a89',
-          last_agent_message: [
-            '**需求/问题**',
-            '',
-            '已创建一个覆盖四类需求的 oz 提案。',
-            '',
-            '**成果**',
-            '',
-            '契约测试已跑。',
-          ].join('\n'),
-          completed_at: 1782132751,
-          duration_ms: 498014,
-          time_to_first_token_ms: 3902,
-        },
-      }),
-    ].join('\n') + '\n',
+      },
+    );
+  }
+
+  lines.push({
+    type: 'event_msg',
+    timestamp: '2026-06-22T12:52:31.803Z',
+    payload: {
+      type: 'task_complete',
+      turn_id: turnId,
+      last_agent_message: finalAnswer,
+      completed_at: 1782132751,
+      duration_ms: 498014,
+      time_to_first_token_ms: 3902,
+    },
+  });
+
+  await fs.writeFile(
+    sessionFile,
+    `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`,
     'utf8',
   );
 }
@@ -322,6 +351,19 @@ test('getCodexSessionMessages maps Codex task_complete events to goal completion
   });
 });
 
+test('getCodexSessionMessages does not map ordinary Codex task_complete events to goal completion notifications', async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const sessionId = 'codex-ordinary-task-complete-session';
+    await createCodexTaskCompleteFixture(tempHome, sessionId, { includeGoalUpdate: false });
+
+    const result = await getCodexSessionMessages(sessionId, null, 0, null);
+
+    assert.equal(result.messages.some((message) => message.taskKind === 'goal_complete'), false);
+    assert.equal(result.messages.some((message) => message.isTaskNotification), false);
+    assert.equal(result.messages.filter((message) => message.type === 'assistant').length, 1);
+  });
+});
+
 test('getCodexSessionMessages collapses duplicated Codex user echo records', async () => {
   await withTemporaryHome(async (tempHome) => {
     const sessionId = 'codex-duplicate-user-echo';
@@ -432,6 +474,78 @@ test('getCodexSessionMessages hides Codex environment context user rows', async 
     assert.equal(userMessages.length, 1);
     assert.equal(userMessages[0].message.content, prompt);
     assert.equal(JSON.stringify(result.messages).includes('<environment_context>'), false);
+  });
+});
+
+test('getCodexSessionMessages hides Codex AGENTS bootstrap before the first user request', async () => {
+  await withTemporaryHome(async (tempHome) => {
+    const sessionId = 'codex-agents-bootstrap-hidden';
+    const sessionsDir = path.join(tempHome, '.codex', 'sessions', '2026', '06', '22');
+    const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+    const prompt = '这是用户真正发送的第一条需求';
+    const agentsBootstrap = [
+      '# AGENTS.md instructions',
+      '',
+      '<INSTRUCTIONS>',
+      '# KISS',
+      '',
+      '- 回答问题但没修改代码时，按"问、答"格式写；',
+      '- 使用rtk前缀执行shell命令',
+      '</INSTRUCTIONS>',
+    ].join('\n');
+    const environmentContext = [
+      '<environment_context>',
+      '<cwd>/home/zzl/projects/ozw</cwd>',
+      '<timezone>Asia/Makassar</timezone>',
+      '</environment_context>',
+    ].join('\n');
+
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-06-22T03:20:00.000Z',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [
+              { type: 'input_text', text: agentsBootstrap },
+              { type: 'input_text', text: environmentContext },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-06-22T03:20:01.000Z',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: prompt }],
+          },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-06-22T03:20:01.001Z',
+          payload: {
+            type: 'user_message',
+            message: prompt,
+          },
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    const result = await getCodexSessionMessages(sessionId, null, 0, null);
+    const userMessages = result.messages.filter((message) => message.type === 'user');
+    const serialized = JSON.stringify(result.messages);
+
+    assert.equal(userMessages.length, 1);
+    assert.equal(userMessages[0].message.content, prompt);
+    assert.equal(serialized.includes('AGENTS.md instructions'), false);
+    assert.equal(serialized.includes('<INSTRUCTIONS>'), false);
+    assert.equal(serialized.includes('<environment_context>'), false);
   });
 });
 

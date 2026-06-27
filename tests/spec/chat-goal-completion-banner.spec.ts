@@ -30,6 +30,7 @@ async function writeGoalCompletionSession(sessionId) {
     '22',
   );
   const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
+  const turnId = '019eef5c-245b-7802-9696-1a51a6956a89';
   const finalAnswer = [
     '**需求/问题**',
     '',
@@ -71,11 +72,37 @@ async function writeGoalCompletionSession(sessionId) {
         },
       }),
       JSON.stringify({
-        type: 'event_msg',
+        type: 'response_item',
         timestamp: '2026-06-22T12:52:31.803Z',
         payload: {
+          type: 'function_call',
+          name: 'update_goal',
+          call_id: 'call-goal-complete',
+          arguments: JSON.stringify({ status: 'complete' }),
+          metadata: { turn_id: turnId },
+        },
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-06-22T12:52:31.804Z',
+        payload: {
+          type: 'function_call_output',
+          call_id: 'call-goal-complete',
+          output: JSON.stringify({
+            goal: {
+              threadId: sessionId,
+              objective: '创建一个覆盖四类需求的 oz 提案。',
+              status: 'complete',
+            },
+          }),
+        },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        timestamp: '2026-06-22T12:52:31.805Z',
+        payload: {
           type: 'task_complete',
-          turn_id: '019eef5c-245b-7802-9696-1a51a6956a89',
+          turn_id: turnId,
           last_agent_message: finalAnswer,
           completed_at: 1782132751,
           duration_ms: 498014,
