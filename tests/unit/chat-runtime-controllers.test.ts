@@ -13,6 +13,14 @@ it('chatSessionLifecycleController plans pagination and visible windows', () => 
   expect(buildSessionLoadPlan({ loadMore: true, offset: 20, pageSize: 10 })).toEqual({ loadMore: true, offset: 20, limit: 10, hasKnownTotal: false });
   expect(applySessionLoadResult(['old'], { messages: ['new'], total: 2, nextRawLineOffset: 2 }, true).messages).toEqual(['old', 'new']);
   expect(buildVisibleMessageWindow(['a', 'b', 'c'], 2)).toEqual(['b', 'c']);
+  expect(buildVisibleMessageWindow(['a', 'b', 'c', 'd', 'e'], 3, 'message-position-3')).toEqual(['b', 'c', 'd']);
+  expect(buildVisibleMessageWindow([
+    { type: 'assistant', content: 'old 1', timestamp: '2026-06-27T00:00:00.000Z', messageKey: 'm1' },
+    { type: 'assistant', content: 'old 2', timestamp: '2026-06-27T00:00:01.000Z', messageKey: 'm2' },
+    { type: 'assistant', content: 'old 3', timestamp: '2026-06-27T00:00:02.000Z', messageKey: 'm3' },
+    { type: 'assistant', content: 'new 4', timestamp: '2026-06-27T00:00:03.000Z', messageKey: 'm4' },
+    { type: 'assistant', content: 'new 5', timestamp: '2026-06-27T00:00:04.000Z', messageKey: 'm5' },
+  ], 2, 'message-assistant-m3').map((message) => message.content)).toEqual(['old 2', 'old 3']);
 });
 
 it('composerSubmitRuntime blocks empty sends and builds pending messages', () => {
