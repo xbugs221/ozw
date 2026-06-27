@@ -70,7 +70,7 @@ test('markdown preview renders valid mermaid fenced blocks as diagrams', async (
   );
 
   await expect(preview.getByText('Architecture', { exact: true })).toBeVisible();
-  await expect(preview.locator('svg')).toBeVisible();
+  await expect(preview.locator('.markdown-mermaid-diagram svg')).toBeVisible();
   await expect(preview.getByText('Start', { exact: true })).toBeVisible();
   await expect(preview.getByText('Done', { exact: true })).toBeVisible();
 });
@@ -93,6 +93,37 @@ test('markdown preview keeps non-mermaid fenced blocks as ordinary code content'
   await expect(preview.getByText('js', { exact: true })).toBeVisible();
   await expect(preview.getByText('export const format = "plain-code";', { exact: true })).toBeVisible();
   await expect(preview.locator('svg')).toHaveCount(0);
+});
+
+test('markdown preview parses frontmatter as metadata before rendering body', async ({ page }) => {
+  /** Scenario: Rendering YAML frontmatter separately from markdown body */
+  const preview = await openMarkdownPreview(
+    page,
+    'docs/frontmatter.md',
+    [
+      '---',
+      'title: Frontmatter note',
+      'tags:',
+      '  - docs',
+      '  - preview',
+      'draft: false',
+      '---',
+      '# Body Heading',
+      '',
+      'Body paragraph should render normally.',
+    ].join('\n'),
+  );
+
+  const metadata = preview.getByTestId('markdown-frontmatter');
+  await expect(metadata).toBeVisible();
+  await expect(metadata.getByText('title', { exact: true })).toBeVisible();
+  await expect(metadata.getByText('Frontmatter note', { exact: true })).toBeVisible();
+  await expect(metadata.getByText('tags', { exact: true })).toBeVisible();
+  await expect(metadata.getByText('docs, preview', { exact: true })).toBeVisible();
+  await expect(metadata.getByText('draft', { exact: true })).toBeVisible();
+  await expect(preview.getByRole('heading', { name: 'Body Heading' })).toBeVisible();
+  await expect(preview.getByText('Body paragraph should render normally.', { exact: true })).toBeVisible();
+  await expect(preview.locator('hr')).toHaveCount(0);
 });
 
 test('markdown preview shows a visible fallback when a mermaid block is invalid', async ({ page }) => {

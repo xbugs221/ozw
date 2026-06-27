@@ -4,6 +4,8 @@ import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
+import { parseMarkdownFrontmatter } from '../../../../../utils/markdownFrontmatter';
+import { MarkdownFrontmatterBlock } from '../../../../markdown/MarkdownFrontmatterBlock';
 import MarkdownCodeBlock from './MarkdownCodeBlock';
 
 type MarkdownPreviewProps = {
@@ -12,6 +14,7 @@ type MarkdownPreviewProps = {
 };
 
 export default function MarkdownPreview({ content, isDarkMode }: MarkdownPreviewProps) {
+  const parsedFrontmatter = useMemo(() => parseMarkdownFrontmatter(content), [content]);
   const remarkPlugins = useMemo(() => [remarkGfm, remarkMath], []);
   const rehypePlugins = useMemo(() => [rehypeKatex], []);
   const markdownPreviewComponents = useMemo<Components>(
@@ -44,12 +47,15 @@ export default function MarkdownPreview({ content, isDarkMode }: MarkdownPreview
   );
 
   return (
-    <ReactMarkdown
-      remarkPlugins={remarkPlugins}
-      rehypePlugins={rehypePlugins}
-      components={markdownPreviewComponents}
-    >
-      {content}
-    </ReactMarkdown>
+    <>
+      <MarkdownFrontmatterBlock entries={parsedFrontmatter.entries} />
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={markdownPreviewComponents}
+      >
+        {parsedFrontmatter.content}
+      </ReactMarkdown>
+    </>
   );
 }

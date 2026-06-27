@@ -15,7 +15,9 @@ import { copyTextToClipboard } from '../../../../utils/clipboard';
 import type { Project } from '../../../../types/app';
 import { isLikelyFileReferenceHref, parseWorkspaceFileReference } from '../../utils/workspaceLinks';
 import { api } from '../../../../utils/api';
+import { parseMarkdownFrontmatter } from '../../../../utils/markdownFrontmatter';
 import type { ProjectFileNode } from '../../utils/fileMentionTree';
+import { MarkdownFrontmatterBlock } from '../../../markdown/MarkdownFrontmatterBlock';
 import MarkdownMermaidBlock from '../../../code-editor/view/subcomponents/markdown/MarkdownMermaidBlock';
 
 type MarkdownProps = {
@@ -276,7 +278,8 @@ function createMarkdownComponents(
 }
 
 export function Markdown({ children, className, selectedProject, onFileOpen }: MarkdownProps) {
-  const content = normalizeUnopenableMarkdownLinks(normalizeChatMarkdownFences(String(children ?? '')));
+  const parsedFrontmatter = useMemo(() => parseMarkdownFrontmatter(String(children ?? '')), [children]);
+  const content = normalizeUnopenableMarkdownLinks(normalizeChatMarkdownFences(parsedFrontmatter.content));
   const remarkPlugins = useMemo(() => [remarkGfm, remarkMath], []);
   const rehypePlugins = useMemo(() => [rehypeKatex], []);
   const projectKey = `${selectedProject?.name || ''}:${selectedProject?.fullPath || selectedProject?.path || ''}`;
@@ -331,6 +334,7 @@ export function Markdown({ children, className, selectedProject, onFileOpen }: M
 
   return (
     <div className={className}>
+      <MarkdownFrontmatterBlock entries={parsedFrontmatter.entries} />
       <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={markdownComponents as any}>
         {content}
       </ReactMarkdown>
