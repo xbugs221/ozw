@@ -66,6 +66,7 @@ export interface UseChatComposerStateArgs {
   piUnavailableMessage?: string;
   codexModelSwitchSessionId: string | null;
   codexReasoningEffort: string;
+  codexServiceTier: string;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
   chatMessages: ChatMessage[];
@@ -236,6 +237,7 @@ export function useChatComposerState({
   piUnavailableMessage = 'Pi is unavailable. Configure Pi authentication before sending.',
   codexModelSwitchSessionId,
   codexReasoningEffort,
+  codexServiceTier,
   canAbortSession,
   tokenBudget,
   chatMessages,
@@ -381,6 +383,7 @@ export function useChatComposerState({
           provider,
           model: provider === 'codex' ? codexModel : undefined,
           reasoningEffort: provider === 'codex' ? codexReasoningEffort : undefined,
+          serviceTier: provider === 'codex' ? codexServiceTier : undefined,
           tokenUsage: tokenBudget,
         };
 
@@ -428,6 +431,7 @@ export function useChatComposerState({
     [
       codexModel,
       codexReasoningEffort,
+      codexServiceTier,
       currentSessionId,
       handleCustomCommand,
       input,
@@ -831,6 +835,7 @@ export function useChatComposerState({
             resume: Boolean(effectiveSessionId),
             model: codexModel,
             reasoningEffort: codexReasoningEffort,
+            serviceTier: codexServiceTier || null,
             permissionMode,
             attachments: uploadedAttachments,
             runningBehavior,
@@ -901,6 +906,7 @@ export function useChatComposerState({
       piUnavailableMessage,
       codexModelSwitchSessionId,
       codexReasoningEffort,
+      codexServiceTier,
       chatMessages,
       currentSessionId,
       executeCommand,

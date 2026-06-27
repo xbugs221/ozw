@@ -17,11 +17,19 @@ type CodexReasoningOption = {
   description?: string;
 };
 
+type CodexServiceTierOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
 type CodexModelOption = {
   value: string;
   label: string;
   defaultReasoningEffort: string;
   reasoningOptions: CodexReasoningOption[];
+  serviceTiers: CodexServiceTierOption[];
+  defaultServiceTier?: string | null;
 };
 
 type PiThinkingOption = {
@@ -87,6 +95,11 @@ function getStoredCodexReasoningEffort(): string {
   return localStorage.getItem('codex-reasoning-effort') || CODEX_REASONING_EFFORTS.DEFAULT;
 }
 
+function getStoredCodexServiceTier(): string {
+  /** Restore the user's Fast-mode preference for Codex models that support it. */
+  return localStorage.getItem('codex-service-tier') || '';
+}
+
 function getStoredPiModel(modelOptions: PiModelOption[]): string {
   const storedModel = localStorage.getItem('pi-model');
   if (modelOptions.length === 0) {
@@ -114,7 +127,16 @@ function getCodexModelOption(modelOptions: CodexModelOption[], model: string): C
     label: model,
     defaultReasoningEffort: CODEX_REASONING_EFFORTS.DEFAULT,
     reasoningOptions: DEFAULT_CODEX_REASONING_OPTIONS,
+    serviceTiers: [],
+    defaultServiceTier: null,
   };
+}
+
+function getCodexFastServiceTier(modelOption: CodexModelOption): string {
+  /** Match the catalog-driven Fast tier id used by Codex's /fast command. */
+  return modelOption.serviceTiers.find((tier) =>
+    tier.id.toLowerCase() === 'fast' || tier.label.toLowerCase() === 'fast'
+  )?.id || '';
 }
 
 function normalizeProvider(value: unknown): SessionProvider {
@@ -158,6 +180,9 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   const [codexReasoningEffort, setCodexReasoningEffortState] = useState<string>(() => {
     return getStoredCodexReasoningEffort();
   });
+  const [codexServiceTier, setCodexServiceTierState] = useState<string>(() => {
+    return getStoredCodexServiceTier();
+  });
   const [piModelOptions, setPiModelOptions] = useState<PiModelOption[]>(FALLBACK_PI_MODEL_OPTIONS);
   const [piModel, setPiModelState] = useState<string>(() => getStoredPiModel(FALLBACK_PI_MODEL_OPTIONS));
   const [piThinkingLevel, setPiThinkingLevelState] = useState<string>(() => getStoredPiThinkingLevel());
@@ -183,6 +208,15 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   const setCodexReasoningEffort = useCallback((nextEffort: string) => {
     setCodexReasoningEffortState(nextEffort);
     localStorage.setItem('codex-reasoning-effort', nextEffort);
+  }, []);
+
+  const setCodexServiceTier = useCallback((nextServiceTier: string) => {
+    setCodexServiceTierState(nextServiceTier);
+    if (nextServiceTier) {
+      localStorage.setItem('codex-service-tier', nextServiceTier);
+      return;
+    }
+    localStorage.removeItem('codex-service-tier');
   }, []);
 
   const setPiModel = useCallback((nextModel: string) => {
@@ -277,6 +311,8 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
           reasoningOptions: Array.isArray(model.reasoningOptions) && model.reasoningOptions.length > 0
             ? model.reasoningOptions
             : CODEX_REASONING_EFFORTS.OPTIONS,
+          serviceTiers: Array.isArray(model.serviceTiers) ? model.serviceTiers : [],
+          defaultServiceTier: typeof model.defaultServiceTier === 'string' ? model.defaultServiceTier : null,
         }));
 
         if (!isCancelled) {
@@ -340,6 +376,22 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   }, [codexModel, codexModelOptions, codexReasoningEffort, setCodexReasoningEffort]);
 
   const codexReasoningOptions = getCodexModelOption(codexModelOptions, codexModel).reasoningOptions;
+  const codexModelOption = getCodexModelOption(codexModelOptions, codexModel);
+  const codexServiceTierOptions = codexModelOption.serviceTiers;
+  const codexFastServiceTier = getCodexFastServiceTier(codexModelOption);
+
+  useEffect(() => {
+    const activeModel = getCodexModelOption(codexModelOptions, codexModel);
+    const fastTier = getCodexFastServiceTier(activeModel);
+    if (!codexServiceTier) {
+      return;
+    }
+    if (codexServiceTier === fastTier) {
+      return;
+    }
+    setCodexServiceTier('');
+  }, [codexModel, codexModelOptions, codexServiceTier, setCodexServiceTier]);
+
   const piThinkingOptions = getPiModelOption(piModelOptions, piModel).thinkingOptions;
 
   useEffect(() => {
@@ -472,6 +524,10 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     codexReasoningEffort,
     setCodexReasoningEffort,
     codexReasoningOptions,
+    codexServiceTier,
+    setCodexServiceTier,
+    codexServiceTierOptions,
+    codexFastServiceTier,
     piModel,
     setPiModel,
     piModelOptions,

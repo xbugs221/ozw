@@ -358,6 +358,48 @@ test('cold start with placeholder cN providerSessionId starts new thread', async
   );
 });
 
+test('app-server runtime forwards Codex Fast service tier to thread and turn start', async () => {
+  const {
+    sendCodexAppServerMessage,
+    clearCodexAppServerSessionsForTest,
+  } = await import('../../backend/codex-app-server-runtime.ts');
+
+  clearCodexAppServerSessionsForTest();
+
+  const requests = [];
+  const transport = {
+    async request(method, params) {
+      requests.push({ method, params });
+      if (method === 'thread/start') {
+        return { thread: { id: 'thread_fast' } };
+      }
+      if (method === 'turn/start') {
+        return { turn: { id: 'turn_fast' } };
+      }
+      return {};
+    },
+    onNotification() {},
+    close() {},
+  };
+
+  await sendCodexAppServerMessage(
+    {
+      ozwSessionId: 'c1',
+      projectPath: '/tmp',
+      text: 'hello fast',
+      model: 'gpt-5.5',
+      serviceTier: 'priority',
+      writer: { send: () => {} },
+    },
+    transport,
+  );
+
+  const threadStart = requests.find((request) => request.method === 'thread/start');
+  const turnStart = requests.find((request) => request.method === 'turn/start');
+  assert.equal(threadStart.params.serviceTier, 'priority');
+  assert.equal(turnStart.params.serviceTier, 'priority');
+});
+
 test('abort sends turn/interrupt with turnId and fails if interrupt fails', async () => {
   const {
     abortCodexAppServerSession,
@@ -583,6 +625,11 @@ test('chat command runtime Codex branch does not unconditionally broadcast messa
     codexBranch,
     /const result = await sendNativeMessage/,
     'must await sendNativeMessage result in codex branch',
+  );
+  assert.match(
+    codexBranch,
+    /serviceTier:\s*codexOptions\?\.serviceTier\s*\|\|\s*['"]['"]/,
+    'Codex branch must forward the selected service tier to the native runtime',
   );
   assert.doesNotMatch(
     codexBranch,

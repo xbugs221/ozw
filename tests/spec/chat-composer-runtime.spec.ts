@@ -118,6 +118,7 @@ async function installChatRuntimeFixture(page) {
     window.localStorage.setItem('userLanguage', 'zh-CN');
     window.localStorage.removeItem('uiPreferences');
     window.localStorage.removeItem('sendByCtrlEnter');
+    window.localStorage.removeItem('codex-service-tier');
     const activeTurnStartedAtKey = '__chatRuntime:c73:turnStartedAt';
     const activeCommandSessionsKey = '__chatRuntime:activeCommandSessions';
 
@@ -466,6 +467,50 @@ test('chat composer keeps bare Enter as newline and submits only with Ctrl or Me
   await expect(textarea).toHaveValue('');
 
   await writeBrowserState(page, 'shortcut-ws-messages.json');
+});
+
+test('Codex Fast toggle is catalog-driven and sends the fast service tier', async ({ page }) => {
+  /** Business rule: the UI only exposes Fast when Codex advertises the service tier. */
+  await page.route('**/api/codex/models**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        defaultModel: 'gpt-5.5',
+        models: [{
+          value: 'gpt-5.5',
+          label: 'GPT-5.5',
+          defaultReasoningEffort: 'medium',
+          reasoningOptions: [
+            { value: 'low', label: 'Low' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
+          ],
+          serviceTiers: [
+            { id: 'priority', label: 'Fast', description: '1.5x speed' },
+          ],
+          defaultServiceTier: null,
+        }],
+      }),
+    });
+  });
+
+  const textarea = await openFixtureManualChat(page);
+  const fastToggle = page.getByTestId('session-fast-toggle');
+  await expect(fastToggle).toBeVisible({ timeout: 20_000 });
+  await expect(fastToggle).toHaveAttribute('aria-pressed', 'false');
+
+  await fastToggle.click();
+  await expect(fastToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem('codex-service-tier'))).toBe('priority');
+
+  await textarea.fill('spec fast service tier');
+  await textarea.press('Control+Enter');
+  await expect.poll(async () => {
+    const commands = await providerCommands(page);
+    return commands.find((message) => message.command === 'spec fast service tier')?.options?.serviceTier;
+  }).toBe('priority');
 });
 
 test('settings no longer expose a sendByCtrlEnter toggle', async ({ page }) => {

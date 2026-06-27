@@ -506,6 +506,7 @@ export function createChatCommandDispatcher(deps: any, ws: WebSocket, request: a
                     const codexOptions: LooseRecord = {
                         ...codexProviderOptions,
                         reasoningEffort: sessionModelState.reasoningEffort || codexProviderOptions?.reasoningEffort,
+                        serviceTier: codexProviderOptions?.serviceTier || data.options?.serviceTier || '',
                     };
                     const codexPromptText = buildProviderPromptText(
                         data.command || '',
@@ -520,6 +521,7 @@ export function createChatCommandDispatcher(deps: any, ws: WebSocket, request: a
                         text: codexPromptText,
                         runningBehavior: data.options?.runningBehavior || (data.options?.activePolicy === 'queue' ? 'queue' : undefined),
                         model: codexOptions?.model || '',
+                        serviceTier: codexOptions?.serviceTier || '',
                         reasoningEffort: codexOptions?.reasoningEffort || '',
                         permissionMode: codexOptions?.permissionMode || '',
                         clientRequestId: routeInitToken || data.clientRequestId || null,

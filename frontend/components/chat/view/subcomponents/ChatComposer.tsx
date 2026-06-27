@@ -62,6 +62,10 @@ interface ChatComposerProps {
   codexReasoningEffort: string;
   setCodexReasoningEffort: (effort: string) => void;
   codexReasoningOptions: { value: string; label: string; description?: string }[];
+  codexServiceTier: string;
+  setCodexServiceTier: (serviceTier: string) => void;
+  codexServiceTierOptions: { id: string; label: string; description?: string }[];
+  codexFastServiceTier: string;
   piModel: string;
   setPiModel: (model: string) => void;
   piModelOptions: { value: string; label: string }[];
@@ -133,6 +137,10 @@ export default function ChatComposer({
   codexReasoningEffort,
   setCodexReasoningEffort,
   codexReasoningOptions,
+  codexServiceTier,
+  setCodexServiceTier,
+  codexServiceTierOptions,
+  codexFastServiceTier,
   piModel,
   setPiModel,
   piModelOptions,
@@ -584,6 +592,10 @@ export default function ChatComposer({
                     codexReasoningEffort={codexReasoningEffort}
                     setCodexReasoningEffort={setCodexReasoningEffort}
                     codexReasoningOptions={codexReasoningOptions}
+                    codexServiceTier={codexServiceTier}
+                    setCodexServiceTier={setCodexServiceTier}
+                    codexServiceTierOptions={codexServiceTierOptions}
+                    codexFastServiceTier={codexFastServiceTier}
                     piModel={piModel}
                     setPiModel={setPiModel}
                     piModelOptions={piModelOptions}

@@ -535,6 +535,7 @@ export async function sendNativeMessage(input: {
   text: string;
   runningBehavior?: RunningBehavior;
   model?: string;
+  serviceTier?: string;
   thinkingLevel?: string;
   reasoningEffort?: string;
   permissionMode?: string;
@@ -562,6 +563,7 @@ export async function sendNativeMessage(input: {
       text,
       runningBehavior,
       model: input.model,
+      serviceTier: input.serviceTier,
       reasoningEffort: input.reasoningEffort,
       permissionMode: input.permissionMode,
       clientRequestId,

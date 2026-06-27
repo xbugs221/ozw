@@ -1,5 +1,5 @@
 /**
- * PURPOSE: Render delegated subagent tool calls with their child tool timeline.
+ * PURPOSE: Render delegated subagent lifecycle and child tool timeline.
  */
 import React, { useState, useMemo } from 'react';
 const Loader2 = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4 animate-spin"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
@@ -115,12 +115,102 @@ const getToolIcon = (toolName: string): React.ReactNode =>
     : <Wrench className="w-3.5 h-3.5" />);
 
 type ToolStatus = 'running' | 'done' | 'error' | 'pending';
+type LifecycleStatus = 'start' | 'active' | 'done' | 'error' | 'pending';
 
 const getToolStatus = (child: SubagentChildTool, isCurrent: boolean): ToolStatus => {
   if (isCurrent) return 'running';
   if (child.toolResult?.isError) return 'error';
   if (child.toolResult) return 'done';
   return 'pending';
+};
+
+const lifecycleToneMap: Record<LifecycleStatus, { dot: string; text: string; connector: string }> = {
+  start: {
+    dot: 'bg-sky-50 text-sky-600 ring-1 ring-sky-200 dark:bg-sky-950/30 dark:text-sky-300 dark:ring-sky-800/70',
+    text: 'text-sky-700 dark:text-sky-300',
+    connector: 'bg-sky-200 dark:bg-sky-800/70',
+  },
+  active: {
+    dot: 'bg-purple-50 text-purple-600 ring-1 ring-purple-200 dark:bg-purple-950/30 dark:text-purple-300 dark:ring-purple-800/70',
+    text: 'text-purple-700 dark:text-purple-300',
+    connector: 'bg-purple-200 dark:bg-purple-800/70',
+  },
+  done: {
+    dot: 'bg-green-50 text-green-600 ring-1 ring-green-200 dark:bg-green-950/30 dark:text-green-300 dark:ring-green-800/70',
+    text: 'text-green-700 dark:text-green-300',
+    connector: 'bg-gray-200 dark:bg-gray-700',
+  },
+  error: {
+    dot: 'bg-red-50 text-red-600 ring-1 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-800/70',
+    text: 'text-red-700 dark:text-red-300',
+    connector: 'bg-red-200 dark:bg-red-800/70',
+  },
+  pending: {
+    dot: 'bg-gray-50 text-gray-400 ring-1 ring-gray-200 dark:bg-gray-900/40 dark:text-gray-500 dark:ring-gray-700/70',
+    text: 'text-gray-500 dark:text-gray-400',
+    connector: 'bg-gray-200 dark:bg-gray-700',
+  },
+};
+
+/**
+ * Choose the lifecycle marker icon shown in the subagent timeline.
+ */
+const getLifecycleStatusIcon = (status: LifecycleStatus): React.ReactNode => {
+  switch (status) {
+    case 'start':
+      return <Bot className="w-3.5 h-3.5" />;
+    case 'active':
+      return <Loader2 className="w-3.5 h-3.5 animate-spin" />;
+    case 'done':
+      return <CheckCircle2 className="w-3.5 h-3.5" />;
+    case 'error':
+      return <AlertTriangle className="w-3.5 h-3.5" />;
+    case 'pending':
+      return <Circle className="w-3.5 h-3.5" />;
+  }
+};
+
+/**
+ * Build the compact lifecycle progress text used by the status chip and end node.
+ */
+const buildLifecycleSummary = (completedTools: number, totalTools: number, errorTools: number): string => {
+  const base = totalTools > 0 ? `${completedTools}/${totalTools} done` : 'No child tools recorded';
+  return errorTools > 0 ? `${base}, ${errorTools} error${errorTools > 1 ? 's' : ''}` : base;
+};
+
+/* ─── lifecycle row ─── */
+
+const LifecycleTimelineRow: React.FC<{
+  title: string;
+  description?: string;
+  status: LifecycleStatus;
+  showConnector?: boolean;
+}> = ({ title, description, status, showConnector = true }) => {
+  /** Render one start/end lifecycle row while keeping child tools visually aligned. */
+  const tone = lifecycleToneMap[status];
+
+  return (
+    <div className="relative">
+      {showConnector && (
+        <div className={`absolute left-[9px] top-6 bottom-0 w-px ${tone.connector}`} />
+      )}
+      <div className="flex items-start gap-2 py-1.5">
+        <div className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${tone.dot}`}>
+          {getLifecycleStatusIcon(status)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className={`text-xs font-semibold ${tone.text}`}>
+            {title}
+          </div>
+          {description && (
+            <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400 break-words">
+              {description}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 /* ─── child tool row ─── */
@@ -248,6 +338,10 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
   const totalTools = childTools.length;
   const completedTools = childTools.filter(c => c.toolResult && !c.toolResult.isError).length;
   const errorTools = childTools.filter(c => c.toolResult?.isError).length;
+  const lifecycleSummary = buildLifecycleSummary(completedTools, totalTools, errorTools);
+  const endNodeStatus: LifecycleStatus = isError ? 'error' : isComplete ? 'done' : 'pending';
+  const endNodeTitle = isError ? 'Task failed' : isComplete ? 'Task completed' : 'Waiting for task end';
+  const startNodeDescription = [subagentType, description].filter(Boolean).join(' / ');
 
   // Keep large child timelines collapsed so history rendering only mounts the summary row.
   const defaultOpen = autoExpandTools && childTools.length <= 20;
@@ -283,11 +377,12 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
   }, [toolResult]);
 
   return (
-    <div className="border-l-2 border-l-purple-500 dark:border-l-purple-400 pl-3 py-1 my-1">
+    <div className="my-1 rounded-lg border border-purple-200/60 bg-purple-50/25 px-3 py-2 shadow-sm shadow-purple-500/5 dark:border-purple-900/45 dark:bg-purple-950/10">
       <CollapsibleSection
         title={title}
         toolName="Subagent"
         open={defaultOpen}
+        wrapTitle
       >
         {/* Prompt */}
         {prompt && (
@@ -302,9 +397,9 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
         )}
 
         {/* Status bar */}
-        <div className="flex items-center gap-3 mb-3">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
           {!isComplete ? (
-            <div className="flex items-center gap-1.5 text-xs text-purple-600 dark:text-purple-400">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-purple-200 bg-purple-50 px-2 py-1 text-xs text-purple-700 dark:border-purple-800/60 dark:bg-purple-950/25 dark:text-purple-300">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
               <span className="font-medium">
                 {currentTool
@@ -313,23 +408,20 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
               </span>
             </div>
           ) : isError ? (
-            <div className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 dark:border-red-800/60 dark:bg-red-950/25 dark:text-red-300">
               <AlertTriangle className="w-3.5 h-3.5" />
               <span className="font-medium">Failed</span>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-700 dark:border-green-800/60 dark:bg-green-950/25 dark:text-green-300">
               <CheckCircle2 className="w-3.5 h-3.5" />
               <span className="font-medium">Completed</span>
             </div>
           )}
 
           {/* Mini stats */}
-          <div className="flex items-center gap-2 text-[11px] text-gray-400 dark:text-gray-500">
-            <span>{completedTools}/{totalTools} done</span>
-            {errorTools > 0 && (
-              <span className="text-red-500">{errorTools} error{errorTools > 1 ? 's' : ''}</span>
-            )}
+          <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+            <span>{lifecycleSummary}</span>
           </div>
         </div>
 
@@ -366,23 +458,32 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
         )}
 
         {/* Tool history timeline */}
-        {childTools.length > 0 && (
-          <div className="mb-3">
-            <div className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-medium mb-1">
-              Steps
-            </div>
-            <div className="pl-0.5">
-              {childTools.map((child, index) => (
-                <ChildToolRow
-                  key={child.toolId}
-                  child={child}
-                  index={index}
-                  isCurrent={index === currentToolIndex && !isComplete}
-                />
-              ))}
-            </div>
+        <div className="mb-3">
+          <div className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-medium mb-1">
+            Steps
           </div>
-        )}
+          <div className="rounded-md border border-gray-200/60 bg-white/55 px-2 py-1 dark:border-gray-800/70 dark:bg-gray-950/20">
+            <LifecycleTimelineRow
+              title="Task started"
+              description={startNodeDescription}
+              status="start"
+            />
+            {childTools.map((child, index) => (
+              <ChildToolRow
+                key={child.toolId}
+                child={child}
+                index={index}
+                isCurrent={index === currentToolIndex && !isComplete}
+              />
+            ))}
+            <LifecycleTimelineRow
+              title={endNodeTitle}
+              description={lifecycleSummary}
+              status={endNodeStatus}
+              showConnector={false}
+            />
+          </div>
+        </div>
 
         {/* Final result */}
         {isComplete && resultContent !== null && resultContent !== undefined && resultContent !== '' && (

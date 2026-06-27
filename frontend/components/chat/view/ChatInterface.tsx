@@ -132,6 +132,10 @@ function ChatInterface({
     codexReasoningEffort,
     setCodexReasoningEffort,
     codexReasoningOptions,
+    codexServiceTier,
+    setCodexServiceTier,
+    codexServiceTierOptions,
+    codexFastServiceTier,
     piModel,
     setPiModel,
     piModelOptions,
@@ -316,6 +320,7 @@ function ChatInterface({
     piUnavailableMessage,
     codexModelSwitchSessionId,
     codexReasoningEffort,
+    codexServiceTier,
     canAbortSession,
     tokenBudget,
     chatMessages,
@@ -465,6 +470,15 @@ function ChatInterface({
       codexModel,
       persistSessionModelState,
       setCodexReasoningEffort,
+    ],
+  );
+
+  const handleSetCodexServiceTier = useCallback(
+    (nextServiceTier: string) => {
+      setCodexServiceTier(nextServiceTier);
+    },
+    [
+      setCodexServiceTier,
     ],
   );
 
@@ -1133,6 +1147,10 @@ function ChatInterface({
           codexReasoningEffort={codexReasoningEffort}
           setCodexReasoningEffort={handleSetCodexReasoningEffort}
           codexReasoningOptions={codexReasoningOptions}
+          codexServiceTier={codexServiceTier}
+          setCodexServiceTier={handleSetCodexServiceTier}
+          codexServiceTierOptions={codexServiceTierOptions}
+          codexFastServiceTier={codexFastServiceTier}
           piModel={piModel}
           setPiModel={handleSetPiModel}
           piModelOptions={piModelOptions}

@@ -113,6 +113,7 @@ export async function sendCodexAppServerMessage(input: {
   text: string;
   runningBehavior?: string;
   model?: string;
+  serviceTier?: string;
   reasoningEffort?: string;
   permissionMode?: string;
   clientRequestId?: string | null;
@@ -131,6 +132,7 @@ export async function sendCodexAppServerMessage(input: {
     const { sandbox, approvalPolicy } = resolveCodexRuntimePolicy(input.permissionMode || 'default', input.highPermissionApproved === true);
     const threadResult = await transport.request('thread/start', {
       model: input.model || null,
+      serviceTier: input.serviceTier || null,
       cwd: input.projectPath || null,
       sandbox,
       approvalPolicy,
@@ -195,6 +197,7 @@ export async function sendCodexAppServerMessage(input: {
     threadId: session.providerThreadId,
     input: buildUserInput(input.text),
     model: input.model || null,
+    serviceTier: input.serviceTier || null,
     effort: input.reasoningEffort || null,
     multiAgentMode: CODEX_MULTI_AGENT_MODE,
   });

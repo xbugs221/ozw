@@ -1,5 +1,5 @@
 /**
- * PURPOSE: Render compact Codex model and reasoning-effort controls in the chat composer.
+ * PURPOSE: Render compact provider model, reasoning-depth, and Codex speed controls in the chat composer.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -14,6 +14,12 @@ type ReasoningOption = {
   description?: string;
 };
 
+type ServiceTierOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
 interface SessionModelControlsProps {
   provider?: 'codex' | 'pi' | string;
   codexModel: string;
@@ -22,6 +28,10 @@ interface SessionModelControlsProps {
   codexReasoningEffort: string;
   setCodexReasoningEffort: (effort: string) => void;
   codexReasoningOptions: ReasoningOption[];
+  codexServiceTier?: string;
+  setCodexServiceTier?: (serviceTier: string) => void;
+  codexServiceTierOptions?: ServiceTierOption[];
+  codexFastServiceTier?: string;
   piModel?: string;
   setPiModel?: (model: string) => void;
   piModelOptions?: ModelOption[];
@@ -31,7 +41,7 @@ interface SessionModelControlsProps {
 }
 
 /**
- * Provide Codex-only in-session controls for model and reasoning-effort switching.
+ * Provide in-session controls for model, reasoning depth, and catalog-driven Codex Fast mode.
  */
 export default function SessionModelControls({
   provider = 'codex',
@@ -41,6 +51,10 @@ export default function SessionModelControls({
   codexReasoningEffort,
   setCodexReasoningEffort,
   codexReasoningOptions,
+  codexServiceTier = '',
+  setCodexServiceTier,
+  codexServiceTierOptions = [],
+  codexFastServiceTier = '',
   piModel = '',
   setPiModel,
   piModelOptions = [],
@@ -65,6 +79,13 @@ export default function SessionModelControls({
   const currentDepthLabel = useMemo(() => {
     return activeDepthOptions.find((option) => option.value === activeDepth)?.label || activeDepth;
   }, [activeDepth, activeDepthOptions]);
+  const fastServiceTier = useMemo(() => {
+    return codexFastServiceTier || codexServiceTierOptions.find((option) =>
+      option.id.toLowerCase() === 'fast' || option.label.toLowerCase() === 'fast'
+    )?.id || '';
+  }, [codexFastServiceTier, codexServiceTierOptions]);
+  const showFastToggle = provider === 'codex' && Boolean(fastServiceTier) && Boolean(setCodexServiceTier);
+  const fastEnabled = showFastToggle && codexServiceTier === fastServiceTier;
 
   useEffect(() => {
     /**
@@ -198,6 +219,23 @@ export default function SessionModelControls({
           </div>
         )}
       </div>
+
+      {showFastToggle && (
+        <button
+          type="button"
+          data-testid="session-fast-toggle"
+          aria-pressed={fastEnabled}
+          className={`flex h-8 items-center rounded-lg border px-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 ${
+            fastEnabled
+              ? 'border-emerald-500/70 bg-emerald-500 text-white shadow-[0_0_0_3px_rgba(16,185,129,0.16)]'
+              : 'border-border/60 bg-background/90 text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+          }`}
+          onClick={() => setCodexServiceTier?.(fastEnabled ? '' : fastServiceTier)}
+          title={fastEnabled ? 'Fast mode on' : 'Fast mode off'}
+        >
+          Fast
+        </button>
+      )}
     </div>
   );
 }

@@ -30,6 +30,10 @@ noise before
         { "effort": "high", "description": "Deep" },
         { "effort": "xhigh", "description": "Max" }
       ],
+      "service_tiers": [
+        { "id": "priority", "name": "Fast", "description": "1.5x speed" }
+      ],
+      "default_service_tier": null,
       "visibility": "list",
       "priority": 0
     },
@@ -80,6 +84,12 @@ test('normalizes visible models and per-model reasoning options', () => {
     normalized.models[1].reasoningOptions.map((option) => option.value),
     ['medium', 'high'],
   );
+  assert.deepEqual(normalized.models[0].serviceTiers, [{
+    id: 'priority',
+    label: 'Fast',
+    description: '1.5x speed',
+  }]);
+  assert.equal(normalized.models[0].defaultServiceTier, null);
 });
 
 test('filters OpenAI model API results to Codex-selectable models', () => {
@@ -121,6 +131,7 @@ test('builds API-backed catalog without appending API-invisible embedded models'
     merged.models[0].reasoningOptions.map((option) => option.value),
     ['medium', 'high'],
   );
+  assert.deepEqual(merged.models[0].serviceTiers, []);
 });
 
 test('discovers Codex models from OpenAI API and local metadata cache', async () => {
@@ -163,6 +174,7 @@ test('discovers Codex models from OpenAI API and local metadata cache', async ()
       catalog.models[0].reasoningOptions.map((option) => option.value),
       ['medium', 'high'],
     );
+    assert.deepEqual(catalog.models[0].serviceTiers, []);
   } finally {
     await rm(tempHome, { recursive: true, force: true });
   }

@@ -38,6 +38,57 @@ function slugToLabel(slug) {
 }
 
 /**
+ * Normalize Codex service tier metadata from current and legacy catalog names.
+ * @param {object} model - Raw Codex model catalog entry.
+ * @returns {Array<{id: string, label: string, description: string}>} Frontend service tier options.
+ */
+function normalizeServiceTierOptions(model) {
+  /** Keep Fast-mode support catalog-driven, matching Codex CLI slash-command behavior. */
+  const explicitTiers = Array.isArray(model?.serviceTiers)
+    ? model.serviceTiers
+    : (Array.isArray(model?.service_tiers) ? model.service_tiers : []);
+  const legacySpeedTiers = Array.isArray(model?.additionalSpeedTiers)
+    ? model.additionalSpeedTiers
+    : (Array.isArray(model?.additional_speed_tiers) ? model.additional_speed_tiers : []);
+  const rawTiers = explicitTiers.length > 0
+    ? explicitTiers
+    : legacySpeedTiers.map((tier) => (typeof tier === 'string' ? { id: tier } : tier));
+  const seenTierIds = new Set();
+
+  return rawTiers
+    .map((tier) => {
+      const record = tier && typeof tier === 'object' ? tier : {};
+      const id = typeof tier === 'string'
+        ? tier.trim()
+        : String(record.id || record.value || record.name || '').trim();
+      if (!id || seenTierIds.has(id)) {
+        return null;
+      }
+
+      seenTierIds.add(id);
+      return {
+        id,
+        label: String(record.name || record.label || slugToLabel(id)).trim(),
+        description: String(record.description || '').trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Resolve the catalog default service tier for a model.
+ * @param {object} model - Raw Codex model catalog entry.
+ * @returns {string|null} Default service tier id, when present.
+ */
+function normalizeDefaultServiceTier(model) {
+  /** Accept both generated app-server and embedded Rust catalog field shapes. */
+  const value = typeof model?.defaultServiceTier === 'string'
+    ? model.defaultServiceTier
+    : (typeof model?.default_service_tier === 'string' ? model.default_service_tier : '');
+  return value.trim() || null;
+}
+
+/**
  * Resolve the OpenAI models endpoint from environment settings.
  * @param {NodeJS.ProcessEnv|object} env - Runtime environment.
  * @returns {string} Fully qualified models endpoint.
@@ -204,6 +255,8 @@ export function __mergeCatalogWithModelList(catalog, listedModels, options = {})
       label: slugToLabel(modelSlug),
       defaultReasoningEffort: CODEX_REASONING_EFFORTS.DEFAULT,
       reasoningOptions: fallbackReasoningOptions,
+      serviceTiers: [],
+      defaultServiceTier: null,
     });
   }
 
@@ -374,6 +427,8 @@ export function __normalizeCodexModelCatalog(catalog) {
           description: option.description || '',
         }))
         : CODEX_REASONING_EFFORTS.OPTIONS,
+      serviceTiers: normalizeServiceTierOptions(model),
+      defaultServiceTier: normalizeDefaultServiceTier(model),
     }));
 
   if (models.length === 0) {
