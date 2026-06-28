@@ -245,7 +245,9 @@ test('会将 update_plan、ctx_batch_execute、write_stdin 和 FileChanges 渲�
 
   await expect(page.getByTestId('tool-batch-execute-content').first()).toContainText('Source Tree');
   await expect(page.getByText('rg --files src/components/chat/tools')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Show output' }).first()).toBeVisible();
+  const outputToggle = page.getByRole('button', { name: 'Show output' }).first();
+  await expect(outputToggle).toBeVisible();
+  await expect(outputToggle).not.toContainText(/Show output|Hide output/);
   await expect(page.getByText('Found files under tools.')).toBeHidden();
   await expect(page.getByText('查询 2 条')).toHaveCount(0);
   await expect(page.getByText('update_plan renderer')).toBeVisible();

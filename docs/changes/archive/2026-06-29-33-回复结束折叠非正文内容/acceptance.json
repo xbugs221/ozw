@@ -1,0 +1,117 @@
+{
+  "summary": "本次变更验收智能体一轮回复进入正文或完成后，思考、工具调用和批量工具调用默认折叠到 turn 级非正文组；正文直接可见，用户可逐层展开查看完整细节。",
+  "coverage": [
+    {
+      "spec": "需求：回复正文开始后折叠非正文内容 / 场景：正文前思考和工具调用进入外层折叠组",
+      "tests": ["contract-turn-collapse-core"],
+      "evidence": ["turn-collapse-state"],
+      "risk": "具体视觉样式由浏览器截图复核，不在纯函数测试中固定。"
+    },
+    {
+      "spec": "需求：回复正文开始后折叠非正文内容 / 场景：正文尚未开始时 live 过程保持可见",
+      "tests": ["contract-turn-collapse-core", "e2e-turn-collapse-live"],
+      "evidence": ["turn-collapse-live-screenshot"],
+      "risk": "端到端使用仓库既有 live socket harness 驱动生产前端事件链路，不依赖外部真实 Provider。"
+    },
+    {
+      "spec": "需求：分层展开可查看全部细节 / 场景：外层组、工具组、命令输出逐级展开",
+      "tests": ["contract-turn-collapse-integration", "e2e-turn-collapse-detail"],
+      "evidence": ["turn-collapse-expanded-screenshot"],
+      "risk": "不同工具类型的详情仍由 ToolRenderer 负责。"
+    },
+    {
+      "spec": "需求：批量工具调用按组折叠 / 场景：多个命令收在同一批量工具组下",
+      "tests": ["contract-turn-collapse-core", "contract-turn-collapse-integration"],
+      "evidence": ["turn-collapse-state"],
+      "risk": "批量工具 payload 的更多 Provider 变体需要执行阶段补样例。"
+    },
+    {
+      "spec": "需求：历史回放和 live 渲染一致 / 场景：刷新后非正文仍默认折叠，正文直接可见",
+      "tests": ["e2e-turn-collapse-live"],
+      "evidence": ["turn-collapse-after-refresh-screenshot"],
+      "risk": "旧历史消息格式可能需要兼容映射。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-turn-collapse-core",
+      "source": "change_contract",
+      "path": "docs/changes/33-回复结束折叠非正文内容/tests/turn-non-body-collapse.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/33-回复结束折叠非正文内容/tests/turn-non-body-collapse.acceptance.test.ts",
+      "purpose": "证明 turn 级分组规则：正文开始后非正文默认折叠，正文尚未开始时 live 内容保持可见，批量工具按组归并。",
+      "assertions": [
+        "正文存在时，思考和工具调用归入 turn-non-body-group 且 defaultOpen=false",
+        "正文尚未开始时，非正文组 defaultOpen=true",
+        "批量工具调用下多个命令归入同一个工具组",
+        "最终助手正文输出为独立 assistant-body"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于缺少 turnNonBodyCollapse.ts 或 buildTurnDisplayBlocks 导出。"
+    },
+    {
+      "id": "contract-turn-collapse-integration",
+      "source": "change_contract",
+      "path": "docs/changes/33-回复结束折叠非正文内容/tests/turn-collapse-integration.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/33-回复结束折叠非正文内容/tests/turn-collapse-integration.acceptance.test.ts",
+      "purpose": "证明 UI 集成有外层非正文组、思考组、工具组和命令输出逐层展开入口，并接入聊天面板。",
+      "assertions": [
+        "存在 TurnNonBodyGroup 组件",
+        "组件暴露 turn-non-body-group、turn-thinking-group、turn-tool-group、turn-tool-command 测试标识",
+        "ChatMessagesPane 或相邻渲染层使用 buildTurnDisplayBlocks",
+        "工具详情继续复用 ToolRenderer 或 CollapsibleSection"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于缺少 TurnNonBodyGroup.tsx 或聊天面板未接入。"
+    },
+    {
+      "id": "e2e-turn-collapse-live",
+      "source": "change_contract",
+      "path": "docs/changes/33-回复结束折叠非正文内容/tests/turn-collapse-e2e.acceptance.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts docs/changes/33-回复结束折叠非正文内容/tests/turn-collapse-e2e.acceptance.spec.ts --grep @live",
+      "purpose": "通过真实聊天页证明 live 阶段可见、正文开始后自动折叠、刷新后仍保持默认折叠。",
+      "assertions": [
+        "正文开始前思考和工具调用可见",
+        "正文开始后最终正文可见，思考和工具详情默认不可见",
+        "刷新后最终正文仍可见，非正文仍默认折叠"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于找不到 turn-non-body-group 或非正文未折叠。"
+    },
+    {
+      "id": "e2e-turn-collapse-detail",
+      "source": "change_contract",
+      "path": "docs/changes/33-回复结束折叠非正文内容/tests/turn-collapse-e2e.acceptance.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts docs/changes/33-回复结束折叠非正文内容/tests/turn-collapse-e2e.acceptance.spec.ts --grep @detail",
+      "purpose": "通过真实浏览器证明用户能逐层展开外层组、工具组和具体命令输出。",
+      "assertions": [
+        "点击外层按钮后显示思考组和工具组",
+        "点击工具组后显示组内多个命令",
+        "点击具体命令输出折叠后显示对应输出"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于缺少逐层展开控件。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "turn-collapse-live-screenshot",
+      "kind": "screenshot",
+      "path": "test-results/turn-non-body-collapse/live.png",
+      "purpose": "证明正文开始前 live 思考和工具调用可见；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "turn-collapse-after-refresh-screenshot",
+      "kind": "screenshot",
+      "path": "test-results/turn-non-body-collapse/collapsed-after-body.png",
+      "purpose": "证明正文开始后或刷新后非正文默认折叠、正文直接可见；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "turn-collapse-expanded-screenshot",
+      "kind": "screenshot",
+      "path": "test-results/turn-non-body-collapse/expanded-detail.png",
+      "purpose": "证明外层组、工具组和命令输出可以逐层展开；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "turn-collapse-state",
+      "kind": "state_snapshot",
+      "path": "test-results/turn-non-body-collapse/state.json",
+      "purpose": "记录 turn 分组数量、默认展开状态和工具组命令数量；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

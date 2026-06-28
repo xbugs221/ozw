@@ -578,7 +578,7 @@ test('mergePersistedAndOptimisticMessages drops live tool card once JSONL has a 
   assert.equal(mergedMessages[0].messageKey, 'codex:c21:line:12:msg:0');
 });
 
-test('mergePersistedAndOptimisticMessages preserves live tool result until JSONL result catches up', () => {
+test('mergePersistedAndOptimisticMessages overlays live tool result onto matching JSONL shell', () => {
   const mergedMessages = mergePersistedAndOptimisticMessages(
     [
       {
@@ -610,8 +610,8 @@ test('mergePersistedAndOptimisticMessages preserves live tool result until JSONL
     ],
   );
 
-  assert.equal(mergedMessages.length, 2);
-  assert.equal(mergedMessages[1].source, 'codex-live');
+  assert.equal(mergedMessages.length, 1);
+  assert.deepEqual(mergedMessages[0].toolResult, { content: 'typecheck passed' });
 });
 
 test('reduceNativeRuntimeEvent drops live tool echo when JSONL already has the completed tool result', () => {

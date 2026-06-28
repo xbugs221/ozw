@@ -17,7 +17,10 @@ import type { Project, ProjectSession, SessionProvider } from '../../../types/ap
 import { safeLocalStorage } from '../utils/chatStorage';
 import { dedupeAdjacentChatMessages } from '../utils/messageDedup';
 import { chatMessageReducer } from '../state/chatMessageReducer';
-import { buildVisibleMessageWindow } from './chatSessionLifecycleController';
+import {
+  buildVisibleMessageWindow,
+  getVisibleWindowMessageKey,
+} from './chatSessionLifecycleController';
 import {
   dedupeSessionMessagesByIdentity,
   getSessionMessageIdentity,
@@ -66,6 +69,8 @@ import {
 } from './sessionIdentity';
 
 const INITIAL_VISIBLE_MESSAGES = 100;
+const MIN_HISTORY_PREFETCH_DISTANCE_PX = 240;
+const HISTORY_PREFETCH_UNLOCK_DISTANCE_PX = 100;
 
 export interface UseChatSessionStateArgs {
   selectedProject: Project | null;
@@ -99,7 +104,15 @@ function getSessionProjectName(selectedProject: Project | null, selectedSession:
  * Resolve a stable key for anchoring a frozen transcript tail.
  */
 function getViewMessageKey(message: ChatMessage, index: number): string {
-  return getIntrinsicMessageKey(message) || `message-position-${index}`;
+  return getVisibleWindowMessageKey(message, index);
+}
+
+/**
+ * Decide whether the scroll position is inside the older-history prefetch zone.
+ */
+export function isInsideHistoryPrefetchZone(container: Pick<HTMLDivElement, 'scrollTop' | 'clientHeight'>): boolean {
+  const prefetchDistance = Math.max(MIN_HISTORY_PREFETCH_DISTANCE_PX, Math.floor(container.clientHeight));
+  return container.scrollTop <= prefetchDistance;
 }
 
 /**
@@ -521,6 +534,15 @@ export function useChatSessionState({
 
       isLoadingMoreRef.current = true;
       const scrollSnapshot = captureSessionScrollSnapshot(container);
+      if (!frozenTailMessageKeyRef.current) {
+        const currentMessages = chatMessagesRef.current;
+        const lastIndex = currentMessages.length - 1;
+        if (lastIndex >= 0) {
+          const frozenKey = getViewMessageKey(currentMessages[lastIndex], lastIndex);
+          frozenTailMessageKeyRef.current = frozenKey;
+          setFrozenTailMessageKey(frozenKey);
+        }
+      }
 
       try {
         const moreMessages = await loadSessionMessages(
@@ -570,20 +592,31 @@ export function useChatSessionState({
     }
 
     const hardBottom = isAtHardBottom();
-    const didFreeze = !hardBottom ? freezeTailAtCurrentEnd() : false;
+    if (hardBottom) {
+      topLoadLockRef.current = false;
+      if (frozenTailMessageKeyRef.current || isUserScrolledUpRef.current) {
+        frozenTailMessageKeyRef.current = null;
+        isUserScrolledUpRef.current = false;
+        setFrozenTailMessageKey(null);
+        setIsUserScrolledUp(false);
+      }
+      return;
+    }
+
+    const didFreeze = freezeTailAtCurrentEnd();
     const nextIsUserScrolledUp = !hardBottom || didFreeze || Boolean(frozenTailMessageKeyRef.current);
     isUserScrolledUpRef.current = nextIsUserScrolledUp;
     setIsUserScrolledUp(nextIsUserScrolledUp);
 
     if (!allMessagesLoadedRef.current) {
-      const scrolledNearTop = container.scrollTop < 100;
-      if (!scrolledNearTop) {
+      const insidePrefetchZone = isInsideHistoryPrefetchZone(container);
+      if (!insidePrefetchZone) {
         topLoadLockRef.current = false;
         return;
       }
 
       if (topLoadLockRef.current) {
-        if (container.scrollTop > 20) {
+        if (container.scrollTop > HISTORY_PREFETCH_UNLOCK_DISTANCE_PX) {
           topLoadLockRef.current = false;
         }
         return;
@@ -936,7 +969,6 @@ export function useChatSessionState({
       }
 
       const newMessages = result.messages;
-      advanceLatestRawLineCursor(newMessages, result.nextRawLineOffset);
       const newTotal = Math.max(
         knownTotal,
         result.total > 0 ? result.total : 0,
@@ -953,8 +985,12 @@ export function useChatSessionState({
       }
 
       if (newMessages.length > 0) {
-        const shouldKeepCurrentViewport = frozenTailMessageKeyRef.current || isUserScrolledUpRef.current;
-        if (shouldKeepCurrentViewport && !frozenTailMessageKeyRef.current) {
+        const shouldKeepCurrentViewport = Boolean(frozenTailMessageKeyRef.current || isUserScrolledUpRef.current);
+        const currentFrozenTailKey = frozenTailMessageKeyRef.current;
+        const currentFrozenTailExists = currentFrozenTailKey
+          ? chatMessagesRef.current.some((message, index) => getViewMessageKey(message, index) === currentFrozenTailKey)
+          : false;
+        if (shouldKeepCurrentViewport && !currentFrozenTailExists) {
           const currentMessages = chatMessagesRef.current;
           const lastIndex = currentMessages.length - 1;
           if (lastIndex >= 0) {
@@ -963,6 +999,7 @@ export function useChatSessionState({
             setFrozenTailMessageKey(frozenKey);
           }
         }
+        advanceLatestRawLineCursor(newMessages, result.nextRawLineOffset);
 
         if (isCoSession) {
           // Cursor-based refresh: incoming messages with the same messageKey
@@ -1195,10 +1232,11 @@ export function useChatSessionState({
   }, [visibleMessages.length]);
 
   useEffect(() => {
-    if (isFollowingLatest) {
+    if (isFollowingLatest && !isUserScrolledUp) {
+      frozenTailMessageKeyRef.current = null;
       setFrozenTailMessageKey(null);
     }
-  }, [isFollowingLatest]);
+  }, [isFollowingLatest, isUserScrolledUp]);
 
   // 消息追加（底部增长）不需要调整 scrollTop——浏览器天然保持上方内容位置。
   // 加载更早的历史消息（顶部增长）由 pendingScrollRestoreRef + useLayoutEffect 处理。
@@ -1222,7 +1260,7 @@ export function useChatSessionState({
     const wasLoading = prevLoadingRef.current;
     prevLoadingRef.current = isLoadingMoreMessages;
 
-    if (wasLoading && !isLoadingMoreMessages && hasMoreMessages) {
+    if (wasLoading && !isLoadingMoreMessages && hasMoreMessages && !isUserScrolledUpRef.current) {
       if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
       setShowLoadAllOverlay(true);
       loadAllOverlayTimerRef.current = setTimeout(() => {

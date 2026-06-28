@@ -8,6 +8,7 @@
 | Codex 响应必须晚于绿色用户气泡 | 用户气泡仍为 sent 时隐藏同 turn live response | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `mergePersistedAndOptimisticMessages` 和 `reduceNativeRuntimeEvent` | session message merge、native runtime reducer | sent 阶段不显示 live assistant；persisted echo 到达后 user 为 persisted 且 assistant 排在其后 | 多窗口 late duplicate 继续由聊天归并内核规格覆盖 |
 | Pi 与 Codex 命令工具卡结构一致 | 相同命令工具共享卡片结构 | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `MessageComponent` 和 `ToolRenderer` SSR 渲染 | MessageComponent 工具分支、ToolRenderer | 两者都渲染为 `data-testid="codex-tool-card"`，命令、输出 anchor 和结构指纹一致 | 其它工具族需按风险补充专门规格 |
 | 文件型工具卡片路径统一可打开 | view_image/Read/Edit/FileChanges 路径复用 open-file 配置 | `tests/specs/chat-rendering-parity.spec.tsx`、`tests/spec/chat-composer-runtime.spec.ts` | 真实 `ToolRenderer`、tool config 和浏览器文件预览 | `openFileToolConfig`、`ToolRenderer`、workspace file open | 路径渲染为可点击控件，点击后调用 workspace 文件打开；图片路径打开图片预览 | 文件不存在时沿用现有 editor error UI |
+| 回复正文开始后折叠非正文内容 | 工具调用及其间的过程说明进入 turn 级折叠组，纯工具调用合并为工具次数折叠组 | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `ChatMessage` 字段组合和 turn display block 构建入口 | `buildTurnDisplayBlocks`、`ChatMessagesPane`、`TurnNonBodyGroup` | 正文出现后非正文组默认折叠，正文直接可见；工具调用前后夹杂的过程说明也折叠；仅 live 执行默认展开，历史或非 live 执行默认折叠；纯工具块只显示“工具调用N次”汇总按钮，展开后平铺工具卡且不重复 Codex/时间戳；子任务步骤不显示具体工具类型 | 浏览器截图证据保留在对应归档提案中，长期规格测试固定核心状态合同 |
 
 ### 需求：Codex live assistant 不显示冗余元信息
 
@@ -51,11 +52,31 @@
 - 并且点击时必须把原始路径交给 workspace `onFileOpen`
 - 并且图片路径必须打开右侧图片预览，而不是退化成普通文本或 JSON 展示
 
+### 需求：回复正文开始后折叠非正文内容
+
+#### 场景：思考折叠，纯工具调用合并为工具次数折叠组
+
+- 给定同一用户回合中先后出现思考、工具调用、批量命令和最终助手正文
+- 当最终助手正文已经开始
+- 那么思考、工具调用、以及工具调用前后夹杂的过程说明必须归入同一个 turn 级非正文组
+- 并且非正文组默认折叠，最终助手正文直接可见
+- 并且当同一回合存在工具或思考过程时，只有最后一段 assistant 正文可以作为最终正文直接展示
+- 当最终助手正文尚未出现时
+- 那么只有 websocket live 思考和工具执行过程必须默认展开可见
+- 并且历史回放或非 live 的未完成执行过程必须默认折叠
+- 当一个非正文块内部只有工具调用时
+- 那么页面必须只显示一个“工具调用N次”汇总按钮，不显示“思考与工具调用”外壳
+- 并且点击汇总按钮后，工具卡必须上下串联平铺展示
+- 并且组内工具卡不得重复显示 provider 标题 `Codex` 或单条消息时间戳
+- 并且子任务内部步骤不得显示具体工具类型标签
+- 并且同一批量工具组的摘要必须展示真实命令数量
+- 并且历史回放中的字符串 `toolInput`、拆分的 `tool_use` / `tool_result` 形态不得导致命令数量少算或多算
+
 ## 契约测试
 
 ### `tests/specs/chat-rendering-parity.spec.tsx`
 
-- 覆盖核心业务契约：Codex live assistant 隐藏冗余 provider/时间戳、Codex live response 等待 persisted 用户气泡、clientRequestId-only 首轮也受 gating 保护、Pi/Codex 命令工具卡结构一致、view_image 文件路径渲染为直接可点击 open-file 控件。
-- 真实数据来源：通过 Vite SSR 加载生产 `MessageComponent`、`ThemeProvider`、生产 `sessionMessageMerge` 和 `nativeRuntimeTranscript`，输入使用真实 `ChatMessage` 字段组合与真实 Codex runtime event shape。
+- 覆盖核心业务契约：Codex live assistant 隐藏冗余 provider/时间戳、Codex live response 等待 persisted 用户气泡、clientRequestId-only 首轮也受 gating 保护、Pi/Codex 命令工具卡结构一致、view_image 文件路径渲染为直接可点击 open-file 控件、回复正文开始后 turn 级非正文内容默认折叠。
+- 真实数据来源：通过 Vite SSR 加载生产 `MessageComponent`、`ThemeProvider`、生产 `sessionMessageMerge`、`nativeRuntimeTranscript` 和 `buildTurnDisplayBlocks`，输入使用真实 `ChatMessage` 字段组合与真实 Codex runtime event shape。
 - 入口路径：`pnpm exec tsx --test tests/specs/chat-rendering-parity.spec.tsx`
 - 用户可见断言：以 SSR HTML 和 transcript 顺序检查用户能看到的正文、元信息、气泡顺序、工具卡 anchor 与卡片结构。

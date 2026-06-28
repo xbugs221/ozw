@@ -140,5 +140,5 @@ test('heavy markdown, diff, tool output, and subagent timelines have lazy summar
   assert.match(diffViewer, /data-testid="large-diff-summary"/);
   assert.match(textContent, /LARGE_TEXT_LINE_THRESHOLD/);
   assert.match(textContent, /data-testid="large-tool-output-summary"/);
-  assert.match(subagent, /autoExpandTools && childTools\.length <= 20/);
+  assert.match(subagent, /isLiveTool && childTools\.length <= 20/);
 });

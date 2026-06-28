@@ -221,7 +221,18 @@ const toOptionalNumber = (value: unknown): number | undefined => {
 };
 
 /**
- * Convert Codex commentary updates into compact status rows so progress
+ * Detect Codex assistant phases that are process detail rather than final body.
+ */
+function isProcessAssistantPhase(phase: unknown): boolean {
+  /**
+   * docstring: Codex persists commentary as assistant text rows, but those rows
+   * are operational narration and must collapse with thinking/tool activity.
+   */
+  return phase === 'commentary' || phase === 'analysis' || phase === 'reasoning';
+}
+
+/**
+ * Convert Codex assistant text rows while preserving process phases so progress
  * messages do not overwhelm the main assistant transcript.
  */
 const toCodexAssistantChatMessage = (
@@ -233,18 +244,18 @@ const toCodexAssistantChatMessage = (
   provider?: string,
   orderFields: Partial<ChatMessage> = {},
 ): ChatMessage => {
-  if (phase === 'commentary') {
+  const normalizedPhase = typeof phase === 'string' ? phase : undefined;
+  if (isProcessAssistantPhase(phase)) {
     return {
       type: 'assistant',
       content,
       timestamp,
-      phase: 'commentary',
+      phase: normalizedPhase,
       provider,
       messageKey,
       clientRequestId,
       ...orderFields,
-      isTaskNotification: true,
-      taskStatus: 'in_progress',
+      isThinking: true,
     };
   }
 
@@ -252,7 +263,7 @@ const toCodexAssistantChatMessage = (
     type: 'assistant',
     content,
     timestamp,
-    phase: typeof phase === 'string' ? phase : undefined,
+    phase: normalizedPhase,
     provider,
     messageKey,
     clientRequestId,
@@ -406,6 +417,8 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
     let text = '';
     let role: ChatMessage['type'] = 'assistant';
     let reasoningText: string | null = null;
+    let assistantPhase: string | undefined;
+    let isProcessAssistantMessage = false;
 
     try {
       if (content?.role && content?.content) {
@@ -452,6 +465,8 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
         }
 
         role = content.role === 'user' ? 'user' : 'assistant';
+        assistantPhase = typeof content.phase === 'string' ? content.phase : undefined;
+        isProcessAssistantMessage = role === 'assistant' && isProcessAssistantPhase(assistantPhase);
 
         if (Array.isArray(content.content)) {
           const textParts: string[] = [];
@@ -477,6 +492,8 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
                   blobId: blob.id,
                   sequence: blob.sequence,
                   rowid: blob.rowid,
+                  phase: assistantPhase,
+                  ...(isProcessAssistantMessage ? { isThinking: true } : {}),
                 });
                 textParts.length = 0;
                 reasoningText = null;
@@ -583,6 +600,10 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
         }
 
         role = content.message.role === 'user' ? 'user' : 'assistant';
+        assistantPhase = typeof content.message.phase === 'string'
+          ? content.message.phase
+          : (typeof content.phase === 'string' ? content.phase : undefined);
+        isProcessAssistantMessage = role === 'assistant' && isProcessAssistantPhase(assistantPhase);
         if (Array.isArray(content.message.content)) {
           text = content.message.content
             .map((part: any) => (typeof part === 'string' ? part : part?.text || ''))
@@ -604,6 +625,8 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
         blobId: blob.id,
         sequence: blob.sequence,
         rowid: blob.rowid,
+        phase: assistantPhase,
+        ...(isProcessAssistantMessage ? { isThinking: true } : {}),
       };
       if (reasoningText) {
         message.reasoning = reasoningText;

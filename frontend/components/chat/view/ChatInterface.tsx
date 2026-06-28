@@ -7,6 +7,7 @@ import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
+import ConversationBookmarks from './subcomponents/ConversationBookmarks';
 import type { ChatInterfaceProps } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
@@ -23,6 +24,9 @@ import {
   resolveSessionRoutingContext,
   type PendingViewSession,
 } from '../session/sessionIdentity';
+import { buildConversationBookmarks } from '../utils/conversationBookmarks';
+import { useChatSearchNavigation } from './chatInterfaceSearchNavigation';
+import { useChatStatusReconcile } from './chatInterfaceStatusReconcile';
 
 const NETWORK_RESPONSE_TIMEOUT_MS = 30_000;
 const NETWORK_TIMEOUT_MESSAGE =
@@ -96,25 +100,8 @@ function ChatInterface({
   const [searchHighlightRetry, setSearchHighlightRetry] = useState(0);
   const [piQueueState, setPiQueueState] = useState<PiQueueState | null>(null);
   const [activeTurnStartedAt, setActiveTurnStartedAt] = useState<string | null>(null);
+  const [bookmarkScrollTargetKey, setBookmarkScrollTargetKey] = useState<string | null>(null);
 
-  const activeSearchTarget = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    const query = params.get('chatSearch');
-    const messageKey = params.get('messageKey');
-
-    if (!query || !messageKey) {
-      return null;
-    }
-
-    return {
-      query,
-      messageKey,
-    };
-  }, [location.search]);
-
-  useEffect(() => {
-    setSearchHighlightRetry(0);
-  }, [activeSearchTarget?.messageKey, activeSearchTarget?.query]);
   const resetStreamingState = useCallback(() => {
     if (streamTimerRef.current) {
       clearTimeout(streamTimerRef.current);
@@ -261,6 +248,28 @@ function ChatInterface({
       ? piQueueState
       : null;
   }, [currentSessionId, piQueueState, selectedSession?.id]);
+  const conversationBookmarks = useMemo(
+    () => buildConversationBookmarks(chatMessages),
+    [chatMessages],
+  );
+  const onBookmarkSelect = useCallback((messageKey: string) => {
+    if (!messageKey) {
+      return;
+    }
+
+    setBookmarkScrollTargetKey(messageKey);
+    const hasLoadedMessage = chatMessages.some((message) => message.messageKey === messageKey);
+    if (hasLoadedMessage) {
+      revealLoadedMessage(messageKey);
+      return;
+    }
+
+    void loadMessagesUntilTarget({ messageKey });
+  }, [
+    chatMessages,
+    loadMessagesUntilTarget,
+    revealLoadedMessage,
+  ]);
 
   const {
     input,
@@ -768,60 +777,19 @@ function ChatInterface({
     sendMessage,
   ]);
 
-  useEffect(() => {
-    const activeViewSessionId =
-      selectedSession?.id || currentSessionId || pendingViewSessionRef.current?.sessionId || null;
-    const activeRouteSessionId = Number.isInteger(Number(selectedSession?.routeIndex))
-      ? `c${Number(selectedSession?.routeIndex)}`
-      : null;
-    const statusSessionId = activeRouteSessionId || activeViewSessionId;
-
-    if (!statusSessionId || (isTemporarySessionId(statusSessionId) && !activeRouteSessionId)) {
-      return;
-    }
-
-    const statusProvider = effectiveProvider === 'pi' ? 'pi' : 'codex';
-    const statusProjectPath = selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '';
-    const reconcileKey = [
-      statusProvider,
-      statusSessionId,
-      activeRouteSessionId || '',
-      statusProjectPath,
-    ].join('|');
-
-    if (statusReconcileKeyRef.current === reconcileKey && !isLoading) {
-      return;
-    }
-
-    if (canAbortSession && statusReconcileKeyRef.current === reconcileKey) {
-      return;
-    }
-
-    statusReconcileKeyRef.current = reconcileKey;
-
-    // Run once; completion and transcript changes arrive through scoped events.
-    sendMessage({
-      type: 'check-session-status',
-      sessionId: statusSessionId,
-      ozwSessionId: activeRouteSessionId,
-      ozw_session_id: activeRouteSessionId,
-      provider: statusProvider,
-      projectPath: statusProjectPath,
-    });
-
-    // 不做固定周期轮询，重连/事件会触发下一次校准
-  }, [
+  useChatStatusReconcile({
     canAbortSession,
     currentSessionId,
-    isLoading,
     effectiveProvider,
-    selectedProject?.fullPath,
-    selectedProject?.path,
-    selectedSession?.id,
-    selectedSession?.projectPath,
-    selectedSession?.routeIndex,
+    isLoading,
+    pendingViewSessionRef,
+    selectedProjectPath: selectedProject?.fullPath || selectedProject?.path || '',
+    selectedSessionId: selectedSession?.id,
+    selectedSessionProjectPath: selectedSession?.projectPath || '',
+    selectedSessionRouteIndex: selectedSession?.routeIndex,
     sendMessage,
-  ]);
+    statusReconcileKeyRef,
+  });
 
   useEffect(() => {
     if (!isLoading || !canAbortSession) {
@@ -849,190 +817,19 @@ function ChatInterface({
     };
   }, [resetStreamingState]);
 
-  useEffect(() => {
-    if (!activeSearchTarget || !selectedSession?.id) {
-      return;
-    }
-
-    const hasTargetMessage = chatMessages.some((message) => message.messageKey === activeSearchTarget.messageKey);
-    if (hasTargetMessage) {
-      revealLoadedMessage(activeSearchTarget.messageKey);
-      return;
-    }
-    if (isLoadingMoreMessages || isLoadingAllMessages || allMessagesLoaded) {
-      return;
-    }
-
-    void loadMessagesUntilTarget({ messageKey: activeSearchTarget.messageKey });
-  }, [
-    activeSearchTarget,
-    allMessagesLoaded,
+  useChatSearchNavigation({
+    locationSearch: location.search,
+    selectedSessionId: selectedSession?.id,
     chatMessages,
+    visibleMessages,
     isLoadingMoreMessages,
     isLoadingAllMessages,
+    allMessagesLoaded,
+    searchHighlightRetry,
+    setSearchHighlightRetry,
     loadMessagesUntilTarget,
     revealLoadedMessage,
-    selectedSession?.id,
-  ]);
-
-  useEffect(() => {
-    const clearHighlights = () => {
-      document.querySelectorAll('.chat-search-highlight').forEach((element) => {
-        const parent = element.parentNode;
-        if (!parent) {
-          return;
-        }
-
-        parent.replaceChild(document.createTextNode(element.textContent || ''), element);
-        parent.normalize();
-      });
-    };
-
-    clearHighlights();
-
-    if (!activeSearchTarget || !selectedSession?.id) {
-      return;
-    }
-
-    const selector = `.chat-message[data-message-key="${CSS.escape(activeSearchTarget.messageKey)}"]`;
-    const retrySearchHighlight = () => {
-      if (searchHighlightRetry >= 60) {
-        return undefined;
-      }
-
-      const retryHandle = window.setTimeout(() => {
-        setSearchHighlightRetry((attempt) => attempt + 1);
-      }, 100);
-      return () => {
-        window.clearTimeout(retryHandle);
-      };
-    };
-
-    const targetElement = document.querySelector<HTMLElement>(selector);
-    if (!targetElement) {
-      return retrySearchHighlight();
-    }
-
-    targetElement.scrollIntoView({ block: 'center', behavior: 'auto' });
-
-    const query = activeSearchTarget.query.trim();
-    if (!query) {
-      return;
-    }
-
-    const textNodes: Text[] = [];
-    const walker = document.createTreeWalker(targetElement, NodeFilter.SHOW_TEXT, {
-      acceptNode: (node) => {
-        if (!node.nodeValue?.trim()) {
-          return NodeFilter.FILTER_REJECT;
-        }
-
-        const parent = node.parentElement;
-        if (!parent || parent.closest('.chat-search-highlight')) {
-          return NodeFilter.FILTER_REJECT;
-        }
-
-        if (parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE') {
-          return NodeFilter.FILTER_REJECT;
-        }
-
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-
-    while (walker.nextNode()) {
-      textNodes.push(walker.currentNode as Text);
-    }
-
-    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const matcher = new RegExp(escapedQuery, 'gi');
-
-    let didHighlight = false;
-    textNodes.forEach((textNode) => {
-      const textContent = textNode.nodeValue || '';
-      matcher.lastIndex = 0;
-      if (!matcher.test(textContent)) {
-        return;
-      }
-
-      matcher.lastIndex = 0;
-      const fragment = document.createDocumentFragment();
-      let lastIndex = 0;
-
-      for (const match of textContent.matchAll(matcher)) {
-        const startIndex = match.index ?? 0;
-        if (startIndex > lastIndex) {
-          fragment.appendChild(document.createTextNode(textContent.slice(lastIndex, startIndex)));
-        }
-
-        const highlight = document.createElement('mark');
-        highlight.className = 'chat-search-highlight';
-        highlight.textContent = match[0];
-        fragment.appendChild(highlight);
-        lastIndex = startIndex + match[0].length;
-      }
-
-      if (lastIndex < textContent.length) {
-        fragment.appendChild(document.createTextNode(textContent.slice(lastIndex)));
-      }
-
-      textNode.parentNode?.replaceChild(fragment, textNode);
-      didHighlight = true;
-    });
-
-    if (!didHighlight) {
-      const combinedText = textNodes.map((textNode) => textNode.nodeValue || '').join('');
-      const combinedMatchIndex = combinedText.toLowerCase().indexOf(query.toLowerCase());
-      if (combinedMatchIndex >= 0) {
-        let cursor = 0;
-        let startNode: Text | null = null;
-        let startOffset = 0;
-        let endNode: Text | null = null;
-        let endOffset = 0;
-        const matchEndIndex = combinedMatchIndex + query.length;
-
-        for (const textNode of textNodes) {
-          const textLength = (textNode.nodeValue || '').length;
-          const nodeStart = cursor;
-          const nodeEnd = cursor + textLength;
-
-          if (!startNode && combinedMatchIndex >= nodeStart && combinedMatchIndex <= nodeEnd) {
-            startNode = textNode;
-            startOffset = combinedMatchIndex - nodeStart;
-          }
-          if (!endNode && matchEndIndex >= nodeStart && matchEndIndex <= nodeEnd) {
-            endNode = textNode;
-            endOffset = matchEndIndex - nodeStart;
-            break;
-          }
-
-          cursor = nodeEnd;
-        }
-
-        if (startNode && endNode) {
-          const range = document.createRange();
-          range.setStart(startNode, startOffset);
-          range.setEnd(endNode, endOffset);
-
-          const highlight = document.createElement('mark');
-          highlight.className = 'chat-search-highlight';
-          highlight.appendChild(range.extractContents());
-          range.insertNode(highlight);
-          didHighlight = true;
-        }
-      }
-    }
-
-    if (!didHighlight) {
-      return retrySearchHighlight();
-    }
-
-    const refreshHighlight = retrySearchHighlight();
-    return () => {
-      refreshHighlight?.();
-      clearHighlights();
-    };
-  }, [activeSearchTarget, chatMessages, searchHighlightRetry, selectedSession?.id, visibleMessages]);
+  });
 
   useEffect(() => {
     if (hasPersistentSession) {
@@ -1093,50 +890,57 @@ function ChatInterface({
 
   return (
     <>
-      <div className="flex-1 min-h-0 flex flex-col">
-        <ChatMessagesPane
-          scrollContainerRef={scrollContainerRef}
-          onWheel={handleWheel}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onKeyDown={handleTranscriptKeyDown}
-          isLoadingSessionMessages={isLoadingSessionMessages}
-          sessionMessagesError={sessionMessagesError}
-          chatMessages={chatMessages}
-          selectedSession={selectedSession}
-          currentSessionId={currentSessionId}
-          provider={effectiveProvider}
-          setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
-          textareaRef={textareaRef}
-          codexModel={codexModel}
-          setCodexModel={handleSetCodexModel}
-          codexModelOptions={codexModelOptions}
-          codexReasoningEffort={codexReasoningEffort}
-          setCodexReasoningEffort={handleSetCodexReasoningEffort}
-          codexReasoningOptions={codexReasoningOptions}
-          setInput={setInput}
-          isLoadingMoreMessages={isLoadingMoreMessages}
-          hasMoreMessages={hasMoreMessages}
-          totalMessages={totalMessages}
-          visibleMessageCount={visibleMessageCount}
-          visibleMessages={visibleMessages}
-          loadEarlierMessages={loadEarlierMessages}
-          loadAllMessages={loadAllMessages}
-          allMessagesLoaded={allMessagesLoaded}
-          isLoadingAllMessages={isLoadingAllMessages}
-          loadAllJustFinished={loadAllJustFinished}
-          showLoadAllOverlay={showLoadAllOverlay}
-          createDiff={createDiff}
-          onFileOpen={onFileOpen}
-          onShowSettings={onShowSettings}
-          autoExpandTools={autoExpandTools}
-          showRawParameters={showRawParameters}
-          showThinking={showThinking}
-          isFollowingLatest={isFollowingLatest}
-          selectedProject={selectedProject}
+      <div className="flex-1 min-h-0 flex">
+        <ConversationBookmarks
+          bookmarks={conversationBookmarks}
+          onBookmarkSelect={onBookmarkSelect}
         />
 
-        <ChatComposer
+        <div className="min-w-0 flex-1 flex flex-col">
+          <ChatMessagesPane
+            scrollContainerRef={scrollContainerRef}
+            onWheel={handleWheel}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onKeyDown={handleTranscriptKeyDown}
+            isLoadingSessionMessages={isLoadingSessionMessages}
+            sessionMessagesError={sessionMessagesError}
+            chatMessages={chatMessages}
+            selectedSession={selectedSession}
+            currentSessionId={currentSessionId}
+            provider={effectiveProvider}
+            setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
+            textareaRef={textareaRef}
+            codexModel={codexModel}
+            setCodexModel={handleSetCodexModel}
+            codexModelOptions={codexModelOptions}
+            codexReasoningEffort={codexReasoningEffort}
+            setCodexReasoningEffort={handleSetCodexReasoningEffort}
+            codexReasoningOptions={codexReasoningOptions}
+            setInput={setInput}
+            isLoadingMoreMessages={isLoadingMoreMessages}
+            hasMoreMessages={hasMoreMessages}
+            totalMessages={totalMessages}
+            visibleMessageCount={visibleMessageCount}
+            visibleMessages={visibleMessages}
+            loadEarlierMessages={loadEarlierMessages}
+            loadAllMessages={loadAllMessages}
+            allMessagesLoaded={allMessagesLoaded}
+            isLoadingAllMessages={isLoadingAllMessages}
+            loadAllJustFinished={loadAllJustFinished}
+            showLoadAllOverlay={showLoadAllOverlay}
+            createDiff={createDiff}
+            onFileOpen={onFileOpen}
+            onShowSettings={onShowSettings}
+            autoExpandTools={autoExpandTools}
+            showRawParameters={showRawParameters}
+            showThinking={showThinking}
+            isFollowingLatest={isFollowingLatest}
+            selectedProject={selectedProject}
+            scrollTargetMessageKey={bookmarkScrollTargetKey}
+          />
+
+          <ChatComposer
           isLoading={isLoading}
           isComposerSubmitting={isComposerSubmitting}
           onAbortSession={handleAbortSession}
@@ -1225,7 +1029,8 @@ function ChatInterface({
           })}
           isTextareaExpanded={isTextareaExpanded}
           onTranscript={handleTranscript}
-        />
+          />
+        </div>
       </div>
     </>
   );

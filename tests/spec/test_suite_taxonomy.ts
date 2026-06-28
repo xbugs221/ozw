@@ -34,7 +34,7 @@ const SERVER_SMOKE_TEST_FILES = [
   'tests/backend/provider-session-change.test.ts',
   'tests/backend/sessions.test.ts',
 ] as const;
-const SERVER_TEST_COMMAND = `rm -rf .tmp/test-db/server && DATABASE_PATH=.tmp/test-db/server/ozw.db tsx --test ${BACKEND_TEST_GLOB}`;
+const SERVER_TEST_COMMAND = `rm -rf .tmp/test-db/server && DATABASE_PATH=.tmp/test-db/server/ozw.db tsx --test --test-concurrency=1 ${BACKEND_TEST_GLOB}`;
 const SPEC_NODE_TEST_COMMAND = 'rm -rf .tmp/test-db/spec-node && DATABASE_PATH=.tmp/test-db/spec-node/ozw.db tsx --test $(node scripts/list-node-spec-tests.mjs)';
 const ACTIVE_PATH_CONTRACT_ROOTS = ['backend', 'frontend', 'tests', 'scripts'];
 const CATEGORY_GUIDES = [

@@ -1,12 +1,13 @@
 /**
  * Sources: 2026-06-14-116-统一Pi与Codex聊天渲染反馈,
- * 2026-06-16-6-聊天Live渲染与工具卡片体系化
+ * 2026-06-16-6-聊天Live渲染与工具卡片体系化,
+ * 2026-06-28-33-回复结束折叠非正文内容
  *
  * PURPOSE: Verify Codex/Pi chat rendering parity with the real frontend
  * message component and merge utilities used by manual sessions.
  */
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test, { after } from 'node:test';
 import React from 'react';
@@ -21,6 +22,8 @@ import {
   filterRenderableMessages,
   reduceNativeRuntimeEvent,
 } from '../../frontend/components/chat/utils/nativeRuntimeTranscript.ts';
+import { buildTurnDisplayBlocks } from '../../frontend/components/chat/utils/turnNonBodyCollapse.ts';
+import { convertSessionMessages } from '../../frontend/components/chat/utils/messageTransforms.ts';
 
 const REPO_ROOT = process.cwd();
 const EVIDENCE_DIR = path.join(REPO_ROOT, 'test-results/chat-rendering-parity');
@@ -203,6 +206,13 @@ async function writeEvidence(relativeName: string, content: string): Promise<voi
 }
 
 /**
+ * Read production source for static rendering contract checks.
+ */
+async function readSource(relativePath: string): Promise<string> {
+  return readFile(path.join(REPO_ROOT, relativePath), 'utf8');
+}
+
+/**
  * Remove volatile React attribute noise before comparing tool-card structures.
  */
 function normalizeHtmlFingerprint(html: string): string {
@@ -238,6 +248,53 @@ function transcriptState(messages: ChatMessage[]): Array<Record<string, unknown>
     turnAnchorKey: message.turnAnchorKey,
     messageKey: message.messageKey,
   }));
+}
+
+/**
+ * Build a completed turn containing thinking, batch tools and final body.
+ */
+function completedTurnRows(): ChatMessage[] {
+  return [
+    row({
+      type: 'user',
+      content: '请检查项目并运行必要测试',
+      messageKey: 'turn-collapse-user',
+    }),
+    row({
+      type: 'assistant',
+      content: '我先阅读项目结构，再运行测试。',
+      isThinking: true,
+      messageKey: 'turn-collapse-thinking',
+    }),
+    row({
+      type: 'assistant',
+      isToolUse: true,
+      toolName: 'batch_execute',
+      toolCallId: 'turn-collapse-batch',
+      toolInput: {
+        commands: [
+          { command: 'pnpm exec tsc --noEmit' },
+          { command: 'pnpm exec vitest run' },
+        ],
+      },
+      toolResult: { content: 'typecheck ok\nvitest ok' },
+      messageKey: 'turn-collapse-batch-tool',
+    }),
+    row({
+      type: 'assistant',
+      isToolUse: true,
+      toolName: 'Bash',
+      toolCallId: 'turn-collapse-bash',
+      toolInput: { command: 'pnpm exec playwright test smoke.spec.ts' },
+      toolResult: { content: 'playwright smoke ok' },
+      messageKey: 'turn-collapse-single-tool',
+    }),
+    row({
+      type: 'assistant',
+      content: '检查完成：类型检查、单元测试和冒烟测试都通过。',
+      messageKey: 'turn-collapse-body',
+    }),
+  ];
 }
 
 test('Codex live assistant renders response text without Codex label or timestamp', async () => {
@@ -579,4 +636,311 @@ test('Codex goal completion notifications render as a milestone banner', async (
   assert.match(visibleTextFromHtml(html), /Goal completed/, 'banner must name the completed goal state');
   assert.match(visibleTextFromHtml(html), /8m 18s/, 'banner must show the task duration');
   assert.match(visibleTextFromHtml(html), /已创建一个覆盖四类需求的 oz 提案。/, 'banner must keep the completion summary visible');
+});
+
+test('completed turns collapse thinking and tool calls while keeping final body visible', async () => {
+  /**
+   * After the assistant body starts, intermediate thinking and tools are
+   * reviewable details rather than the primary reading path.
+   */
+  const blocks = buildTurnDisplayBlocks(completedTurnRows());
+  const nonBodyGroup = blocks.find((block) => block.kind === 'turn-non-body-group');
+  const assistantBody = blocks.find((block) => block.kind === 'assistant-body');
+
+  assert.ok(nonBodyGroup, 'thinking and tools before final body must enter a turn non-body group');
+  assert.equal(nonBodyGroup?.defaultOpen, false, 'completed turn details must default to collapsed');
+  assert.equal(assistantBody?.message?.messageKey, 'turn-collapse-body', 'final assistant body must stay directly visible');
+  assert.equal(
+    blocks.findIndex((block) => block.kind === 'turn-non-body-group') <
+      blocks.findIndex((block) => block.kind === 'assistant-body'),
+    true,
+    'non-body group must preserve transcript order before the final body',
+  );
+  assert.deepEqual(nonBodyGroup?.items?.map((item) => item.kind), ['thinking-group', 'tool-group', 'tool-group']);
+});
+
+test('assistant progress text between tool calls collapses with turn activity', async () => {
+  /**
+   * Commentary around tool calls is process narration, not final answer body;
+   * only the last assistant body in the turn should stay on the reading path.
+   */
+  const blocks = buildTurnDisplayBlocks([
+    row({
+      type: 'user',
+      content: '继续修工具调用折叠',
+      messageKey: 'turn-progress-user',
+    }),
+    row({
+      type: 'assistant',
+      content: '我先确认工具组结构。',
+      messageKey: 'turn-progress-note-one',
+    }),
+    row({
+      type: 'assistant',
+      isToolUse: true,
+      toolName: 'Read',
+      toolInput: { file_path: 'frontend/components/chat/view/subcomponents/TurnNonBodyGroup.tsx' },
+      toolResult: { content: 'source' },
+      toolCallId: 'turn-progress-read',
+      messageKey: 'turn-progress-tool-one',
+    }),
+    row({
+      type: 'assistant',
+      content: '现在补测试覆盖这个过程。',
+      messageKey: 'turn-progress-note-two',
+    }),
+    row({
+      type: 'assistant',
+      isToolUse: true,
+      toolName: 'Bash',
+      toolInput: { command: 'pnpm exec tsx --test tests/specs/chat-rendering-parity.spec.tsx' },
+      toolResult: { content: 'ok' },
+      toolCallId: 'turn-progress-test',
+      messageKey: 'turn-progress-tool-two',
+    }),
+    row({
+      type: 'assistant',
+      content: '完成：默认只展示这段最终正文。',
+      messageKey: 'turn-progress-final-body',
+    }),
+  ]);
+  const nonBodyGroup = blocks.find((block) => block.kind === 'turn-non-body-group');
+  const assistantBodies = blocks.filter((block) => block.kind === 'assistant-body');
+
+  assert.ok(nonBodyGroup, 'progress narration and tools must enter one non-body group');
+  assert.equal(nonBodyGroup?.defaultOpen, false, 'completed progress details must default to collapsed');
+  assert.deepEqual(
+    nonBodyGroup?.items?.map((item) => item.kind),
+    ['thinking-group', 'tool-group', 'thinking-group', 'tool-group'],
+  );
+  assert.deepEqual(
+    nonBodyGroup?.items
+      ?.filter((item) => item.kind === 'thinking-group')
+      .flatMap((item) => item.messages.map((message) => message.messageKey)),
+    ['turn-progress-note-one', 'turn-progress-note-two'],
+  );
+  assert.equal(assistantBodies.length, 1, 'only final assistant body should stay directly visible');
+  assert.equal(assistantBodies[0]?.message.messageKey, 'turn-progress-final-body');
+});
+
+test('Codex commentary phase history collapses before the final answer body', async () => {
+  /**
+   * Codex JSONL replays commentary as assistant text with phase metadata. Those
+   * rows are process narration and must not stay visible as final answer text.
+   */
+  const converted = convertSessionMessages([
+    {
+      type: 'user',
+      provider: 'codex',
+      timestamp: FIXED_TIMESTAMP,
+      messageKey: 'codex-commentary-user',
+      message: { role: 'user', content: '继续修默认折叠' },
+    },
+    {
+      type: 'assistant',
+      provider: 'codex',
+      timestamp: FIXED_TIMESTAMP,
+      messageKey: 'codex-commentary-note',
+      message: {
+        role: 'assistant',
+        phase: 'commentary',
+        content: '我先确认真实历史消息形态。',
+      },
+    },
+    {
+      type: 'tool_use',
+      provider: 'codex',
+      timestamp: FIXED_TIMESTAMP,
+      messageKey: 'codex-commentary-tool',
+      toolName: 'exec_command',
+      toolInput: { cmd: 'printf ok' },
+      toolCallId: 'codex-commentary-call',
+    },
+    {
+      type: 'tool_result',
+      provider: 'codex',
+      timestamp: FIXED_TIMESTAMP,
+      messageKey: 'codex-commentary-tool-result',
+      toolCallId: 'codex-commentary-call',
+      output: 'ok',
+    },
+    {
+      type: 'assistant',
+      provider: 'codex',
+      timestamp: FIXED_TIMESTAMP,
+      messageKey: 'codex-commentary-final',
+      message: { role: 'assistant', content: '完成：默认只展示正文回复。' },
+    },
+  ]);
+  const blocks = buildTurnDisplayBlocks(converted);
+  const nonBodyGroup = blocks.find((block) => block.kind === 'turn-non-body-group');
+  const assistantBodies = blocks.filter((block) => block.kind === 'assistant-body');
+
+  assert.equal(converted.find((message) => message.messageKey === 'codex-commentary-note')?.isThinking, true);
+  assert.ok(nonBodyGroup, 'commentary and tool activity must enter one collapsed process group');
+  assert.equal(nonBodyGroup?.defaultOpen, false, 'persisted Codex process detail must default to collapsed');
+  assert.deepEqual(nonBodyGroup?.items.map((item) => item.kind), ['thinking-group', 'tool-group']);
+  assert.equal(assistantBodies.length, 1, 'only the final assistant body should stay directly visible');
+  assert.equal(assistantBodies[0]?.message.messageKey, 'codex-commentary-final');
+});
+
+test('plain assistant body rows without tool activity stay visible', async () => {
+  /**
+   * Multiple normal assistant body rows are still answer content when the turn
+   * has no tool or thinking activity around them.
+   */
+  const blocks = buildTurnDisplayBlocks([
+    row({
+      type: 'user',
+      content: '给我两段说明',
+      messageKey: 'turn-plain-user',
+    }),
+    row({
+      type: 'assistant',
+      content: '第一段正文。',
+      messageKey: 'turn-plain-body-one',
+    }),
+    row({
+      type: 'assistant',
+      content: '第二段正文。',
+      messageKey: 'turn-plain-body-two',
+    }),
+  ]);
+
+  assert.equal(blocks.some((block) => block.kind === 'turn-non-body-group'), false);
+  assert.deepEqual(
+    blocks
+      .filter((block) => block.kind === 'assistant-body')
+      .map((block) => block.message.messageKey),
+    ['turn-plain-body-one', 'turn-plain-body-two'],
+  );
+});
+
+test('live turns keep non-body execution visible until assistant body starts', async () => {
+  /**
+   * Running turns must not hide active reasoning/tool progress before the
+   * final assistant response exists.
+   */
+  const liveRows = completedTurnRows()
+    .filter((message) => message.messageKey !== 'turn-collapse-body')
+    .map((message) => message.type === 'user'
+      ? message
+      : { ...message, source: 'codex-live', isStreaming: true });
+  const blocks = buildTurnDisplayBlocks(liveRows);
+  const nonBodyGroup = blocks.find((block) => block.kind === 'turn-non-body-group');
+
+  assert.ok(nonBodyGroup, 'live thinking and tools must still be grouped');
+  assert.equal(nonBodyGroup?.defaultOpen, true, 'live execution must default to expanded');
+  assert.equal(blocks.some((block) => block.kind === 'assistant-body'), false, 'live execution must not fabricate body blocks');
+});
+
+test('historical unfinished turns keep non-body details collapsed', async () => {
+  /**
+   * Persisted history can end before a final assistant body because of
+   * pagination or interruption, but it is no longer active websocket progress.
+   */
+  const historyRows = completedTurnRows().filter((message) => message.messageKey !== 'turn-collapse-body');
+  const blocks = buildTurnDisplayBlocks(historyRows);
+  const nonBodyGroup = blocks.find((block) => block.kind === 'turn-non-body-group');
+
+  assert.ok(nonBodyGroup, 'historical thinking and tools must still be grouped');
+  assert.equal(nonBodyGroup?.defaultOpen, false, 'non-live unfinished details must default to collapsed');
+});
+
+test('tool-only turn activity renders one collapsed tool group without row metadata', async () => {
+  /**
+   * Pure tool activity should collapse behind one count summary and then render
+   * tool cards directly without repeated provider labels or timestamps.
+   */
+  const turnGroupSource = await readSource('frontend/components/chat/view/subcomponents/TurnNonBodyGroup.tsx');
+  const messageSource = await readSource('frontend/components/chat/view/subcomponents/MessageComponent.tsx');
+  const subagentSource = await readSource('frontend/components/chat/tools/components/SubagentContainer.tsx');
+
+  assert.match(turnGroupSource, /isToolOnlyBlock/);
+  assert.match(turnGroupSource, /data-testid=["']turn-tool-list-group["']/);
+  assert.match(turnGroupSource, /data-testid=["']turn-tool-list-toggle["']/);
+  assert.match(turnGroupSource, /data-testid=["']turn-tool-list["']/);
+  assert.match(turnGroupSource, /工具调用\$\{toolInvocationCount\}次/);
+  assert.match(turnGroupSource, /suppressAssistantMetadata:\s*true/);
+  assert.match(messageSource, /suppressAssistantMetadata/);
+  assert.match(messageSource, /Boolean\(suppressAssistantMetadata\)/);
+  assert.doesNotMatch(turnGroupSource, /Tool call/);
+  assert.doesNotMatch(turnGroupSource, /data-testid=["']turn-tool-command["']/);
+  assert.doesNotMatch(turnGroupSource, /getCommandLabels/);
+  assert.doesNotMatch(subagentSource, /\{child\.toolName\}/);
+  assert.doesNotMatch(subagentSource, /`\$\{currentTool\.toolName\}…`/);
+  assert.doesNotMatch(subagentSource, /getToolIcon\(child\.toolName\)/);
+});
+
+test('tool disclosure chrome keeps right chevrons and one-shot target scrolling', async () => {
+  /**
+   * The transcript uses nested details rows; global CSS must not flip their
+   * right chevrons into left chevrons, and target jumps must not re-run after
+   * virtual row height measurements settle.
+   */
+  const cssSource = await readSource('frontend/index.css');
+  const commandContentSource = await readSource('frontend/components/chat/tools/components/ContentRenderers/ContextCommandContent.tsx');
+  const paneLayoutSource = await readSource('frontend/components/chat/view/subcomponents/chatMessagesPaneLayoutController.ts');
+  const searchNavigationSource = await readSource('frontend/components/chat/view/chatInterfaceSearchNavigation.ts');
+
+  assert.doesNotMatch(cssSource, /summary svg\[class\*=["']group-open["']\][\s\S]{0,80}rotate\(180deg\)/);
+  assert.match(commandContentSource, /aria-label=\{outputOpen \? 'Hide output' : 'Show output'\}/);
+  assert.doesNotMatch(commandContentSource, />\{outputOpen \? 'Hide output' : 'Show output'\}<\/span>/);
+  assert.match(paneLayoutSource, /appliedScrollTargetKeyRef/);
+  assert.match(paneLayoutSource, /appliedScrollTargetKeyRef\.current === targetKey/);
+  assert.match(searchNavigationSource, /scrolledSearchTargetRef/);
+  assert.match(searchNavigationSource, /applySearchHighlight\(targetElement, activeSearchTarget\.query, shouldScroll\)/);
+});
+
+test('batch tool summaries count commands across historical payload shapes', async () => {
+  /**
+   * Persisted sessions may store tool input as objects, JSON strings, or split
+   * tool_use/tool_result rows; summaries should count commands, not rows.
+   */
+  const stringInputRows = completedTurnRows().map((message) => (
+    message.messageKey === 'turn-collapse-batch-tool'
+      ? {
+        ...message,
+        toolInput: JSON.stringify({ command: 'pnpm exec tsc --noEmit\npnpm exec vitest run' }, null, 2),
+      }
+      : message
+  ));
+  const stringBlocks = buildTurnDisplayBlocks(stringInputRows);
+  const stringGroup = stringBlocks
+    .find((block) => block.kind === 'turn-non-body-group')
+    ?.items?.find((item) => item.groupKey === 'turn-collapse-batch');
+
+  const splitBlocks = buildTurnDisplayBlocks([
+    row({
+      type: 'user',
+      content: '运行两条命令',
+      messageKey: 'turn-collapse-split-user',
+    }),
+    row({
+      type: 'tool_use',
+      toolCallId: 'turn-collapse-split-batch',
+      toolName: 'Bash',
+      toolInput: { command: 'cmd1\ncmd2' },
+      messageKey: 'turn-collapse-split-tool-use',
+    }),
+    row({
+      type: 'tool_result',
+      toolCallId: 'turn-collapse-split-batch',
+      toolName: 'Bash',
+      toolResult: { content: 'ok' },
+      messageKey: 'turn-collapse-split-tool-result',
+    }),
+    row({
+      type: 'assistant',
+      content: '完成',
+      messageKey: 'turn-collapse-split-body',
+    }),
+  ]);
+  const splitGroup = splitBlocks
+    .find((block) => block.kind === 'turn-non-body-group')
+    ?.items?.find((item) => item.groupKey === 'turn-collapse-split-batch');
+
+  assert.equal(stringGroup?.commandCount, 2, 'JSON string toolInput must keep batch command count');
+  assert.equal(splitGroup?.messages?.length, 2, 'split tool_use/tool_result rows must stay in one tool group');
+  assert.equal(splitGroup?.commandCount, 2, 'tool_result rows must not add command count');
 });

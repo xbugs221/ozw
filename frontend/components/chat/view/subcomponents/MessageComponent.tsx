@@ -49,6 +49,7 @@ interface MessageComponentProps {
   autoExpandTools?: boolean;
   showRawParameters?: boolean;
   showThinking?: boolean;
+  suppressAssistantMetadata?: boolean;
   selectedProject?: Project | null;
   provider: Provider | string;
 }
@@ -92,7 +93,7 @@ function formatTaskDurationMs(value: unknown): string | null {
  * Render a single chat transcript message using shared visual contracts for
  * provider-agnostic flags such as isThinking and isToolUse.
  */
-const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFileOpen, onShowSettings, autoExpandTools, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFileOpen, onShowSettings, autoExpandTools, showRawParameters, showThinking, suppressAssistantMetadata, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const messageAttachments = Array.isArray(message.attachments)
     ? message.attachments
@@ -161,6 +162,7 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
   // Tool card rendering applies to both Codex and Pi
   const isToolCard = Boolean(message.isToolUse);
   const isRunningTool = isToolCard && (message.exitCode === null || message.status === 'running');
+  const isLiveTool = isToolCard && (isLiveToolSource(message.source) || message.isStreaming === true);
   const toolRenderId = useMemo(() => {
     /**
      * Persisted command_execution rows can render as one combined command/output
@@ -182,7 +184,7 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
   const isGoalCompletionNotification = isCompletedTaskNotification && message.taskKind === 'goal_complete';
   const completedTaskDuration = useMemo(() => formatTaskDurationMs(message.durationMs), [message.durationMs]);
   const selectedProjectRoot = selectedProject?.fullPath || selectedProject?.path || '';
-  const hideAssistantMetadata = isCodexLiveAssistant(message) || (isToolCard && isLiveToolSource(message.source));
+  const hideAssistantMetadata = Boolean(suppressAssistantMetadata) || isCodexLiveAssistant(message) || (isToolCard && isLiveToolSource(message.source));
 
   return (
     <div
@@ -292,7 +294,7 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
             {message.isToolUse ? (
               <div
                 data-testid="codex-tool-card"
-                data-collapsed={isRunningTool || autoExpandTools ? undefined : 'true'}
+                data-collapsed={isLiveTool ? undefined : 'true'}
               >
                 {isRunningTool && (
                   <div className="flex items-center gap-1.5 text-xs py-0.5 text-blue-600 dark:text-blue-400">
@@ -319,6 +321,7 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
                     showRawParameters={showRawParameters}
                     rawToolInput={typeof message.toolInput === 'string' ? message.toolInput : undefined}
                     isSubagentContainer={message.isSubagentContainer}
+                    isLiveTool={isLiveTool}
                     subagentState={message.subagentState}
                   />
                 )}
@@ -373,6 +376,7 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
                       selectedProject={selectedProject}
                       autoExpandTools={autoExpandTools}
                       isSubagentContainer={message.isSubagentContainer}
+                      isLiveTool={isLiveTool}
                       subagentState={message.subagentState}
                     />
                   )

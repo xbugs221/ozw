@@ -27,11 +27,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Server tests
-        run: pnpm test:server
-
       - name: Node spec tests
-        run: pnpm test:spec:node
+        run: pnpm run test:ci

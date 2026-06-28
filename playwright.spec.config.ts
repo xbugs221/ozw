@@ -1,7 +1,7 @@
 /**
- * PURPOSE: Dedicated Playwright configuration for OpenSpec acceptance tests in tests/spec
- * and oz change contract tests under docs/changes.
- * Reuses the main e2e fixture/bootstrap pipeline while scoping execution to spec-derived tests.
+ * PURPOSE: Dedicated Playwright configuration for OpenSpec acceptance tests,
+ * oz change contract tests, and explicitly targeted e2e acceptance specs.
+ * Reuses the main e2e fixture/bootstrap pipeline while keeping test discovery scoped.
  */
 import baseConfig from './playwright.config.ts';
 
@@ -15,6 +15,7 @@ export default {
   testDir: '.',
   testMatch: [
     'tests/spec/**/*.spec.ts',
+    'tests/e2e/**/*.spec.ts',
     'docs/changes/**/tests/**/*.spec.ts',
   ],
 };

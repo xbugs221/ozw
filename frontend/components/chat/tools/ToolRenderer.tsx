@@ -29,6 +29,7 @@ interface ToolRendererProps {
   showRawParameters?: boolean;
   rawToolInput?: string;
   isSubagentContainer?: boolean;
+  isLiveTool?: boolean;
   subagentState?: {
     childTools: SubagentChildTool[];
     currentToolIndex: number;
@@ -73,11 +74,11 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
   onFileOpen,
   createDiff,
   selectedProject,
-  autoExpandTools = false,
   enableResultAnchor = true,
   showRawParameters = false,
   rawToolInput,
   isSubagentContainer,
+  isLiveTool = false,
   subagentState
 }) => {
   // Route subagent containers to dedicated component
@@ -90,7 +91,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
         toolInput={toolInput}
         toolResult={toolResult}
         subagentState={subagentState ?? { childTools: [], currentToolIndex: -1, isComplete: Boolean(toolResult) }}
-        autoExpandTools={autoExpandTools}
+        isLiveTool={isLiveTool}
       />
     );
   }
@@ -236,9 +237,11 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
       displayConfig.contentType === 'context-command' ||
       displayConfig.title === 'Context command'
     );
-    const defaultOpen = mode === 'result'
-      ? Boolean(displayConfig.defaultOpen)
-      : (isContextModeInput && Boolean(displayConfig.defaultOpen));
+    const defaultOpen = isLiveTool && (
+      mode === 'result'
+        ? Boolean(displayConfig.defaultOpen)
+        : (isContextModeInput && Boolean(displayConfig.defaultOpen))
+    );
 
     const contentProps = displayConfig.getContentProps?.(safeData, {
       selectedProject,

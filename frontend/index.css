@@ -951,12 +951,6 @@
     color: rgb(243 244 246) !important;
   }
 
-  /* Tool details chevron animation */
-  details[open] .details-chevron,
-  details[open] summary svg[class*="group-open"] {
-    transform: rotate(180deg);
-  }
-
   /* Smooth chevron transition */
   .details-chevron,
   summary svg[class*="transition-transform"] {

@@ -1,0 +1,124 @@
+{
+  "summary": "验收高价值模块重构、测试文档同步和 GitHub CI/CD 失败修复：聊天入口、消息面板、项目状态 hook 降为可审查边界，本地 test:ci 与 GitHub node-checks 对齐，并记录最近失败 run 与修复后的通过证据。",
+  "coverage": [
+    {
+      "spec": "需求：高价值入口降为可审查编排层 / 场景：聊天和项目状态入口满足行数与职责边界",
+      "tests": ["contract-high-value-boundary"],
+      "evidence": ["module-boundary-audit"],
+      "risk": "具体拆分命名可不同，但必须有等价 focused modules 和默认测试覆盖。"
+    },
+    {
+      "spec": "需求：高价值入口降为可审查编排层 / 场景：复杂逻辑迁入 focused modules",
+      "tests": ["contract-high-value-boundary"],
+      "evidence": ["module-boundary-audit"],
+      "risk": "如执行阶段调整 focused module 文件名，必须同步更新合同并说明原因。"
+    },
+    {
+      "spec": "需求：GitHub CI/CD 失败被真实修复 / 场景：CI 质量门与本地脚本对齐",
+      "tests": ["contract-ci-quality-gate"],
+      "evidence": ["ci-gate-audit"],
+      "risk": "当前 node-checks 不强制运行 browser e2e 全量，browser 仍由既有 full gate 覆盖。"
+    },
+    {
+      "spec": "需求：GitHub CI/CD 失败被真实修复 / 场景：最近失败 run 有复现和修复证据",
+      "tests": ["contract-ci-quality-gate"],
+      "evidence": ["github-ci-failure-metadata", "github-ci-after-fix-metadata"],
+      "risk": "GitHub 日志正文可能为空，最低证据是 run 元数据、本地同入口质量门和修复后的通过 run。"
+    },
+    {
+      "spec": "需求：测试和文档跟随重构更新 / 场景：durable spec、索引和默认测试同步",
+      "tests": ["contract-docs-tests-sync"],
+      "evidence": ["docs-tests-sync-audit"],
+      "risk": "若规格合并进既有文档，必须保留可检索标题和索引链接。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-high-value-boundary",
+      "source": "change_contract",
+      "path": "docs/changes/34-重构高价值模块并修复CI/tests/high-value-module-boundary.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/34-重构高价值模块并修复CI/tests/high-value-module-boundary.acceptance.test.ts",
+      "purpose": "证明高价值入口文件降为可审查编排层，并产出 module-boundary-audit 到 test-results/high-value-refactor/module-audit.json。",
+      "assertions": [
+        "ChatInterface.tsx、ChatMessagesPane.tsx、useProjectsState.ts 均低于合同预算",
+        "入口文件不得新增 @ts-nocheck",
+        "搜索定位、状态校准、消息面板布局、项目刷新和项目状态 reducer 均有 focused module 承载"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于入口文件超预算或缺少 focused modules。"
+    },
+    {
+      "id": "contract-ci-quality-gate",
+      "source": "change_contract",
+      "path": "docs/changes/34-重构高价值模块并修复CI/tests/ci-quality-gate.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/34-重构高价值模块并修复CI/tests/ci-quality-gate.acceptance.test.ts",
+      "purpose": "证明本地 test:ci 与 GitHub node-checks 对齐，并产出 ci-gate-audit、github-ci-failure-metadata 和 github-ci-after-fix-metadata 证据路径。",
+      "assertions": [
+        "package.json 必须提供 test:ci",
+        "test:ci 必须覆盖 typecheck、test:vitest、test:server 和 test:spec:node",
+        ".github/workflows/ci.yml 必须执行一致质量门且不得跳过 Node spec tests",
+        "失败 run 28289064798 和修复后通过 run 必须有元数据记录"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于缺少 test:ci、workflow 未对齐或缺少修复后 CI 元数据。"
+    },
+    {
+      "id": "contract-docs-tests-sync",
+      "source": "change_contract",
+      "path": "docs/changes/34-重构高价值模块并修复CI/tests/docs-tests-sync.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/34-重构高价值模块并修复CI/tests/docs-tests-sync.acceptance.test.ts",
+      "purpose": "证明 durable spec、规格索引和默认测试已跟随重构与 CI 修复同步，并产出 docs-tests-sync-audit。",
+      "assertions": [
+        "docs/specs/high-value-module-refactor.md 必须存在或等价规格必须可检索",
+        "docs/specs/index.md 必须链接高价值模块重构和 CI 修复规格",
+        "tests/specs/high-value-module-refactor.spec.ts 必须覆盖默认模块边界",
+        "tests/spec/ci-quality-gate-contract.ts 必须覆盖默认 CI 质量门"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于缺少 durable spec、索引链接或默认测试。"
+    },
+    {
+      "id": "root-ci-local-gate",
+      "source": "existing_regression",
+      "path": "package.json",
+      "command": "node -e \"JSON.parse(require('fs').readFileSync('package.json','utf8'))\" && pnpm run test:ci",
+      "purpose": "用本地与 GitHub node-checks 对齐的质量门证明 CI/CD 修复不是只改文档。",
+      "assertions": [
+        "typecheck 通过",
+        "Vitest 通过",
+        "server tests 通过",
+        "Node spec tests 通过"
+      ],
+      "expected_initial_failure": "新增 test:ci 前应失败于缺少脚本。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "module-boundary-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/high-value-refactor/module-audit.json",
+      "purpose": "记录目标入口文件行数、ts-nocheck 状态和 focused module 存在性；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "ci-gate-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/github-ci/ci-gate-audit.json",
+      "purpose": "记录 package scripts 与 GitHub workflow 的质量门对齐情况；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "github-ci-failure-metadata",
+      "kind": "runtime_log",
+      "path": "test-results/github-ci/latest-failure.json",
+      "purpose": "记录 GitHub run 28289064798 的失败 job 和步骤；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "github-ci-after-fix-metadata",
+      "kind": "runtime_log",
+      "path": "test-results/github-ci/after-fix-run.json",
+      "purpose": "记录修复后同一 GitHub CI workflow 的通过 run；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "docs-tests-sync-audit",
+      "kind": "state_snapshot",
+      "path": "test-results/high-value-refactor/docs-tests-sync.json",
+      "purpose": "记录 durable spec、索引和默认测试是否同步；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

@@ -2,30 +2,21 @@
  * PURPOSE: Render the scrollable chat transcript, including history pagination affordances.
  */
 import { useTranslation } from 'react-i18next';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   Dispatch,
   KeyboardEvent as ReactKeyboardEvent,
   RefObject,
   SetStateAction,
   TouchEvent as ReactTouchEvent,
-  UIEvent as ReactUIEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
 
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
+import TurnNonBodyGroup from './TurnNonBodyGroup';
 import type { ChatMessage } from '../../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
-import { getIntrinsicMessageKey } from '../../utils/messageKeys';
-import {
-  buildTranscriptVirtualLayout,
-  calculateTranscriptVirtualRange,
-} from '../../utils/transcriptVirtualization';
-
-const MAX_RENDERED_TRANSCRIPT_MESSAGES = 150;
-const VIRTUAL_MESSAGE_OVERSCAN = 32;
-const ESTIMATED_MESSAGE_HEIGHT = 96;
+import { useChatMessagesPaneLayout } from './chatMessagesPaneLayoutController';
 
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
@@ -67,6 +58,7 @@ interface ChatMessagesPaneProps {
   showThinking?: boolean;
   isFollowingLatest: boolean;
   selectedProject: Project;
+  scrollTargetMessageKey?: string | null;
 }
 
 export default function ChatMessagesPane({
@@ -109,218 +101,35 @@ export default function ChatMessagesPane({
   showThinking,
   isFollowingLatest,
   selectedProject,
+  scrollTargetMessageKey,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
-  const messageKeyMapRef = useRef<WeakMap<ChatMessage, string>>(new WeakMap());
-  const allocatedKeysRef = useRef<Set<string>>(new Set());
-  const generatedMessageKeyCounterRef = useRef(0);
-  const measuredHeightsRef = useRef<Map<string, number>>(new Map());
-  const pendingMeasurementFrameRef = useRef<number | null>(null);
-  const followLatestScrollFrameRef = useRef<number | null>(null);
-  const followLatestSecondScrollFrameRef = useRef<number | null>(null);
-  const hasPendingMeasurementUpdateRef = useRef(false);
-  const [measurementVersion, setMeasurementVersion] = useState(0);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
   const renderedMessageCount = chatMessages.length;
   const visibleRenderedMessageCount = visibleMessages.length;
   const hasHiddenRenderedHistory = renderedMessageCount > visibleRenderedMessageCount;
   const shouldShowTopHistoryHint =
     hasMoreMessages && !isLoadingMoreMessages && !allMessagesLoaded && hasHiddenRenderedHistory;
-
-  // Keep keys stable across prepends so existing MessageComponent instances retain local state.
-  const getMessageKey = useCallback((message: ChatMessage) => {
-    const existingKey = messageKeyMapRef.current.get(message);
-    if (existingKey) {
-      return existingKey;
-    }
-
-    const intrinsicKey = getIntrinsicMessageKey(message);
-    if (intrinsicKey) {
-      messageKeyMapRef.current.set(message, intrinsicKey);
-      return intrinsicKey;
-    }
-
-    let candidateKey: string;
-    do {
-      generatedMessageKeyCounterRef.current += 1;
-      candidateKey = `message-generated-${generatedMessageKeyCounterRef.current}`;
-    } while (allocatedKeysRef.current.has(candidateKey));
-
-    allocatedKeysRef.current.add(candidateKey);
-    messageKeyMapRef.current.set(message, candidateKey);
-    return candidateKey;
-  }, []);
-
-  const reactMessageKeys = useMemo(() => visibleMessages.map((message) => getMessageKey(message)), [
+  const {
     getMessageKey,
+    handleScroll,
+    maxRenderedTranscriptMessages,
+    measureMessage,
+    reactMessageKeys,
+    virtualDisplayBlocks,
+    virtualRange,
+  } = useChatMessagesPaneLayout({
     visibleMessages,
-  ]);
-  const businessMessageKeys = useMemo(
-    () => visibleMessages.map((message) => message.messageKey || getMessageKey(message)),
-    [getMessageKey, visibleMessages],
-  );
-
-  /**
-   * Estimate prefix offsets from measured row heights so the rendered DOM range
-   * can move continuously through already-loaded messages.
-   */
-  const virtualLayout = useMemo(() => {
-    return buildTranscriptVirtualLayout(
-      reactMessageKeys,
-      measuredHeightsRef.current,
-      ESTIMATED_MESSAGE_HEIGHT,
-    );
-  }, [reactMessageKeys, measurementVersion, visibleMessages.length]);
-
-  const virtualRange = useMemo(() => {
-    return calculateTranscriptVirtualRange({
-      messageCount: visibleMessages.length,
-      offsets: virtualLayout.offsets,
-      totalHeight: virtualLayout.totalHeight,
-      scrollTop,
-      viewportHeight,
-      estimatedMessageHeight: ESTIMATED_MESSAGE_HEIGHT,
-      maxRenderedMessages: MAX_RENDERED_TRANSCRIPT_MESSAGES,
-      overscan: VIRTUAL_MESSAGE_OVERSCAN,
-    });
-  }, [scrollTop, viewportHeight, virtualLayout, visibleMessages.length]);
-
-  const virtualMessages = useMemo(
-    () => visibleMessages.slice(virtualRange.start, virtualRange.end),
-    [virtualRange.end, virtualRange.start, visibleMessages],
-  );
-
-  const handleScroll = useCallback((event: ReactUIEvent<HTMLDivElement>) => {
-    const element = event.currentTarget;
-    setScrollTop(element.scrollTop);
-    setViewportHeight(element.clientHeight);
-  }, []);
-
-  const scheduleFollowLatestMeasurementScroll = useCallback(() => {
-    /**
-     * Keep explicit follow mode pinned after virtual rows settle from estimated
-     * heights to measured tool/markdown heights.
-     */
-    if (!isFollowingLatest) {
-      return;
-    }
-
-    if (followLatestScrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(followLatestScrollFrameRef.current);
-    }
-    if (followLatestSecondScrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(followLatestSecondScrollFrameRef.current);
-      followLatestSecondScrollFrameRef.current = null;
-    }
-
-    const scrollToMeasuredBottom = () => {
-      const container = scrollContainerRef.current;
-      if (!container) {
-        return;
-      }
-      container.scrollTop = container.scrollHeight;
-      setScrollTop(container.scrollTop);
-      setViewportHeight(container.clientHeight);
-    };
-
-    followLatestScrollFrameRef.current = window.requestAnimationFrame(() => {
-      followLatestScrollFrameRef.current = null;
-      scrollToMeasuredBottom();
-      followLatestSecondScrollFrameRef.current = window.requestAnimationFrame(() => {
-        followLatestSecondScrollFrameRef.current = null;
-        scrollToMeasuredBottom();
-      });
-    });
-  }, [isFollowingLatest, scrollContainerRef]);
-
-  const measureMessage = useCallback((messageKey: string, element: HTMLDivElement | null) => {
-    if (!element) {
-      return;
-    }
-
-    const nextHeight = Math.max(1, element.getBoundingClientRect().height);
-    const previousHeight = measuredHeightsRef.current.get(messageKey);
-    if (!previousHeight || Math.abs(previousHeight - nextHeight) > 1) {
-      measuredHeightsRef.current.set(messageKey, nextHeight);
-      hasPendingMeasurementUpdateRef.current = true;
-      if (pendingMeasurementFrameRef.current === null) {
-        pendingMeasurementFrameRef.current = window.requestAnimationFrame(() => {
-          pendingMeasurementFrameRef.current = null;
-          if (!hasPendingMeasurementUpdateRef.current) {
-            return;
-          }
-          hasPendingMeasurementUpdateRef.current = false;
-          setMeasurementVersion((version) => version + 1);
-        });
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (pendingMeasurementFrameRef.current !== null) {
-        window.cancelAnimationFrame(pendingMeasurementFrameRef.current);
-        pendingMeasurementFrameRef.current = null;
-      }
-      if (followLatestScrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(followLatestScrollFrameRef.current);
-        followLatestScrollFrameRef.current = null;
-      }
-      if (followLatestSecondScrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(followLatestSecondScrollFrameRef.current);
-        followLatestSecondScrollFrameRef.current = null;
-      }
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    scheduleFollowLatestMeasurementScroll();
-  }, [measurementVersion, scheduleFollowLatestMeasurementScroll]);
-
-  useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) {
-      return;
-    }
-
-    setScrollTop(container.scrollTop);
-    setViewportHeight(container.clientHeight);
-  }, [scrollContainerRef, visibleMessages.length]);
-
-  useLayoutEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const targetKey = params.get('messageKey');
-    if (!targetKey || visibleMessages.length === 0) {
-      return;
-    }
-
-    const targetIndex = businessMessageKeys.findIndex((key) => key === targetKey);
-    const container = scrollContainerRef.current;
-    if (targetIndex < 0 || !container) {
-      return;
-    }
-
-    const targetTop = virtualLayout.offsets[targetIndex] || 0;
-    container.scrollTop = Math.max(0, targetTop - Math.floor(container.clientHeight / 2));
-    setScrollTop(container.scrollTop);
-    setViewportHeight(container.clientHeight);
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const targetElement = document.querySelector<HTMLElement>(
-          `.chat-message[data-message-key="${CSS.escape(targetKey)}"]`,
-        );
-        targetElement?.scrollIntoView({ block: 'center', behavior: 'auto' });
-      });
-    });
-  }, [businessMessageKeys, scrollContainerRef, virtualLayout.offsets, visibleMessages.length]);
+    scrollContainerRef,
+    isFollowingLatest,
+    scrollTargetMessageKey,
+  });
 
   return (
     <div
       ref={scrollContainerRef}
       data-testid="chat-scroll-container"
       data-virtualized="true"
-      data-render-window-size={MAX_RENDERED_TRANSCRIPT_MESSAGES}
+      data-render-window-size={maxRenderedTranscriptMessages}
       onScroll={handleScroll}
       onWheel={onWheel}
       onTouchStart={onTouchStart}
@@ -446,30 +255,49 @@ export default function ChatMessagesPane({
             <div aria-hidden="true" style={{ height: virtualRange.paddingTop }} />
           )}
 
-          {virtualMessages.map((message, index) => {
-            const sourceIndex = virtualRange.start + index;
+          {virtualDisplayBlocks.map((block, index) => {
+            const isNonBodyGroup = block.kind === 'turn-non-body-group';
+            const message = isNonBodyGroup ? null : block.message;
+            const sourceIndex = message ? visibleMessages.indexOf(message) : virtualRange.start + index;
             const prevMessage = sourceIndex > 0 ? visibleMessages[sourceIndex - 1] : null;
-            const messageKey = reactMessageKeys[sourceIndex] || getMessageKey(message);
+            const blockKey = isNonBodyGroup
+              ? `turn-non-body-${block.turnKey}-${index}`
+              : reactMessageKeys[sourceIndex] || getMessageKey(block.message);
             return (
               <div
-                key={messageKey}
-                ref={(element) => measureMessage(messageKey, element)}
+                key={blockKey}
+                ref={(element) => measureMessage(blockKey, element)}
                 className="mb-3 sm:mb-4 last:mb-0"
                 data-virtual-row="chat-message"
               >
-                <MessageComponent
-                  message={message}
-                  index={sourceIndex}
-                  prevMessage={prevMessage}
-                  createDiff={createDiff}
-                  onFileOpen={onFileOpen}
-                  onShowSettings={onShowSettings}
-                  autoExpandTools={autoExpandTools}
-                  showRawParameters={showRawParameters}
-                  showThinking={showThinking}
-                  selectedProject={selectedProject}
-                  provider={provider}
-                />
+                {block.kind === 'turn-non-body-group' ? (
+                  <TurnNonBodyGroup
+                    block={block}
+                    blockIndex={index}
+                    createDiff={createDiff}
+                    onFileOpen={onFileOpen}
+                    onShowSettings={onShowSettings}
+                    autoExpandTools={autoExpandTools}
+                    showRawParameters={showRawParameters}
+                    showThinking={showThinking}
+                    selectedProject={selectedProject}
+                    provider={provider}
+                  />
+                ) : (
+                  <MessageComponent
+                    message={block.message}
+                    index={sourceIndex}
+                    prevMessage={prevMessage}
+                    createDiff={createDiff}
+                    onFileOpen={onFileOpen}
+                    onShowSettings={onShowSettings}
+                    autoExpandTools={autoExpandTools}
+                    showRawParameters={showRawParameters}
+                    showThinking={showThinking}
+                    selectedProject={selectedProject}
+                    provider={provider}
+                  />
+                )}
               </div>
             );
           })}

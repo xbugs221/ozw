@@ -1,0 +1,105 @@
+{
+  "summary": "验证长会话在用户到达顶部前主动预加载更早历史，同时保持滚动锚点、分页请求和虚拟渲染性能边界。",
+  "coverage": [
+    {
+      "spec": "需求：长会话历史提前预加载 / 场景：未到顶部时请求更早消息页",
+      "tests": ["contract-history-prefetch"],
+      "evidence": ["network-prefetch-page", "trace-history-prefetch"],
+      "risk": "具体预加载距离由执行阶段实现决定；合同只锁定旧 100px 顶部阈值之外必须发起请求。"
+    },
+    {
+      "spec": "需求：长会话历史提前预加载 / 场景：prepend 后阅读锚点不跳",
+      "tests": ["contract-history-prefetch", "existing-history-scroll-preservation"],
+      "evidence": ["screenshot-prefetch-anchor", "trace-history-prefetch"],
+      "risk": "超高单条消息导致的视觉细节仍需执行阶段截图人工复核。"
+    },
+    {
+      "spec": "需求：历史加载性能边界 / 场景：预加载不退化成全量加载",
+      "tests": ["contract-history-prefetch", "existing-chat-performance-boundary"],
+      "evidence": ["network-prefetch-page"],
+      "risk": "不覆盖用户显式点击“加载全部消息”的路径。"
+    },
+    {
+      "spec": "需求：后端分页契约保持 / 场景：raw line cursor 不回退",
+      "tests": ["existing-session-incremental-read"],
+      "evidence": [],
+      "risk": "后端 cache miss 的安全回读路径仍允许读取更多内容，以保证正确性。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-history-prefetch",
+      "source": "change_contract",
+      "path": "docs/changes/32-优化长会话历史预加载/tests/history-prefetch.acceptance.spec.ts",
+      "command": "pnpm exec playwright test docs/changes/32-优化长会话历史预加载/tests/history-prefetch.acceptance.spec.ts --config=docs/changes/32-优化长会话历史预加载/playwright.config.ts",
+      "purpose": "证明长会话向上滚动到预加载区时，前端在到达顶部前请求更早消息页，并保持锚点和 DOM 上限。",
+      "assertions": [
+        "打开真实 history-scroll 长会话后，只能看到最新尾部消息作为初始入口",
+        "当滚动容器处于 scrollTop > 100 的上方预加载区时，出现 limit=100 且 offset>=100 的消息请求",
+        "更早页返回后滚动位置仍大于 100，没有跳到顶部或底部",
+        "继续向上滚动可以看到更早历史消息",
+        "预加载过程中没有默认无界 messages 请求，DOM 中 .chat-message 数量不超过 150"
+      ],
+      "expected_initial_failure": "旧实现只在接近顶部时触发加载；测试会在 scrollTop > 100 的位置等待更早页请求并超时。"
+    },
+    {
+      "id": "existing-history-scroll-preservation",
+      "source": "existing_regression",
+      "path": "tests/e2e/history-scroll-preservation.spec.ts",
+      "command": "pnpm exec playwright test tests/e2e/history-scroll-preservation.spec.ts",
+      "purpose": "证明已有顶部加载、滚动锚点、外部追加和长会话虚拟渲染流程不回退。",
+      "assertions": [
+        "打开历史会话时从最新消息开始",
+        "滚动到顶部仍能加载更早消息并保持阅读锚点",
+        "外部追加消息时，已滚动用户不会被强制跟随到底部"
+      ],
+      "expected_initial_failure": "不应失败；若失败说明本提案执行前已有回归或测试环境问题。"
+    },
+    {
+      "id": "existing-session-incremental-read",
+      "source": "existing_regression",
+      "path": "tests/specs/session-incremental-read.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/session-incremental-read.spec.ts",
+      "purpose": "证明后端 JSONL afterLine 和 raw line cursor 分页语义保持。",
+      "assertions": [
+        "Codex/Pi afterLine cache hit 只读取新增尾部消息",
+        "Codex afterLine 边界不重复旧消息",
+        "读取期间不调用 JSONL FileHandle.readFile 全量读"
+      ],
+      "expected_initial_failure": "不应失败；本变更不应破坏后端 cursor 合同。"
+    },
+    {
+      "id": "existing-chat-performance-boundary",
+      "source": "existing_regression",
+      "path": "tests/specs/chat-performance-boundary.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/chat-performance-boundary.spec.ts",
+      "purpose": "证明消息列表虚拟化和加载全部分页预算仍存在。",
+      "assertions": [
+        "加载全部历史仍通过分批读取实现",
+        "消息列表虚拟渲染窗口上限不超过 150",
+        "文件提及和长消息性能保护没有回退"
+      ],
+      "expected_initial_failure": "不应失败；若失败需先处理既有性能边界问题。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "network-prefetch-page",
+      "kind": "network",
+      "path": "test-results/32-history-prefetch/network-prefetch.json",
+      "purpose": "记录消息接口请求，证明未到顶部时已经请求 offset>=100 的更早页，且没有默认无界请求。"
+    },
+    {
+      "id": "screenshot-prefetch-anchor",
+      "kind": "screenshot",
+      "path": "test-results/32-history-prefetch/history-prefetch-anchor.png",
+      "purpose": "证明更早页 prepend 后页面仍停留在阅读锚点附近。"
+    },
+    {
+      "id": "trace-history-prefetch",
+      "kind": "trace",
+      "path": "test-results/32-history-prefetch/playwright/history-prefetch-trace.zip",
+      "purpose": "Playwright 复核时保留的浏览器 trace 运行产物。"
+    }
+  ]
+}

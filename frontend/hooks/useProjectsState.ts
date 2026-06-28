@@ -2,19 +2,21 @@
  * PURPOSE: Compose project, session, workflow, and sidebar state for the app
  * shell while delegating route, collection, and refresh business rules.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 import type { SocketMessageEnvelope } from '../contexts/WebSocketContext';
-import { getMessageHistoryTailSequence, getPendingSocketMessages, reduceProjectsUpdatedMessages, sessionChangedMatchesSelectedSession } from '../../shared/socket-message-utils';
+import { getMessageHistoryTailSequence } from '../../shared/socket-message-utils';
 import { api } from '../utils/api';
 import { createWindowRefreshCoordinator } from '../utils/windowRefreshCoordinator';
 import type { SessionProvider } from '../types/app';
 import { buildProjectRoute, buildProjectSessionRoute, buildProjectWorkflowRoute, buildWorkflowChildSessionRoute } from '../utils/projectRoute';
 import type { NewSessionOptions } from '../utils/workflowAutoStart';
-import { findWorkflowById, getDirectSessionRouteIndex, normalizePathname, resolveRouteSelection, shouldPollWorkflowPlanningSession } from './projects/projectRouteSelection';
-import { findProjectSessionById, getNextManualSessionLabel, getOptimisticManualSessionRouteIndex, getProjectSessions, insertSessionIntoProject, isUpdateAdditive, withSessionProjectMetadata } from './projects/projectSessionCollections';
+import { findWorkflowById, shouldPollWorkflowPlanningSession } from './projects/projectRouteSelection';
+import { getNextManualSessionLabel, getOptimisticManualSessionRouteIndex, getProjectSessions, insertSessionIntoProject, withSessionProjectMetadata } from './projects/projectSessionCollections';
 import { findRefreshedSelectedSession, isInterruptedFetch, isTemporarySessionId, mergeProjectOverview, mergeProjectSummaries, mergeProjectSummary, normalizeComparablePath, projectMatchesOverview, projectsHaveChanges, serialize } from './projects/projectRefreshReducer';
-import type { AppSocketMessage, AppTab, LoadingProgress, Project, ProjectSession, ProjectWorkflow, ProjectsUpdatedMessage } from '../types/app';
+import type { AppTab, LoadingProgress, Project, ProjectSession, ProjectWorkflow } from '../types/app';
+import { useProjectRouteSelectionSync, useProjectsRealtimeReducers } from './projectsStateReducers';
+import { refreshSidebarSelection } from './projectsStateRefreshController';
 type UseProjectsStateArgs = {
   locationPathname: string;
   locationSearch?: string;
@@ -234,118 +236,24 @@ export function useProjectsState({
       setSelectedProject(projects[0]);
     }
   }, [isLoadingProjects, locationPathname, projects, selectedProject]);
-  useEffect(() => {
-    const pendingMessages = getPendingSocketMessages(messageHistory, lastProcessedMessageSequenceRef.current);
-    if (pendingMessages.length === 0) {
-      return;
-    }
-    let projectListInvalidated: Record<string, unknown> | null = null;
-    for (const entry of pendingMessages) {
-      lastProcessedMessageSequenceRef.current = entry.sequence;
-      const latestMessage = entry.message as AppSocketMessage | null;
-      if (!latestMessage) {
-        continue;
-      }
-      if (latestMessage.type === 'loading_progress') {
-        if (loadingProgressTimeoutRef.current) {
-          clearTimeout(loadingProgressTimeoutRef.current);
-          loadingProgressTimeoutRef.current = null;
-        }
-        setLoadingProgress(latestMessage as LoadingProgress);
-        if (latestMessage.phase === 'complete') {
-          loadingProgressTimeoutRef.current = setTimeout(() => {
-            setLoadingProgress(null);
-            loadingProgressTimeoutRef.current = null;
-          }, 500);
-        }
-        continue;
-      }
-      if (latestMessage.type === 'session_changed') {
-        const changedSessionId = (latestMessage as Record<string, unknown>)?.sessionId as string | undefined;
-        if (sessionChangedMatchesSelectedSession(latestMessage as Record<string, unknown>, selectedSession)) {
-          setExternalMessageUpdate((previous) => previous + 1);
-        }
-        if (!selectedSession && selectedWorkflowRef.current && changedSessionId) {
-          const childSessions = selectedWorkflowRef.current.childSessions || [];
-          if (childSessions.some((cs) => sessionChangedMatchesSelectedSession(latestMessage as Record<string, unknown>, cs))) {
-            handleSidebarRefreshRef.current?.();
-          }
-        }
-        continue;
-      }
-      if (latestMessage.type === 'project_list_invalidated') {
-        projectListInvalidated = latestMessage as Record<string, unknown>;
-        continue;
-      }
-      if (latestMessage.type === 'workflow_changed') {
-        const changedRunId = (latestMessage as Record<string, unknown>)?.runId as string | undefined;
-        if (selectedWorkflowRef.current?.runId && changedRunId && selectedWorkflowRef.current.runId === changedRunId) {
-          handleSidebarRefreshRef.current?.();
-        }
-        continue;
-      }
-    }
-    if (projectListInvalidated) {
-      void (async () => {
-        const freshProjects = await requestCoordinatedProjectRefresh(projectListInvalidated);
-        if (!selectedProject) {
-          return;
-        }
-        if (selectedSession || selectedWorkflowRef.current) {
-          return;
-        }
-        const changedProjectPath = typeof projectListInvalidated?.changedProjectPath === 'string'
-          ? normalizeComparablePath(projectListInvalidated.changedProjectPath)
-          : '';
-        const selectedProjectPath = normalizeComparablePath(selectedProject.fullPath || selectedProject.path || '');
-        if (changedProjectPath && selectedProjectPath && changedProjectPath !== selectedProjectPath) {
-          return;
-        }
-        const refreshedProject = (freshProjects || projects).find((project) => (
-          project.name === selectedProject.name
-          || normalizeComparablePath(project.fullPath || project.path || '') === selectedProjectPath
-        )) || selectedProject;
-        await fetchProjectOverview(refreshedProject);
-      })();
-    }
-    const projectMessages = pendingMessages
-      .map((entry) => entry.message as ProjectsUpdatedMessage | null)
-      .filter((message): message is ProjectsUpdatedMessage => Boolean(message && message.type === 'projects_updated'));
-    if (projectMessages.length === 0) {
-      return;
-    }
-    const reducedState = reduceProjectsUpdatedMessages({
-      messages: projectMessages,
-      projects,
-      selectedProject,
-      selectedSession,
-      activeSessions,
-      getProjectSessions: getProjectSessions as unknown as (project: Record<string, unknown>) => Array<Record<string, unknown>>,
-      isUpdateAdditive: isUpdateAdditive as (
-        currentProjects: Array<Record<string, unknown>>,
-        updatedProjects: Array<Record<string, unknown>>,
-        selectedProject: Record<string, unknown> | null,
-        selectedSession: Record<string, unknown> | null,
-      ) => boolean,
-    }) as {
-      projects: Project[];
-      selectedProject: Project | null;
-      selectedSession: ProjectSession | null;
-      externalMessageUpdateCount: number;
-    };
-    if (reducedState.externalMessageUpdateCount > 0) {
-      setExternalMessageUpdate((previous) => previous + reducedState.externalMessageUpdateCount);
-    }
-    if (serialize(reducedState.projects) !== serialize(projects)) {
-      setProjects(reducedState.projects);
-    }
-    if (serialize(reducedState.selectedProject) !== serialize(selectedProject)) {
-      setSelectedProject(reducedState.selectedProject);
-    }
-    if (serialize(reducedState.selectedSession) !== serialize(selectedSession)) {
-      setSelectedSession(reducedState.selectedSession);
-    }
-  }, [fetchProjectOverview, messageHistory, selectedProject, selectedSession, activeSessions, projects, requestCoordinatedProjectRefresh]);
+  useProjectsRealtimeReducers({
+    activeSessions,
+    fetchProjectOverview,
+    handleSidebarRefreshRef,
+    lastProcessedMessageSequenceRef,
+    loadingProgressTimeoutRef,
+    messageHistory,
+    projects,
+    requestCoordinatedProjectRefresh,
+    selectedProject,
+    selectedSession,
+    selectedWorkflowRef,
+    setExternalMessageUpdate,
+    setLoadingProgress,
+    setProjects,
+    setSelectedProject,
+    setSelectedSession,
+  });
   useEffect(() => {
     return () => {
       if (loadingProgressTimeoutRef.current) {
@@ -354,121 +262,18 @@ export function useProjectsState({
       }
     };
   }, []);
-  useLayoutEffect(() => {
-    const legacySessionMatch = normalizePathname(locationPathname).match(/^\/session\/([^/]+)$/);
-    if (legacySessionMatch) {
-      const searchParams = new URLSearchParams(locationSearch);
-      const hintedProjectPath = searchParams.get('projectPath') || '';
-      const rawProvider = searchParams.get('provider');
-      const hintedProvider: SessionProvider = rawProvider === 'pi' ? 'pi' : 'codex';
-      const decodedSessionId = decodeURIComponent(legacySessionMatch[1]);
-      const requestedSessionSummary = String(searchParams.get('sessionSummary') || '').trim();
-      const matchedProject = projects.find((project) => (
-        normalizeComparablePath(project.fullPath || project.path || '') === normalizeComparablePath(hintedProjectPath)
-      )) || null;
-      const matchedSession = decodedSessionId && !matchedProject
-        ? findProjectSessionById(projects, decodedSessionId, hintedProvider)
-        : null;
-      const resolvedProject = matchedProject || matchedSession?.project || null;
-      if (resolvedProject && decodedSessionId) {
-        const existingSession = matchedSession?.session || getProjectSessions(resolvedProject).find(
-          (entry) => entry.id === decodedSessionId && (entry.__provider || hintedProvider) === hintedProvider,
-        );
-        const cNMatch = decodedSessionId.match(/^c(\d+)$/);
-        const cNRouteIndex = cNMatch ? Number(cNMatch[1]) : undefined;
-        const fallbackSession = {
-          id: decodedSessionId,
-          title: requestedSessionSummary || decodedSessionId,
-          summary: requestedSessionSummary || decodedSessionId,
-          routeIndex: existingSession?.routeIndex ?? cNRouteIndex,
-        } as ProjectSession;
-        const nextSession = withSessionProjectMetadata(
-          existingSession || fallbackSession,
-          resolvedProject,
-          hintedProvider,
-        );
-        if (serialize(selectedProject) !== serialize(resolvedProject)) {
-          setSelectedProject(resolvedProject);
-        }
-        if (
-          selectedSession?.id !== nextSession.id
-          || selectedSession?.__provider !== nextSession.__provider
-          || selectedSession?.__projectName !== nextSession.__projectName
-        ) {
-          setSelectedSession(nextSession);
-        }
-        if (selectedWorkflow) {
-          setSelectedWorkflow(null);
-        }
-      }
-      return;
-    }
-    const resolvedSelection = resolveRouteSelection(projects, locationPathname);
-    const resolvedProject = resolvedSelection.project;
-    const resolvedWorkflow = resolvedSelection.workflow;
-    const resolvedSession = resolvedSelection.session;
-    if (!resolvedProject) {
-      if (normalizePathname(locationPathname) === '/') {
-        if (selectedWorkflow) {
-          setSelectedWorkflow(null);
-        }
-        if (selectedSession) {
-          setSelectedSession(null);
-        }
-      }
-      return;
-    }
-    if (serialize(selectedProject) !== serialize(resolvedProject)) {
-      setSelectedProject(resolvedProject);
-    }
-    if (resolvedWorkflow) {
-      if (serialize(selectedWorkflow) !== serialize(resolvedWorkflow)) {
-        setSelectedWorkflow(resolvedWorkflow);
-      }
-      if (selectedSession) {
-        setSelectedSession(null);
-      }
-      return;
-    }
-    if (resolvedSession) {
-      const provider = resolvedSession.__provider || ((resolvedProject.codexSessions || []).some(
-        (session) => session.id === resolvedSession.id,
-      ) ? 'codex' : (resolvedProject.piSessions || []).some(
-        (session) => session.id === resolvedSession.id,
-      ) ? 'pi' : 'codex');
-      const nextSession = withSessionProjectMetadata(resolvedSession, resolvedProject, provider);
-      if (
-        selectedSession?.id !== nextSession.id
-        || selectedSession?.routeIndex !== nextSession.routeIndex
-        || selectedSession?.__provider !== nextSession.__provider
-        || selectedSession?.__projectName !== nextSession.__projectName
-      ) {
-        setSelectedSession(nextSession);
-      }
-      if (selectedWorkflow) {
-        setSelectedWorkflow(null);
-      }
-      return;
-    }
-    const directSessionRouteIndex = getDirectSessionRouteIndex(resolvedProject, locationPathname);
-    if (
-      selectedSession
-      && directSessionRouteIndex
-      && selectedSession.routeIndex === directSessionRouteIndex
-      && selectedSession.__projectName === resolvedProject.name
-    ) {
-      if (selectedWorkflow) {
-        setSelectedWorkflow(null);
-      }
-      return;
-    }
-    if (selectedSession) {
-      setSelectedSession(null);
-    }
-    if (selectedWorkflow) {
-      setSelectedWorkflow(null);
-    }
-  }, [locationPathname, locationSearch, projects, selectedProject, selectedSession, selectedWorkflow]);
+  useProjectRouteSelectionSync({
+    fetchProjectOverview,
+    locationPathname,
+    locationSearch,
+    projects,
+    selectedProject,
+    selectedSession,
+    selectedWorkflow,
+    setSelectedProject,
+    setSelectedSession,
+    setSelectedWorkflow,
+  });
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -708,62 +513,18 @@ export function useProjectsState({
     [navigate],
   );
   const handleSidebarRefresh = useCallback(async () => {
-    try {
-      const freshProjects = await requestCoordinatedProjectRefresh({
-        type: 'project_list_invalidated',
-        scope: 'projects:list',
-        reason: 'manual-sidebar-refresh',
-        version: String(Date.now()),
-      }) || projects;
-      const mergedFreshProjects = mergeProjectSummaries(projects, freshProjects);
-      setProjects((prevProjects) => {
-        const nextProjects = mergeProjectSummaries(prevProjects, freshProjects);
-        return projectsHaveChanges(prevProjects, nextProjects, true) ? nextProjects : prevProjects;
-      });
-      if (!selectedProject) {
-        return;
-      }
-      const refreshedProject = mergedFreshProjects.find((project) => project.name === selectedProject.name);
-      if (!refreshedProject) {
-        return;
-      }
-      if (serialize(refreshedProject) !== serialize(selectedProject)) {
-        setSelectedProject(refreshedProject);
-      }
-      if (!selectedSession) {
-        if (selectedWorkflow) {
-          const overview = await fetchProjectOverview(refreshedProject);
-          const workflowSource = overview || refreshedProject;
-          const refreshedWorkflow =
-            workflowSource.workflows?.find((workflow) => workflow.id === selectedWorkflow.id) || null;
-          if (serialize(refreshedWorkflow) !== serialize(selectedWorkflow)) {
-            setSelectedWorkflow(refreshedWorkflow);
-          }
-        }
-        return;
-      }
-      const refreshedSession = findRefreshedSelectedSession(
-        refreshedProject,
-        selectedSession,
-        getProjectSessions,
-      );
-      if (refreshedSession) {
-        const normalizedRefreshedSession = withSessionProjectMetadata(
-          refreshedSession,
-          refreshedProject,
-          selectedSession.__provider || 'codex',
-        );
-        if (serialize(normalizedRefreshedSession) !== serialize(selectedSession)) {
-          setSelectedSession(normalizedRefreshedSession);
-        }
-      }
-    } catch (error) {
-      if (isInterruptedFetch(error)) {
-        console.warn('Sidebar refresh was interrupted:', error);
-      } else {
-        console.error('Error refreshing sidebar:', error);
-      }
-    }
+    await refreshSidebarSelection({
+      fetchProjectOverview,
+      projects,
+      requestCoordinatedProjectRefresh,
+      selectedProject,
+      selectedSession,
+      selectedWorkflow,
+      setProjects,
+      setSelectedProject,
+      setSelectedSession,
+      setSelectedWorkflow,
+    });
   }, [fetchProjectOverview, projects, requestCoordinatedProjectRefresh, selectedProject, selectedSession, selectedWorkflow]);
   handleSidebarRefreshRef.current = handleSidebarRefresh;
   useEffect(() => {

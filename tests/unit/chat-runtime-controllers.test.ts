@@ -13,7 +13,7 @@ it('chatSessionLifecycleController plans pagination and visible windows', () => 
   expect(buildSessionLoadPlan({ loadMore: true, offset: 20, pageSize: 10 })).toEqual({ loadMore: true, offset: 20, limit: 10, hasKnownTotal: false });
   expect(applySessionLoadResult(['old'], { messages: ['new'], total: 2, nextRawLineOffset: 2 }, true).messages).toEqual(['old', 'new']);
   expect(buildVisibleMessageWindow(['a', 'b', 'c'], 2)).toEqual(['b', 'c']);
-  expect(buildVisibleMessageWindow(['a', 'b', 'c', 'd', 'e'], 3, 'message-position-3')).toEqual(['b', 'c', 'd']);
+  expect(buildVisibleMessageWindow(['a', 'b', 'c', 'd', 'e'], 3, 'message-position-3')).toEqual(['c', 'd', 'e']);
   expect(buildVisibleMessageWindow([
     { type: 'assistant', content: 'old 1', timestamp: '2026-06-27T00:00:00.000Z', messageKey: 'm1' },
     { type: 'assistant', content: 'old 2', timestamp: '2026-06-27T00:00:01.000Z', messageKey: 'm2' },

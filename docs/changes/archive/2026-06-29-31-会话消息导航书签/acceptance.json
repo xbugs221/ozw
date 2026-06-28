@@ -1,0 +1,136 @@
+{
+  "summary": "本次变更验收当前会话内用户消息导航书签：按用户消息生成书签，直接截取后续智能体最终回复正文前 50 个字符，点击后复用现有分页定位链路，并在桌面和手机端保持长会话性能边界。",
+  "coverage": [
+    {
+      "spec": "需求：当前会话生成用户消息书签 / 场景：用户消息与最终回复摘要配对",
+      "tests": ["contract-bookmark-index"],
+      "evidence": ["bookmark-state-snapshot"],
+      "risk": "不同 Provider 的特殊正文结构可能需要执行阶段补充更多真实样例。"
+    },
+    {
+      "spec": "需求：当前会话生成用户消息书签 / 场景：进行中消息保留书签",
+      "tests": ["contract-bookmark-index"],
+      "evidence": ["bookmark-state-snapshot"],
+      "risk": "流式完成后的摘要刷新时机需要端到端测试一起复核。"
+    },
+    {
+      "spec": "需求：点击书签定位当前会话消息 / 场景：已加载消息直接定位",
+      "tests": ["contract-bookmark-integration", "e2e-bookmark-navigation"],
+      "evidence": ["desktop-bookmark-screenshot", "bookmark-network-log"],
+      "risk": "高亮动画本身不固定时长，只验收目标进入视口。"
+    },
+    {
+      "spec": "需求：点击书签定位当前会话消息 / 场景：目标未加载时逐页加载",
+      "tests": ["contract-bookmark-integration", "e2e-bookmark-navigation"],
+      "evidence": ["bookmark-network-log"],
+      "risk": "旧消息是否可定位依赖服务端分页返回稳定 messageKey。"
+    },
+    {
+      "spec": "需求：桌面和手机端适配 / 场景：桌面常驻列表，手机抽屉入口",
+      "tests": ["contract-bookmark-integration", "e2e-bookmark-responsive"],
+      "evidence": ["desktop-bookmark-screenshot", "mobile-bookmark-screenshot"],
+      "risk": "截图复核视觉布局，源码契约不锁定具体像素值。"
+    },
+    {
+      "spec": "需求：长会话性能边界 / 场景：不全量加载、不破坏虚拟滚动",
+      "tests": ["contract-bookmark-index", "e2e-bookmark-performance"],
+      "evidence": ["bookmark-network-log", "bookmark-state-snapshot"],
+      "risk": "极端超长文本的浏览器性能需要执行阶段结合真实 trace 判断。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-bookmark-index",
+      "source": "change_contract",
+      "path": "docs/changes/31-会话消息导航书签/tests/message-bookmark-index.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/31-会话消息导航书签/tests/message-bookmark-index.acceptance.test.ts",
+      "purpose": "证明书签索引按用户消息生成，并直接截取最终助手回复正文前 50 个字符。",
+      "assertions": [
+        "每条用户消息生成一个书签",
+        "思考消息、工具消息和错误消息不会被当作最终回复摘要",
+        "assistantSummary 等于最终助手正文前 50 个字符且不追加省略号",
+        "没有最终回复时显示 pending 状态和“回复中”"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于缺少 conversationBookmarks.ts 或 buildConversationBookmarks 导出。"
+    },
+    {
+      "id": "contract-bookmark-integration",
+      "source": "change_contract",
+      "path": "docs/changes/31-会话消息导航书签/tests/message-bookmark-integration.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/31-会话消息导航书签/tests/message-bookmark-integration.acceptance.test.ts",
+      "purpose": "证明书签组件和聊天页接入了响应式入口、当前会话定位和分页加载边界。",
+      "assertions": [
+        "存在书签组件并提供桌面列表、手机按钮和手机面板",
+        "书签点击接入 messageKey 定位回调",
+        "书签组件不调用 loadAllMessages",
+        "聊天页保留逐页加载目标消息能力"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于缺少 ConversationBookmarks.tsx 或聊天页未接入。"
+    },
+    {
+      "id": "e2e-bookmark-navigation",
+      "source": "change_contract",
+      "path": "docs/changes/31-会话消息导航书签/tests/message-bookmark-e2e.acceptance.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts docs/changes/31-会话消息导航书签/tests/message-bookmark-e2e.acceptance.spec.ts --grep @navigation",
+      "purpose": "通过真实聊天页证明点击书签可以把对应用户消息滚动到视口。",
+      "assertions": [
+        "长会话页面显示书签列表",
+        "点击尾部用户消息书签后对应用户消息进入视口",
+        "网络请求没有无分页参数的全量 messages 请求"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于页面找不到书签列表或书签项。"
+    },
+    {
+      "id": "e2e-bookmark-responsive",
+      "source": "change_contract",
+      "path": "docs/changes/31-会话消息导航书签/tests/message-bookmark-e2e.acceptance.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts docs/changes/31-会话消息导航书签/tests/message-bookmark-e2e.acceptance.spec.ts --grep @responsive",
+      "purpose": "通过真实浏览器 viewport 证明桌面和手机入口符合用户可见适配要求。",
+      "assertions": [
+        "桌面端显示常驻书签列表",
+        "手机端隐藏桌面列表并显示书签按钮",
+        "点击手机按钮后显示书签抽屉"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于缺少桌面列表、手机按钮或手机面板。"
+    },
+    {
+      "id": "e2e-bookmark-performance",
+      "source": "change_contract",
+      "path": "docs/changes/31-会话消息导航书签/tests/message-bookmark-e2e.acceptance.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts docs/changes/31-会话消息导航书签/tests/message-bookmark-e2e.acceptance.spec.ts --grep @performance",
+      "purpose": "证明长会话打开和书签展示不会破坏现有分页与虚拟滚动性能边界。",
+      "assertions": [
+        "打开 1000+ 轮会话不发起无分页参数的 messages 请求",
+        "聊天消息 DOM 数量保持不超过 150",
+        "书签摘要长度不超过 50 个字符"
+      ],
+      "expected_initial_failure": "功能未实现时应失败于缺少书签摘要或性能边界断言无法满足。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "desktop-bookmark-screenshot",
+      "kind": "screenshot",
+      "path": "test-results/chat-message-bookmarks/desktop.png",
+      "purpose": "证明桌面端常驻书签列表可见且不遮挡聊天输入框；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "mobile-bookmark-screenshot",
+      "kind": "screenshot",
+      "path": "test-results/chat-message-bookmarks/mobile.png",
+      "purpose": "证明手机端书签按钮和抽屉可见；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "bookmark-network-log",
+      "kind": "network",
+      "path": "test-results/chat-message-bookmarks/network.json",
+      "purpose": "证明书签展示和跳转没有发起无分页参数的全量消息请求；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "bookmark-state-snapshot",
+      "kind": "state_snapshot",
+      "path": "test-results/chat-message-bookmarks/state.json",
+      "purpose": "记录书签数量、摘要长度和聊天 DOM 数量，便于复核长会话性能边界；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

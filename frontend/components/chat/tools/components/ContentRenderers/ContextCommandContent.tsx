@@ -166,8 +166,7 @@ export const ContextCodeCard: React.FC<ContextCodeCardProps> = ({
         >
           <summary
             role="button"
-            className="absolute left-1.5 top-1 z-20 inline-flex h-5 w-5 cursor-pointer list-none items-center justify-center font-mono text-[13px] leading-none text-gray-500 transition-colors select-none hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 [&::-webkit-details-marker]:hidden"
-            title={outputOpen ? 'Hide output' : 'Show output'}
+            className="absolute left-1.5 top-1 z-20 inline-flex h-5 cursor-pointer list-none items-center justify-center gap-1 rounded bg-white/90 px-1.5 font-mono text-[11px] leading-none text-gray-500 shadow-sm ring-1 ring-gray-200 transition-colors select-none hover:text-gray-900 dark:bg-gray-900/90 dark:text-gray-400 dark:ring-gray-700 dark:hover:text-gray-100 [&::-webkit-details-marker]:hidden"
             aria-label={outputOpen ? 'Hide output' : 'Show output'}
             aria-expanded={outputOpen}
             onClick={(event) => {
@@ -175,7 +174,7 @@ export const ContextCodeCard: React.FC<ContextCodeCardProps> = ({
               setShowControls(true);
             }}
           >
-            {outputOpen ? '▾' : '▸'}
+            <span aria-hidden="true">{outputOpen ? '▾' : '▸'}</span>
           </summary>
           {outputOpen ? (
             <pre className="max-h-80 overflow-auto border-t border-gray-200/70 bg-white px-2.5 py-2 text-[11px] font-mono whitespace-pre-wrap break-words text-gray-700 dark:border-gray-700/60 dark:bg-gray-950/30 dark:text-gray-200">

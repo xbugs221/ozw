@@ -20,9 +20,19 @@ export function applySessionLoadResult<TMessage>(previous: TMessage[], result: {
   return { messages, total: typeof result.total === 'number' ? result.total : messages.length, nextOffset: result.nextRawLineOffset ?? messages.length };
 }
 
-function getVisibleWindowMessageKey<TMessage>(message: TMessage, index: number): string {
-  /** 用和运行时冻结尾部一致的 key 规则定位窗口结束点。 */
-  return getIntrinsicMessageKey(message as ChatMessage) || `message-position-${index}`;
+export function getVisibleWindowMessageKey<TMessage>(message: TMessage, index: number): string {
+  /** 生成可见窗口锚点 key；没有 messageKey 的转换消息也要能跨 prepend 保持稳定。 */
+  const chatMessage = message as ChatMessage;
+  const intrinsicKey = getIntrinsicMessageKey(chatMessage);
+  if (intrinsicKey) {
+    return intrinsicKey;
+  }
+
+  const timestamp = chatMessage.timestamp instanceof Date
+    ? chatMessage.timestamp.toISOString()
+    : String(chatMessage.timestamp ?? '');
+  const content = typeof chatMessage.content === 'string' ? chatMessage.content.slice(0, 120) : '';
+  return `message-fallback:${chatMessage.type}:${timestamp}:${content}` || `message-position-${index}`;
 }
 
 export function buildVisibleMessageWindow<TMessage>(messages: TMessage[], visibleCount: number, frozenTailKey: string | null = null): TMessage[] {
