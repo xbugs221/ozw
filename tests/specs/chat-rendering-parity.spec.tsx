@@ -723,6 +723,46 @@ test('assistant progress text between tool calls collapses with turn activity', 
   assert.equal(assistantBodies[0]?.message.messageKey, 'turn-progress-final-body');
 });
 
+test('assistant body before trailing tool activity stays directly visible', async () => {
+  /**
+   * Some Codex history writes the assistant answer before follow-up tool
+   * activity in the same turn. That answer is still the primary message card.
+   */
+  const blocks = buildTurnDisplayBlocks([
+    row({
+      type: 'user',
+      content: '生成长正文后再调用工具',
+      messageKey: 'turn-body-before-tool-user',
+    }),
+    row({
+      type: 'assistant',
+      content: '这段最终正文必须直接显示。',
+      messageKey: 'turn-body-before-tool-final',
+    }),
+    row({
+      type: 'assistant',
+      isToolUse: true,
+      toolName: 'Task',
+      toolInput: { prompt: 'inspect result' },
+      toolResult: { content: 'done' },
+      toolCallId: 'turn-body-before-tool-call',
+      messageKey: 'turn-body-before-tool-card',
+    }),
+  ]);
+  const nonBodyGroup = blocks.find((block) => block.kind === 'turn-non-body-group');
+  const assistantBodies = blocks.filter((block) => block.kind === 'assistant-body');
+
+  assert.equal(assistantBodies.length, 1, 'the assistant answer before trailing tools must stay visible');
+  assert.equal(assistantBodies[0]?.message.messageKey, 'turn-body-before-tool-final');
+  assert.ok(nonBodyGroup, 'trailing tool activity still belongs in a collapsed detail group');
+  assert.equal(
+    blocks.findIndex((block) => block.kind === 'assistant-body') <
+      blocks.findIndex((block) => block.kind === 'turn-non-body-group'),
+    true,
+    'trailing tools should render after the visible assistant body',
+  );
+});
+
 test('Codex commentary phase history collapses before the final answer body', async () => {
   /**
    * Codex JSONL replays commentary as assistant text with phase metadata. Those
@@ -834,6 +874,28 @@ test('live turns keep non-body execution visible until assistant body starts', a
   assert.equal(blocks.some((block) => block.kind === 'assistant-body'), false, 'live execution must not fabricate body blocks');
 });
 
+test('live turns keep thinking and tool calls expanded while assistant body streams', async () => {
+  /**
+   * Business case: once a live response body starts, the user still needs the
+   * preceding reasoning and tool activity visible until the response completes.
+   */
+  const liveRows = completedTurnRows().map((message) => message.type === 'user'
+    ? message
+    : { ...message, source: 'codex-live', isStreaming: true });
+  const blocks = buildTurnDisplayBlocks(liveRows);
+  const nonBodyGroup = blocks.find((block) => block.kind === 'turn-non-body-group');
+  const assistantBody = blocks.find((block) => block.kind === 'assistant-body');
+
+  assert.ok(nonBodyGroup, 'live thinking and tools before the body must still be grouped');
+  assert.equal(nonBodyGroup?.defaultOpen, true, 'live response details must stay expanded while body streams');
+  assert.deepEqual(
+    nonBodyGroup?.items.map((item) => item.defaultOpen),
+    [true, true, true],
+    'nested live thinking/tool groups must inherit the expanded state',
+  );
+  assert.equal(assistantBody?.message.messageKey, 'turn-collapse-body');
+});
+
 test('historical unfinished turns keep non-body details collapsed', async () => {
   /**
    * Persisted history can end before a final assistant body because of
@@ -845,6 +907,24 @@ test('historical unfinished turns keep non-body details collapsed', async () => 
 
   assert.ok(nonBodyGroup, 'historical thinking and tools must still be grouped');
   assert.equal(nonBodyGroup?.defaultOpen, false, 'non-live unfinished details must default to collapsed');
+});
+
+test('active workflow tail keeps persisted process details expanded', async () => {
+  /**
+   * Workflow child sessions may stream through JSONL polling rather than live
+   * message flags. The active tail must still stay visible while it is running.
+   */
+  const activeTailRows = completedTurnRows().filter((message) => message.messageKey !== 'turn-collapse-body');
+  const blocks = buildTurnDisplayBlocks(activeTailRows, { activeTailDefaultOpen: true });
+  const nonBodyGroup = blocks.find((block) => block.kind === 'turn-non-body-group');
+
+  assert.ok(nonBodyGroup, 'active workflow tail process rows must still be grouped');
+  assert.equal(nonBodyGroup?.defaultOpen, true, 'active workflow tail details must default to expanded');
+  assert.deepEqual(
+    nonBodyGroup?.items.map((item) => item.defaultOpen),
+    [true, true, true],
+    'nested active workflow process groups must inherit expanded state',
+  );
 });
 
 test('tool-only turn activity renders one collapsed tool group without row metadata', async () => {

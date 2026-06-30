@@ -7,7 +7,6 @@ import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
-import ConversationBookmarks from './subcomponents/ConversationBookmarks';
 import type { ChatInterfaceProps } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
@@ -83,6 +82,7 @@ function ChatInterface({
   showThinking,
   autoScrollToBottom,
   externalMessageUpdate,
+  onBookmarkControlsChange,
 }: ChatInterfaceProps) {
   const { t } = useTranslation('chat');
   const location = useLocation();
@@ -269,6 +269,23 @@ function ChatInterface({
     chatMessages,
     loadMessagesUntilTarget,
     revealLoadedMessage,
+  ]);
+  useEffect(() => {
+    if (conversationBookmarks.length === 0) {
+      onBookmarkControlsChange?.(null);
+      return;
+    }
+
+    onBookmarkControlsChange?.({
+      bookmarks: conversationBookmarks,
+      onBookmarkSelect,
+    });
+
+    return () => onBookmarkControlsChange?.(null);
+  }, [
+    conversationBookmarks,
+    onBookmarkControlsChange,
+    onBookmarkSelect,
   ]);
 
   const {
@@ -891,12 +908,7 @@ function ChatInterface({
   return (
     <>
       <div className="flex-1 min-h-0 flex">
-        <ConversationBookmarks
-          bookmarks={conversationBookmarks}
-          onBookmarkSelect={onBookmarkSelect}
-        />
-
-        <div className="min-w-0 flex-1 flex flex-col">
+        <div className="relative min-w-0 flex-1 flex flex-col">
           <ChatMessagesPane
             scrollContainerRef={scrollContainerRef}
             onWheel={handleWheel}

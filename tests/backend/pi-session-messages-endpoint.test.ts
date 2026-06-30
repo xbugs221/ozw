@@ -742,6 +742,50 @@ test('running Codex cN session with JSONL + live transcript returns merged-jsonl
   }
 });
 
+test('unbound Codex cN draft does not read unrelated provider session with same cN id', async () => {
+  const tempHome = path.join(os.tmpdir(), `ozw-ep-codex-draft-empty-${Date.now()}`);
+  const coHome = path.join(tempHome, '.local', 'state', 'ozw', 'co');
+  const xdgStateHome = path.join(tempHome, '.local', 'state');
+  const prevHome = process.env.HOME;
+  const prevCoHome = process.env.CCFLOW_CO_HOME;
+  const prevXdgStateHome = process.env.XDG_STATE_HOME;
+
+  process.env.HOME = tempHome;
+  process.env.CCFLOW_CO_HOME = coHome;
+  process.env.XDG_STATE_HOME = xdgStateHome;
+
+  try {
+    const projectName = 'ep-codex-draft-empty';
+    const projectPath = path.join(tempHome, 'projects', projectName);
+    const unrelatedProjectPath = path.join(tempHome, 'projects', 'unrelated-codex-history');
+    await fs.mkdir(projectPath, { recursive: true });
+    await fs.mkdir(unrelatedProjectPath, { recursive: true });
+    await writeProjectConfig(tempHome, projectName, projectPath);
+
+    const draft = await createManualSessionDraft(projectName, projectPath, 'codex', 'Codex empty draft');
+    await writeCodexNativeSession(tempHome, draft.id, unrelatedProjectPath);
+    clearProjectDirectoryCache();
+
+    const req = {
+      params: { projectName, sessionId: draft.id },
+      query: { provider: 'codex', projectPath },
+    };
+    const res = createMockRes();
+    await handleGetSessionMessages(req, res);
+
+    assert.equal(res.getStatus(), 200);
+    const body = res.getJson();
+    assert.deepEqual(body.messages, []);
+    assert.equal(body.total, 0);
+    assert.equal(body.hasMore, false);
+  } finally {
+    if (prevHome) process.env.HOME = prevHome; else delete process.env.HOME;
+    if (prevCoHome !== undefined) process.env.CCFLOW_CO_HOME = prevCoHome; else delete process.env.CCFLOW_CO_HOME;
+    if (prevXdgStateHome !== undefined) process.env.XDG_STATE_HOME = prevXdgStateHome; else delete process.env.XDG_STATE_HOME;
+    await fs.rm(tempHome, { recursive: true, force: true });
+  }
+});
+
 test('Codex cN afterLine refresh returns persisted tail without repeating active-turn overlay', async () => {
   const tempHome = path.join(os.tmpdir(), `ozw-ep-codex-afterline-overlay-${Date.now()}`);
   const coHome = path.join(tempHome, '.local', 'state', 'ozw', 'co');

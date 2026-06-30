@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 const Plus = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
 const Trash2 = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>;
 import ChatInterface from '../../chat/view/ChatInterface';
+import ConversationBookmarks from '../../chat/view/subcomponents/ConversationBookmarks';
+import type { ConversationBookmark } from '../../chat/utils/conversationBookmarks';
 import FileTree from '../../file-tree/view/FileTree';
 import { FileTreeDockViewModeControls } from '../../file-tree/view/FileTreeViewModeControls';
 import StandaloneShell from '../../standalone-shell/view/StandaloneShell';
@@ -24,6 +26,11 @@ import { getAllSessions } from '../../sidebar/utils/utils';
 type TerminalInstance = {
   id: string;
   title: string;
+};
+
+type ChatBookmarkControls = {
+  bookmarks: ConversationBookmark[];
+  onBookmarkSelect: (messageKey: string) => void;
 };
 
 const createTerminalInstance = (index: number): TerminalInstance => {
@@ -69,6 +76,7 @@ function MainContent({
 
   const projectSessions = selectedProject ? getAllSessions(selectedProject, {}, true) : [];
   const [revealDirectoryRequest, setRevealDirectoryRequest] = React.useState<{ path: string; requestId: number } | null>(null);
+  const [chatBookmarkControls, setChatBookmarkControls] = React.useState<ChatBookmarkControls | null>(null);
   const terminalCounterRef = React.useRef(1);
   const [terminalInstances, setTerminalInstances] = React.useState<TerminalInstance[]>(() => [createTerminalInstance(1)]);
   const [activeTerminalId, setActiveTerminalId] = React.useState<string>(() => terminalInstances[0]?.id || '');
@@ -112,6 +120,21 @@ function MainContent({
     moveTerminalToBottom,
     setRightDockSplitRatio,
   } = useWorkspaceLayoutState(isMobile);
+
+  useEffect(() => {
+    /**
+     * The header lives outside the chat component, so clear exported controls
+     * immediately when the active route-backed session changes.
+     */
+    setChatBookmarkControls(null);
+  }, [selectedProject?.name, selectedSession?.id]);
+
+  const bookmarkControlsNode = chatBookmarkControls ? (
+    <ConversationBookmarks
+      bookmarks={chatBookmarkControls.bookmarks}
+      onBookmarkSelect={chatBookmarkControls.onBookmarkSelect}
+    />
+  ) : undefined;
 
   useEffect(() => {
     /**
@@ -304,6 +327,7 @@ function MainContent({
       isSidebarOpen={isSidebarOpen}
       onMenuClick={onMenuClick}
       leadingContent={headerLeadingContent}
+      bookmarkControls={headerActiveTab === 'chat' ? bookmarkControlsNode : undefined}
       onRefresh={onRefresh}
       dockLayout={isMobile ? undefined : {
         rightDockActive: layout.rightDock.activePanel,
@@ -394,6 +418,7 @@ function MainContent({
           isSidebarOpen={isSidebarOpen}
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
+          bookmarkControls={bookmarkControlsNode}
           onRefresh={onRefresh}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
@@ -426,6 +451,7 @@ function MainContent({
               showThinking={showThinking}
               autoScrollToBottom={autoScrollToBottom}
               externalMessageUpdate={externalMessageUpdate}
+              onBookmarkControlsChange={setChatBookmarkControls}
             />
           </ErrorBoundary>
         </div>
@@ -490,6 +516,7 @@ function MainContent({
           isSidebarOpen={isSidebarOpen}
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
+          bookmarkControls={bookmarkControlsNode}
           onRefresh={onRefresh}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
@@ -587,6 +614,7 @@ function MainContent({
           isSidebarOpen={isSidebarOpen}
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
+          bookmarkControls={bookmarkControlsNode}
           onRefresh={onRefresh}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
@@ -647,6 +675,7 @@ function MainContent({
               showThinking={showThinking}
               autoScrollToBottom={autoScrollToBottom}
               externalMessageUpdate={externalMessageUpdate}
+              onBookmarkControlsChange={setChatBookmarkControls}
             />
           </ErrorBoundary>
         </div>
@@ -701,6 +730,7 @@ function MainContent({
         isSidebarOpen={isSidebarOpen}
         onMenuClick={onMenuClick}
         leadingContent={headerLeadingContent}
+        bookmarkControls={bookmarkControlsNode}
         onRefresh={onRefresh}
         dockLayout={{
           rightDockActive: layout.rightDock.activePanel,

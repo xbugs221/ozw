@@ -10,6 +10,8 @@ import {
   buildTranscriptVirtualLayout,
   calculateTranscriptVirtualRange,
 } from '../../../frontend/components/chat/utils/transcriptVirtualization.ts';
+import { buildTurnDisplayBlocks } from '../../../frontend/components/chat/utils/turnNonBodyCollapse.ts';
+import type { ChatMessage } from '../../../frontend/components/chat/types/types.ts';
 
 const repoRoot = process.cwd();
 
@@ -18,6 +20,18 @@ const repoRoot = process.cwd();
  */
 function readSource(relativePath: string): string {
   return readFileSync(join(repoRoot, relativePath), 'utf8');
+}
+
+/**
+ * Build a minimal chat row for display-block contract checks.
+ */
+function chatRow(overrides: Partial<ChatMessage>): ChatMessage {
+  return {
+    type: 'assistant',
+    content: '',
+    timestamp: '2026-06-30T00:00:00.000Z',
+    ...overrides,
+  } as ChatMessage;
 }
 
 test('chat transcript renders a bounded virtual DOM window while retaining loaded messages', () => {
@@ -53,54 +67,93 @@ test('chat transcript renders a bounded virtual DOM window while retaining loade
 test('chat transcript implementation uses measured continuous virtual ranges', () => {
   /** Scenario: 渲染层使用滚动范围，不回退到只取最新或最旧 150 条 */
   const source = readSource('frontend/components/chat/view/subcomponents/ChatMessagesPane.tsx');
+  const layoutController = readSource('frontend/components/chat/view/subcomponents/chatMessagesPaneLayoutController.ts');
 
   assert.match(source, /data-virtualized="true"/);
-  assert.match(source, /data-render-window-size=\{MAX_RENDERED_TRANSCRIPT_MESSAGES\}/);
-  assert.match(source, /calculateTranscriptVirtualRange/);
+  assert.match(source, /data-render-window-size=\{maxRenderedTranscriptMessages\}/);
+  assert.match(layoutController, /calculateTranscriptVirtualRange/);
+  assert.match(layoutController, /buildTurnDisplayBlocks\(visibleMessages\)/);
+  assert.match(layoutController, /displayBlockKeys/);
+  assert.doesNotMatch(layoutController, /buildTurnDisplayBlocks\(virtualMessages\)/);
   assert.doesNotMatch(source, /visibleMessages\.slice\(-MAX_RENDERED_TRANSCRIPT_MESSAGES\)/);
   assert.doesNotMatch(source, /visibleMessages\.slice\(0,\s*MAX_RENDERED_TRANSCRIPT_MESSAGES\)/);
   assert.doesNotMatch(source, /\{visibleMessages\.map\(/);
 });
 
+test('assistant body before trailing tool activity remains a visible message card', () => {
+  /** Scenario: Codex history can write answer text before same-turn tool rows */
+  const blocks = buildTurnDisplayBlocks([
+    chatRow({
+      type: 'user',
+      content: '生成长正文后再调用工具',
+      messageKey: 'body-before-tool-user',
+    }),
+    chatRow({
+      type: 'assistant',
+      content: '这段助手正文必须直接渲染为消息卡片。',
+      messageKey: 'body-before-tool-final',
+    }),
+    chatRow({
+      type: 'assistant',
+      isToolUse: true,
+      toolName: 'Task',
+      toolCallId: 'body-before-tool-call',
+      toolInput: { prompt: 'inspect' },
+      toolResult: { content: 'done' },
+      messageKey: 'body-before-tool-card',
+    }),
+  ]);
+  const assistantBodyIndex = blocks.findIndex((block) =>
+    block.kind === 'assistant-body' && block.message.messageKey === 'body-before-tool-final',
+  );
+  const detailGroupIndex = blocks.findIndex((block) => block.kind === 'turn-non-body-group');
+
+  assert.notEqual(assistantBodyIndex, -1);
+  assert.notEqual(detailGroupIndex, -1);
+  assert.ok(assistantBodyIndex < detailGroupIndex);
+});
+
 test('search navigation pages toward unloaded targets without using load-all', () => {
   /** Scenario: 搜索命中未加载旧消息时按页查找，不发起无 limit 全量请求 */
-  const sessionState = readSource('frontend/components/chat/hooks/useChatSessionState.ts');
-  const chatInterface = readSource('frontend/components/chat/view/ChatInterface.tsx');
+  const sessionState = readSource('frontend/components/chat/session/sessionRuntimeController.ts');
+  const searchNavigation = readSource('frontend/components/chat/view/chatInterfaceSearchNavigation.ts');
 
   assert.match(sessionState, /loadMessagesUntilTarget/);
-  assert.match(sessionState, /MESSAGES_PER_PAGE/);
-  assert.match(sessionState, /fetchSessionMessages\(\s*sessionProjectName,\s*requestSessionId,\s*MESSAGES_PER_PAGE,\s*currentOffset,/);
+  assert.match(sessionState, /SESSION_MESSAGES_PER_PAGE/);
+  assert.match(sessionState, /const requestWindow = createOlderSessionMessageWindow\(currentOffset\)/);
+  assert.match(sessionState, /fetchSessionMessages\(\s*sessionProjectName,\s*requestSessionId,\s*requestWindow\.limit,\s*requestWindow\.offset,/);
   assert.doesNotMatch(sessionState, /setVisibleMessageCount\(Infinity\)/);
-  assert.match(chatInterface, /loadMessagesUntilTarget\(\{ messageKey: activeSearchTarget\.messageKey \}\)/);
-  assert.doesNotMatch(chatInterface, /loadAllMessages\(\{ reveal: true \}\)/);
+  assert.match(searchNavigation, /loadMessagesUntilTarget\(\{ messageKey: activeSearchTarget\.messageKey \}\)/);
+  assert.doesNotMatch(searchNavigation, /loadAllMessages\(\{ reveal: true \}\)/);
 });
 
 test('search reveals targets that are loaded but outside the visible data window', () => {
   /** Scenario: 已加载但未进入 visibleMessages 的命中会先扩展数据窗口 */
-  const sessionState = readSource('frontend/components/chat/hooks/useChatSessionState.ts');
-  const chatInterface = readSource('frontend/components/chat/view/ChatInterface.tsx');
+  const sessionState = readSource('frontend/components/chat/session/sessionRuntimeController.ts');
+  const searchNavigation = readSource('frontend/components/chat/view/chatInterfaceSearchNavigation.ts');
 
   assert.match(sessionState, /const revealLoadedMessage = useCallback/);
   assert.match(sessionState, /endIndex - targetIndex/);
   assert.match(sessionState, /setVisibleMessageCount/);
-  assert.match(chatInterface, /if \(hasTargetMessage\) \{\s*revealLoadedMessage\(activeSearchTarget\.messageKey\);/);
-  assert.match(chatInterface, /searchHighlightRetry/);
-  assert.match(chatInterface, /visibleMessages\]/);
+  assert.match(searchNavigation, /if \(hasTargetMessage\) \{\s*revealLoadedMessage\(activeSearchTarget\.messageKey\);/);
+  assert.match(searchNavigation, /searchHighlightRetry/);
+  assert.match(searchNavigation, /visibleMessages\]/);
 });
 
 test('external appends merge data while preserving an up-scroll frozen viewport', () => {
   /** Scenario: 用户上滑时新消息进入数据，但不扩大当前可见窗口到最新尾部 */
-  const sessionState = readSource('frontend/components/chat/hooks/useChatSessionState.ts');
+  const sessionState = readSource('frontend/components/chat/session/sessionRuntimeController.ts');
 
   assert.doesNotMatch(sessionState, /if \(frozenTailMessageKeyRef\.current \|\| isUserScrolledUpRef\.current\) \{\s*return;\s*\}/);
-  assert.match(sessionState, /const shouldKeepCurrentViewport = frozenTailMessageKeyRef\.current \|\| isUserScrolledUpRef\.current/);
-  assert.match(sessionState, /setSessionMessages\(\(previous\) => dedupeSessionMessagesByIdentity\(\[/);
+  assert.match(sessionState, /const shouldKeepCurrentViewport = Boolean\(frozenTailMessageKeyRef\.current \|\| isUserScrolledUpRef\.current\)/);
+  assert.match(sessionState, /setSessionMessages\(\(previous\) => \{\s*const nextMessages = mergeSessionMessagesByIdentityPreservingOrder\(previous, newMessages\)/);
+  assert.match(sessionState, /persistedDeltaAppended/);
   assert.match(sessionState, /if \(!shouldKeepCurrentViewport\) \{/);
 });
 
 test('follow-latest appends expand the visible tail to keep live Codex output visible', () => {
   /** Scenario: 跟随模式下读模型刷新不能把尚未落盘的 Codex live 文本裁出尾窗 */
-  const sessionState = readSource('frontend/components/chat/hooks/useChatSessionState.ts');
+  const sessionState = readSource('frontend/components/chat/session/sessionRuntimeController.ts');
 
   assert.match(sessionState, /const isFollowingLatestRef = useRef\(isFollowingLatest\)/);
   assert.match(sessionState, /isFollowingLatestRef\.current = isFollowingLatest/);

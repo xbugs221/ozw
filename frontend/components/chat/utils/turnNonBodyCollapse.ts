@@ -33,6 +33,10 @@ export interface MessageBlock {
 
 export type TurnDisplayBlock = TurnNonBodyGroupBlock | AssistantBodyBlock | MessageBlock;
 
+export interface BuildTurnDisplayBlocksOptions {
+  activeTailDefaultOpen?: boolean;
+}
+
 /**
  * Return a stable identity for grouping rows in one visible transcript window.
  */
@@ -205,17 +209,20 @@ function appendNonBodyItem(
  * Convert transcript messages into render blocks. A turn is anchored by the
  * latest user message; process rows before assistant body are grouped.
  */
-export function buildTurnDisplayBlocks(messages: ChatMessage[]): TurnDisplayBlock[] {
+export function buildTurnDisplayBlocks(
+  messages: ChatMessage[],
+  options: BuildTurnDisplayBlocksOptions = {},
+): TurnDisplayBlock[] {
   const blocks: TurnDisplayBlock[] = [];
   let currentTurnKey = 'turn-start';
   let pendingItems: TurnNonBodyItem[] = [];
 
-  const flushPending = (defaultOpen: boolean) => {
+  const flushPending = (defaultOpen: boolean, forceDefaultOpen = false) => {
     if (pendingItems.length === 0) {
       return;
     }
     const shouldDefaultOpen = defaultOpen && pendingItems.some((item) =>
-      item.messages.some(isLiveProcessMessage),
+      forceDefaultOpen || item.messages.some(isLiveProcessMessage),
     );
     blocks.push({
       kind: 'turn-non-body-group',
@@ -241,19 +248,22 @@ export function buildTurnDisplayBlocks(messages: ChatMessage[]): TurnDisplayBloc
     }
 
     const hasPendingTurnActivity = pendingItems.length > 0;
+    const hasLaterAssistantBody = hasLaterAssistantBodyBeforeNextUser(messages, index);
     if (
       isAssistantBody(message) &&
-      (
-        hasLaterNonBodyBeforeNextUser(messages, index) ||
-        (hasPendingTurnActivity && hasLaterAssistantBodyBeforeNextUser(messages, index))
-      )
+      hasLaterAssistantBody &&
+      (hasLaterNonBodyBeforeNextUser(messages, index) || hasPendingTurnActivity)
     ) {
       appendNonBodyItem(pendingItems, message, 'thinking-group', true, index);
       return;
     }
 
     if (isAssistantBody(message)) {
-      flushPending(false);
+      const isActiveTailBody = options.activeTailDefaultOpen === true && index === messages.length - 1;
+      flushPending(
+        isLiveProcessMessage(message) || isActiveTailBody,
+        isActiveTailBody,
+      );
       blocks.push({ kind: 'assistant-body', message });
       return;
     }
@@ -262,6 +272,6 @@ export function buildTurnDisplayBlocks(messages: ChatMessage[]): TurnDisplayBloc
     blocks.push({ kind: 'message', message });
   });
 
-  flushPending(true);
+  flushPending(true, options.activeTailDefaultOpen === true);
   return blocks;
 }

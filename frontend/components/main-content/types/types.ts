@@ -68,6 +68,7 @@ export type MainContentHeaderProps = {
   isSidebarOpen: boolean;
   onMenuClick: () => void;
   leadingContent?: ReactNode;
+  bookmarkControls?: ReactNode;
   dockLayout?: DockLayoutControl;
   onRefresh?: () => Promise<void> | void;
 };

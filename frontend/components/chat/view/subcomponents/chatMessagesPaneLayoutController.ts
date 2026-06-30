@@ -6,7 +6,7 @@ import type { RefObject, UIEvent as ReactUIEvent } from 'react';
 
 import type { ChatMessage } from '../../types/types';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
-import { buildTurnDisplayBlocks } from '../../utils/turnNonBodyCollapse';
+import { buildTurnDisplayBlocks, type TurnDisplayBlock } from '../../utils/turnNonBodyCollapse';
 import {
   buildTranscriptVirtualLayout,
   calculateTranscriptVirtualRange,
@@ -21,13 +21,32 @@ type UseChatMessagesPaneLayoutArgs = {
   scrollContainerRef: RefObject<HTMLDivElement>;
   isFollowingLatest: boolean;
   scrollTargetMessageKey?: string | null;
+  activeTailDefaultOpen?: boolean;
 };
+
+type VirtualTurnDisplayBlock = {
+  block: TurnDisplayBlock;
+  blockIndex: number;
+  blockKey: string;
+  sourceIndex: number;
+};
+
+/**
+ * Return the messages that are physically represented by one display block.
+ */
+function getBlockMessages(block: TurnDisplayBlock): ChatMessage[] {
+  if (block.kind === 'turn-non-body-group') {
+    return block.items.flatMap((item) => item.messages);
+  }
+  return [block.message];
+}
 
 export function useChatMessagesPaneLayout({
   visibleMessages,
   scrollContainerRef,
   isFollowingLatest,
   scrollTargetMessageKey,
+  activeTailDefaultOpen,
 }: UseChatMessagesPaneLayoutArgs) {
   /** Coordinate stable message keys, virtual windows, and scroll positioning. */
   const messageKeyMapRef = useRef<WeakMap<ChatMessage, string>>(new WeakMap());
@@ -67,24 +86,46 @@ export function useChatMessagesPaneLayout({
     return candidateKey;
   }, []);
 
-  const reactMessageKeys = useMemo(() => visibleMessages.map((message) => getMessageKey(message)), [
-    getMessageKey,
-    visibleMessages,
-  ]);
   const businessMessageKeys = useMemo(
     () => visibleMessages.map((message) => message.messageKey || getMessageKey(message)),
     [getMessageKey, visibleMessages],
   );
+  const displayBlocks = useMemo(
+    () => buildTurnDisplayBlocks(visibleMessages, { activeTailDefaultOpen }),
+    [activeTailDefaultOpen, visibleMessages],
+  );
+  const displayBlockKeys = useMemo(() => {
+    return displayBlocks.map((block, blockIndex) => {
+      if (block.kind !== 'turn-non-body-group') {
+        return getMessageKey(block.message);
+      }
+
+      const blockMessages = getBlockMessages(block);
+      const firstKey = blockMessages[0] ? getMessageKey(blockMessages[0]) : `empty-${blockIndex}`;
+      const lastKey = blockMessages.at(-1) ? getMessageKey(blockMessages.at(-1) as ChatMessage) : firstKey;
+      return `turn-non-body-${block.turnKey}-${firstKey}-${lastKey}`;
+    });
+  }, [displayBlocks, getMessageKey]);
+  const displayBlockSourceIndexes = useMemo(() => {
+    return displayBlocks.map((block) => {
+      const firstMessage = getBlockMessages(block)[0];
+      if (!firstMessage) {
+        return 0;
+      }
+      const sourceIndex = visibleMessages.indexOf(firstMessage);
+      return sourceIndex >= 0 ? sourceIndex : 0;
+    });
+  }, [displayBlocks, visibleMessages]);
   const virtualLayout = useMemo(() => {
     return buildTranscriptVirtualLayout(
-      reactMessageKeys,
+      displayBlockKeys,
       measuredHeightsRef.current,
       ESTIMATED_MESSAGE_HEIGHT,
     );
-  }, [reactMessageKeys, measurementVersion]);
+  }, [displayBlockKeys, measurementVersion]);
   const virtualRange = useMemo(() => {
     return calculateTranscriptVirtualRange({
-      messageCount: visibleMessages.length,
+      messageCount: displayBlocks.length,
       offsets: virtualLayout.offsets,
       totalHeight: virtualLayout.totalHeight,
       scrollTop,
@@ -93,15 +134,24 @@ export function useChatMessagesPaneLayout({
       maxRenderedMessages: MAX_RENDERED_TRANSCRIPT_MESSAGES,
       overscan: VIRTUAL_MESSAGE_OVERSCAN,
     });
-  }, [scrollTop, viewportHeight, virtualLayout, visibleMessages.length]);
-  const virtualMessages = useMemo(
-    () => visibleMessages.slice(virtualRange.start, virtualRange.end),
-    [virtualRange.end, virtualRange.start, visibleMessages],
-  );
-  const virtualDisplayBlocks = useMemo(
-    () => buildTurnDisplayBlocks(virtualMessages),
-    [virtualMessages],
-  );
+  }, [displayBlocks.length, scrollTop, viewportHeight, virtualLayout]);
+  const virtualDisplayBlocks = useMemo<VirtualTurnDisplayBlock[]>(() => {
+    return displayBlocks.slice(virtualRange.start, virtualRange.end).map((block, index) => {
+      const blockIndex = virtualRange.start + index;
+      return {
+        block,
+        blockIndex,
+        blockKey: displayBlockKeys[blockIndex] || `display-block-${blockIndex}`,
+        sourceIndex: displayBlockSourceIndexes[blockIndex] || 0,
+      };
+    });
+  }, [
+    displayBlockKeys,
+    displayBlockSourceIndexes,
+    displayBlocks,
+    virtualRange.end,
+    virtualRange.start,
+  ]);
   const handleScroll = useCallback((event: ReactUIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
     setScrollTop(element.scrollTop);
@@ -201,8 +251,16 @@ export function useChatMessagesPaneLayout({
     if (targetIndex < 0 || !container) {
       return;
     }
+    const targetBlockIndex = displayBlocks.findIndex((block) =>
+      getBlockMessages(block).some((message) => (
+        (message.messageKey || getMessageKey(message)) === targetKey
+      )),
+    );
+    if (targetBlockIndex < 0) {
+      return;
+    }
     appliedScrollTargetKeyRef.current = targetKey;
-    const targetTop = virtualLayout.offsets[targetIndex] || 0;
+    const targetTop = virtualLayout.offsets[targetBlockIndex] || 0;
     container.scrollTop = Math.max(0, targetTop - Math.floor(container.clientHeight / 2));
     setScrollTop(container.scrollTop);
     setViewportHeight(container.clientHeight);
@@ -214,14 +272,12 @@ export function useChatMessagesPaneLayout({
         targetElement?.scrollIntoView({ block: 'center', behavior: 'auto' });
       });
     });
-  }, [businessMessageKeys, scrollContainerRef, scrollTargetMessageKey, virtualLayout.offsets, visibleMessages.length]);
+  }, [businessMessageKeys, displayBlocks, getMessageKey, scrollContainerRef, scrollTargetMessageKey, virtualLayout.offsets, visibleMessages.length]);
 
   return {
-    getMessageKey,
     handleScroll,
     maxRenderedTranscriptMessages: MAX_RENDERED_TRANSCRIPT_MESSAGES,
     measureMessage,
-    reactMessageKeys,
     virtualDisplayBlocks,
     virtualRange,
   };

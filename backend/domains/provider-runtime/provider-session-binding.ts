@@ -45,7 +45,7 @@ export async function writeProviderSessionBinding(input: {
 }
 
 /**
- * Resolve a binding and fall back to an explicit provider when no draft exists.
+ * Resolve a route binding and preserve provider choice while a draft is unbound.
  */
 export async function resolveProviderSessionBinding(input: {
   projectName?: string;
@@ -59,7 +59,7 @@ export async function resolveProviderSessionBinding(input: {
   }
   return {
     provider: input.provider === 'pi' ? 'pi' : 'codex',
-    providerSessionId: input.routeSessionId,
+    providerSessionId: '',
     projectName: input.projectName || '',
     projectPath: input.projectPath,
   };

@@ -226,7 +226,7 @@ test('1000+ mixed long session keeps DOM bounded and search reveals offscreen ta
   });
 
   await page.goto(`/session/${MIXED_LONG_SESSION_ID}`, { waitUntil: 'networkidle' });
-  await expect(page.locator('body')).toContainText('mixed long virtual markdown turn 1050');
+  await expect(page.locator('body')).toContainText('mixed long virtual history turn 1050');
 
   const unboundedRequests = messageRequests.filter((url) => {
     const parsedUrl = new URL(url);
@@ -236,6 +236,11 @@ test('1000+ mixed long session keeps DOM bounded and search reveals offscreen ta
   await expect
     .poll(async () => page.locator('.chat-message').count())
     .toBeLessThanOrEqual(150);
+  await expect(page.getByTestId('turn-tool-list-group')).toHaveCount(3);
+  const toolGroupToggles = page.getByTestId('turn-tool-list-toggle');
+  for (let index = 0; index < 3; index += 1) {
+    await toolGroupToggles.nth(index).click();
+  }
   await expect(page.getByTestId('codex-tool-card')).toHaveCount(3);
   await expect(page.getByTestId('large-code-block-summary')).toBeVisible();
   await expect(page.getByText(MIXED_LONG_HIDDEN_CODE_TEXT)).toHaveCount(0);

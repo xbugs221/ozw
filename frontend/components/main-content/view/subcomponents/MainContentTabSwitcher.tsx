@@ -7,7 +7,7 @@ const Terminal = ({ className: cls, strokeWidth: sw }: { className?: string; str
 const Folder = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>;
 import Tooltip from '../../../ui/Tooltip';
 import type { AppTab } from '../../../../types/app';
-import type { Dispatch, SetStateAction } from 'react';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { DockLayoutControl } from '../../types/types';
 
@@ -16,6 +16,7 @@ type MainContentTabSwitcherProps = {
   setActiveTab: Dispatch<SetStateAction<AppTab>>;
   compact?: boolean;
   dockLayout?: DockLayoutControl;
+  leadingControl?: ReactNode;
 };
 
 type TabDefinition = {
@@ -35,6 +36,7 @@ export default function MainContentTabSwitcher({
   setActiveTab,
   compact = false,
   dockLayout,
+  leadingControl,
 }: MainContentTabSwitcherProps) {
   const { t } = useTranslation();
 
@@ -83,6 +85,7 @@ export default function MainContentTabSwitcher({
           : 'inline-flex w-auto items-center gap-[2px] p-[3px]'
       }`}
     >
+      {leadingControl}
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = isTabActive(tab.id);

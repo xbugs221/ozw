@@ -2,6 +2,7 @@
  * PURPOSE: Render the scrollable chat transcript, including history pagination affordances.
  */
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
 import type {
   Dispatch,
   KeyboardEvent as ReactKeyboardEvent,
@@ -17,6 +18,43 @@ import TurnNonBodyGroup from './TurnNonBodyGroup';
 import type { ChatMessage } from '../../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
 import { useChatMessagesPaneLayout } from './chatMessagesPaneLayoutController';
+
+/**
+ * Detect workflow states that are still producing child-session output.
+ */
+function isActiveWorkflowStatus(status: unknown): boolean {
+  const normalized = String(status || '').toLowerCase();
+  return normalized === 'running' || normalized === 'active' || normalized === 'processing';
+}
+
+/**
+ * Check whether the selected chat is a child session of an active workflow run.
+ */
+function isActiveWorkflowChildSession(project: Project, session: ProjectSession | null): boolean {
+  if (!session) {
+    return false;
+  }
+  const sessionId = String(session.id || '');
+  const workflowId = String(session.workflowId || '');
+  const stageKey = String(session.stageKey || '');
+
+  return Boolean((project.workflows || []).some((workflow) => {
+    const ownsSession =
+      (workflowId && workflow.id === workflowId) ||
+      (workflow.childSessions || []).some((child) => child.id === sessionId) ||
+      (workflow.workflowOwnedSessionRefs || []).some((ref) => ref.sessionId === sessionId);
+    if (!ownsSession) {
+      return false;
+    }
+    const stageIsActive = stageKey
+      ? (workflow.stageStatuses || []).some((stage) => stage.key === stageKey && isActiveWorkflowStatus(stage.status))
+      : false;
+    const processIsActive = (workflow.runnerProcesses || []).some((process) => (
+      (process.sessionId === sessionId || process.stage === stageKey) && isActiveWorkflowStatus(process.status)
+    ));
+    return isActiveWorkflowStatus(workflow.runState) || stageIsActive || processIsActive;
+  }));
+}
 
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
@@ -107,14 +145,16 @@ export default function ChatMessagesPane({
   const renderedMessageCount = chatMessages.length;
   const visibleRenderedMessageCount = visibleMessages.length;
   const hasHiddenRenderedHistory = renderedMessageCount > visibleRenderedMessageCount;
+  const activeTailDefaultOpen = useMemo(
+    () => isActiveWorkflowChildSession(selectedProject, selectedSession),
+    [selectedProject, selectedSession],
+  );
   const shouldShowTopHistoryHint =
     hasMoreMessages && !isLoadingMoreMessages && !allMessagesLoaded && hasHiddenRenderedHistory;
   const {
-    getMessageKey,
     handleScroll,
     maxRenderedTranscriptMessages,
     measureMessage,
-    reactMessageKeys,
     virtualDisplayBlocks,
     virtualRange,
   } = useChatMessagesPaneLayout({
@@ -122,6 +162,7 @@ export default function ChatMessagesPane({
     scrollContainerRef,
     isFollowingLatest,
     scrollTargetMessageKey,
+    activeTailDefaultOpen,
   });
 
   return (
@@ -255,14 +296,10 @@ export default function ChatMessagesPane({
             <div aria-hidden="true" style={{ height: virtualRange.paddingTop }} />
           )}
 
-          {virtualDisplayBlocks.map((block, index) => {
+          {virtualDisplayBlocks.map(({ block, blockIndex, blockKey, sourceIndex }) => {
             const isNonBodyGroup = block.kind === 'turn-non-body-group';
             const message = isNonBodyGroup ? null : block.message;
-            const sourceIndex = message ? visibleMessages.indexOf(message) : virtualRange.start + index;
             const prevMessage = sourceIndex > 0 ? visibleMessages[sourceIndex - 1] : null;
-            const blockKey = isNonBodyGroup
-              ? `turn-non-body-${block.turnKey}-${index}`
-              : reactMessageKeys[sourceIndex] || getMessageKey(block.message);
             return (
               <div
                 key={blockKey}
@@ -273,7 +310,7 @@ export default function ChatMessagesPane({
                 {block.kind === 'turn-non-body-group' ? (
                   <TurnNonBodyGroup
                     block={block}
-                    blockIndex={index}
+                    blockIndex={blockIndex}
                     createDiff={createDiff}
                     onFileOpen={onFileOpen}
                     onShowSettings={onShowSettings}
