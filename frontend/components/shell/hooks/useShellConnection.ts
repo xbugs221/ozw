@@ -24,8 +24,8 @@ const PROCESS_EXIT_REGEX = /Process exited with code (\d+)/;
 /**
  * Resolve shell session providers to supported agent backends only.
  */
-function normalizeShellSessionProvider(provider: unknown): 'codex' {
-  return 'codex';
+function normalizeShellSessionProvider(provider: unknown): 'codex' | 'pi' {
+  return provider === 'pi' ? 'pi' : 'codex';
 }
 
 /**
@@ -40,12 +40,36 @@ function getShellProjectPath(currentProject: Project | null | undefined, current
   return currentProject?.fullPath || currentProject?.path || '';
 }
 
+/**
+ * Resolve route and provider session identities for shell resume.
+ */
+function getShellSessionIdentity(currentSession: ProjectSession | null | undefined): {
+  routeSessionId: string | null;
+  providerSessionId: string | null;
+} {
+  const routeSessionId = Number.isInteger(Number(currentSession?.routeIndex))
+    ? `c${Number(currentSession?.routeIndex)}`
+    : /^c\d+$/.test(String(currentSession?.id || ''))
+      ? String(currentSession?.id)
+      : null;
+  const providerSessionId = typeof currentSession?.providerSessionId === 'string' && currentSession.providerSessionId.trim()
+    ? currentSession.providerSessionId.trim()
+    : routeSessionId
+      ? null
+      : typeof currentSession?.id === 'string' && currentSession.id.trim()
+        ? currentSession.id.trim()
+        : null;
+
+  return { routeSessionId, providerSessionId };
+}
+
 type UseShellConnectionOptions = {
   wsRef: MutableRefObject<WebSocket | null>;
   terminalRef: MutableRefObject<Terminal | null>;
   fitAddonRef: MutableRefObject<FitAddon | null>;
   selectedProjectRef: MutableRefObject<Project | null | undefined>;
   selectedSessionRef: MutableRefObject<ProjectSession | null | undefined>;
+  providerRef: MutableRefObject<'codex' | 'pi' | undefined>;
   initialCommandRef: MutableRefObject<string | null | undefined>;
   isPlainShellRef: MutableRefObject<boolean>;
   onProcessCompleteRef: MutableRefObject<((exitCode: number) => void) | null | undefined>;
@@ -71,6 +95,7 @@ export function useShellConnection({
   fitAddonRef,
   selectedProjectRef,
   selectedSessionRef,
+  providerRef,
   initialCommandRef,
   isPlainShellRef,
   onProcessCompleteRef,
@@ -224,20 +249,25 @@ export function useShellConnection({
       return null;
     }
 
+    const { routeSessionId, providerSessionId } = getShellSessionIdentity(currentSession);
+    const hasProviderSession = Boolean(providerSessionId);
+
     return {
       type: 'init',
       projectPath: getShellProjectPath(currentProject, currentSession),
-      sessionId: isPlainShellRef.current ? null : currentSession?.id || null,
-      hasSession: isPlainShellRef.current ? false : Boolean(currentSession),
+      sessionId: isPlainShellRef.current ? null : providerSessionId,
+      routeSessionId: isPlainShellRef.current ? null : routeSessionId,
+      providerSessionId: isPlainShellRef.current ? null : providerSessionId,
+      hasSession: isPlainShellRef.current ? false : hasProviderSession,
       provider: isPlainShellRef.current
         ? 'plain-shell'
-        : normalizeShellSessionProvider(currentSession?.__provider || localStorage.getItem('selected-provider')),
+        : normalizeShellSessionProvider(providerRef.current || currentSession?.__provider || localStorage.getItem('selected-provider')),
       cols: currentTerminal.cols,
       rows: currentTerminal.rows,
       initialCommand: initialCommandRef.current,
       isPlainShell: isPlainShellRef.current,
     } as const;
-  }, [initialCommandRef, isPlainShellRef, selectedProjectRef, selectedSessionRef, terminalRef]);
+  }, [initialCommandRef, isPlainShellRef, providerRef, selectedProjectRef, selectedSessionRef, terminalRef]);
 
   /**
    * Mark the websocket as alive after any inbound activity and reset the watchdog.

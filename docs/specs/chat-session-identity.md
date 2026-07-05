@@ -19,6 +19,18 @@
 - **且** routing context 必须保留 `projectName`、`projectPath`、`workflowId` 和 `workflowStageKey`
 - **且** 该能力由 `pnpm exec tsx --test tests/specs/chat-session-identity.spec.ts` 覆盖
 
+## 需求：Codex/Pi TUI 会话身份必须隔离
+
+### 场景：TUI 会话键和 shell relay 区分 route 身份与 Provider 恢复身份
+
+- **给定** Codex 和 Pi manual session 都可以默认进入聊天 TUI
+- **当** 前端创建 TUI 会话键并初始化后端 shell relay
+- **则** TUI session key 必须包含 `projectPath`、`provider`、`routeSessionId` 和 `providerSessionId`
+- **且** Codex 与 Pi 不得复用同一个 PTY 会话
+- **且** Pi route-backed session 必须使用 `providerSessionId` 执行 Provider CLI resume，而不是把 `cN` 路由 id 当作真实 Provider 会话号
+- **且** 非 plain-shell 的 TUI WebSocket 断开后必须保留 PTY，并允许同 key 重连回放 buffer
+- **且** 该能力由 `pnpm exec tsx --test tests/specs/chat-tui-session-boundary.spec.ts` 覆盖
+
 ## 需求：真实聊天行为必须不退化
 
 ### 场景：identity 收敛后聊天发送、合并和刷新仍稳定

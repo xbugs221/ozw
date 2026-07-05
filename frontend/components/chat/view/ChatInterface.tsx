@@ -7,6 +7,7 @@ import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
+import Shell from '../../shell/view/Shell';
 import type { ChatInterfaceProps } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
@@ -24,6 +25,12 @@ import {
   type PendingViewSession,
 } from '../session/sessionIdentity';
 import { buildConversationBookmarks } from '../utils/conversationBookmarks';
+import { buildChatTuiSessionKey } from '../tui/chatTuiSessionKey';
+import {
+  applyUserRenderSnapshot,
+  createInitialRenderSnapshotState,
+  returnToTuiMode,
+} from '../session/renderSnapshotController';
 import { useChatSearchNavigation } from './chatInterfaceSearchNavigation';
 import { useChatStatusReconcile } from './chatInterfaceStatusReconcile';
 
@@ -101,6 +108,7 @@ function ChatInterface({
   const [piQueueState, setPiQueueState] = useState<PiQueueState | null>(null);
   const [activeTurnStartedAt, setActiveTurnStartedAt] = useState<string | null>(null);
   const [bookmarkScrollTargetKey, setBookmarkScrollTargetKey] = useState<string | null>(null);
+  const [isRenderingSnapshot, setIsRenderingSnapshot] = useState(false);
 
   const resetStreamingState = useCallback(() => {
     if (streamTimerRef.current) {
@@ -186,6 +194,36 @@ function ChatInterface({
   const piThinkingLevelRef = useRef(piThinkingLevel);
   piThinkingLevelRef.current = piThinkingLevel;
 
+  const chatTuiSessionKey = useMemo(() => {
+    const routeSessionId = Number.isInteger(Number(selectedSession?.routeIndex))
+      ? `c${Number(selectedSession?.routeIndex)}`
+      : isCbwRouteSessionId(selectedSession?.id || '')
+        ? selectedSession?.id || ''
+        : null;
+
+    return buildChatTuiSessionKey({
+      projectPath: selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '',
+      provider: effectiveProvider === 'pi' ? 'pi' : 'codex',
+      routeSessionId,
+      providerSessionId: selectedSession?.providerSessionId || selectedSession?.id || null,
+    });
+  }, [
+    effectiveProvider,
+    selectedProject?.fullPath,
+    selectedProject?.path,
+    selectedSession?.id,
+    selectedSession?.projectPath,
+    selectedSession?.providerSessionId,
+    selectedSession?.routeIndex,
+  ]);
+  const [renderSnapshotState, setRenderSnapshotState] = useState(() =>
+    createInitialRenderSnapshotState({ tuiSessionKey: chatTuiSessionKey }),
+  );
+
+  useEffect(() => {
+    setRenderSnapshotState(createInitialRenderSnapshotState({ tuiSessionKey: chatTuiSessionKey }));
+  }, [chatTuiSessionKey]);
+
   const {
     chatMessages,
     setChatMessages,
@@ -236,6 +274,7 @@ function ChatInterface({
     isRealtimeConnected: Boolean(ws && ws.readyState === WebSocket.OPEN),
     autoScrollToBottom,
     externalMessageUpdate,
+    renderSnapshotState,
     resetStreamingState,
     pendingViewSessionRef,
   });
@@ -287,6 +326,25 @@ function ChatInterface({
     onBookmarkControlsChange,
     onBookmarkSelect,
   ]);
+
+  const handleRenderSnapshot = useCallback(async () => {
+    setIsRenderingSnapshot(true);
+    try {
+      const messages = await loadSessionMessages();
+      setRenderSnapshotState((previous) =>
+        applyUserRenderSnapshot(previous, {
+          messages: Array.isArray(messages) ? messages as any[] : [],
+          loadedAt: new Date().toISOString(),
+        }),
+      );
+    } finally {
+      setIsRenderingSnapshot(false);
+    }
+  }, [loadSessionMessages]);
+
+  const handleReturnToTui = useCallback(() => {
+    setRenderSnapshotState((previous) => returnToTuiMode(previous));
+  }, []);
 
   const {
     input,
@@ -909,7 +967,61 @@ function ChatInterface({
     <>
       <div className="flex-1 min-h-0 flex">
         <div className="relative min-w-0 flex-1 flex flex-col">
-          <ChatMessagesPane
+          <div
+            data-testid="chat-tui-panel"
+            data-tui-session-key={renderSnapshotState.tuiSessionKey}
+            data-provider={effectiveProvider === 'pi' ? 'pi' : 'codex'}
+            data-connection-state="mounted"
+            className={renderSnapshotState.mode === 'tui' ? 'min-h-0 flex-1' : 'hidden'}
+          >
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="flex items-center justify-end gap-2 border-b border-border px-3 py-2">
+                <button
+                  type="button"
+                  data-testid="chat-render-snapshot-button"
+                  className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted disabled:opacity-50"
+                  disabled={isRenderingSnapshot}
+                  onClick={() => void handleRenderSnapshot()}
+                >
+                  {isRenderingSnapshot ? '渲染中' : '渲染'}
+                </button>
+              </div>
+              <Shell
+                selectedProject={selectedProject}
+                selectedSession={selectedSession}
+                provider={effectiveProvider === 'pi' ? 'pi' : 'codex'}
+                autoConnect
+              />
+            </div>
+          </div>
+
+          {renderSnapshotState.mode === 'renderedSnapshot' && (
+            <div
+              data-testid="chat-rendered-snapshot-pane"
+              data-snapshot-version={renderSnapshotState.snapshotVersion}
+              data-display-mode={renderSnapshotState.mode}
+              className="min-h-0 flex-1 flex flex-col"
+            >
+              <div className="flex items-center justify-end gap-2 border-b border-border px-3 py-2">
+                <button
+                  type="button"
+                  data-testid="chat-return-tui-button"
+                  className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+                  onClick={handleReturnToTui}
+                >
+                  返回 TUI
+                </button>
+                <button
+                  type="button"
+                  data-testid="chat-rerender-snapshot-button"
+                  className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted disabled:opacity-50"
+                  disabled={isRenderingSnapshot}
+                  onClick={() => void handleRenderSnapshot()}
+                >
+                  {isRenderingSnapshot ? '渲染中' : '重新渲染'}
+                </button>
+              </div>
+              <ChatMessagesPane
             scrollContainerRef={scrollContainerRef}
             onWheel={handleWheel}
             onTouchStart={handleTouchStart}
@@ -917,7 +1029,7 @@ function ChatInterface({
             onKeyDown={handleTranscriptKeyDown}
             isLoadingSessionMessages={isLoadingSessionMessages}
             sessionMessagesError={sessionMessagesError}
-            chatMessages={chatMessages}
+            chatMessages={renderSnapshotState.snapshotMessages as any[]}
             selectedSession={selectedSession}
             currentSessionId={currentSessionId}
             provider={effectiveProvider}
@@ -934,7 +1046,7 @@ function ChatInterface({
             hasMoreMessages={hasMoreMessages}
             totalMessages={totalMessages}
             visibleMessageCount={visibleMessageCount}
-            visibleMessages={visibleMessages}
+            visibleMessages={renderSnapshotState.snapshotMessages as any[]}
             loadEarlierMessages={loadEarlierMessages}
             loadAllMessages={loadAllMessages}
             allMessagesLoaded={allMessagesLoaded}
@@ -951,6 +1063,8 @@ function ChatInterface({
             selectedProject={selectedProject}
             scrollTargetMessageKey={bookmarkScrollTargetKey}
           />
+            </div>
+          )}
 
           <ChatComposer
           isLoading={isLoading}

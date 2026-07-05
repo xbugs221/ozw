@@ -13,6 +13,8 @@ export type ShellInitMessage = {
   type: 'init';
   projectPath: string;
   sessionId: string | null;
+  routeSessionId?: string | null;
+  providerSessionId?: string | null;
   hasSession: boolean;
   provider: string;
   cols: number;
@@ -53,6 +55,7 @@ export type ShellIncomingMessage =
 export type UseShellRuntimeOptions = {
   selectedProject: Project | null | undefined;
   selectedSession: ProjectSession | null | undefined;
+  provider?: 'codex' | 'pi';
   initialCommand: string | null | undefined;
   isPlainShell: boolean;
   isDarkMode: boolean;
@@ -69,6 +72,7 @@ export type ShellSharedRefs = {
   authUrlRef: MutableRefObject<string>;
   selectedProjectRef: MutableRefObject<Project | null | undefined>;
   selectedSessionRef: MutableRefObject<ProjectSession | null | undefined>;
+  providerRef: MutableRefObject<'codex' | 'pi' | undefined>;
   initialCommandRef: MutableRefObject<string | null | undefined>;
   isPlainShellRef: MutableRefObject<boolean>;
   onProcessCompleteRef: MutableRefObject<((exitCode: number) => void) | null | undefined>;

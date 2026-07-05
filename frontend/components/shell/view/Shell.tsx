@@ -19,6 +19,7 @@ import ShellMobileKeyBar from './subcomponents/ShellMobileKeyBar';
 type ShellProps = {
   selectedProject?: Project | null;
   selectedSession?: ProjectSession | null;
+  provider?: 'codex' | 'pi';
   initialCommand?: string | null;
   isPlainShell?: boolean;
   onProcessComplete?: ((exitCode: number) => void) | null;
@@ -30,6 +31,7 @@ type ShellProps = {
 export default function Shell({
   selectedProject = null,
   selectedSession = null,
+  provider,
   initialCommand = null,
   isPlainShell = false,
   onProcessComplete = null,
@@ -61,6 +63,7 @@ export default function Shell({
   } = useShellRuntime({
     selectedProject,
     selectedSession,
+    provider,
     initialCommand,
     isPlainShell,
     isDarkMode,

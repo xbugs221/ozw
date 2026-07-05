@@ -9,6 +9,8 @@
 | Pi 与 Codex 命令工具卡结构一致 | 相同命令工具共享卡片结构 | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `MessageComponent` 和 `ToolRenderer` SSR 渲染 | MessageComponent 工具分支、ToolRenderer | 两者都渲染为 `data-testid="codex-tool-card"`，命令、输出 anchor 和结构指纹一致 | 其它工具族需按风险补充专门规格 |
 | 文件型工具卡片路径统一可打开 | view_image/Read/Edit/FileChanges 路径复用 open-file 配置 | `tests/specs/chat-rendering-parity.spec.tsx`、`tests/spec/chat-composer-runtime.spec.ts` | 真实 `ToolRenderer`、tool config 和浏览器文件预览 | `openFileToolConfig`、`ToolRenderer`、workspace file open | 路径渲染为可点击控件，点击后调用 workspace 文件打开；图片路径打开图片预览 | 文件不存在时沿用现有 editor error UI |
 | 回复正文开始后折叠非正文内容 | 工具调用及其间的过程说明进入 turn 级折叠组，纯工具调用合并为工具次数折叠组 | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `ChatMessage` 字段组合和 turn display block 构建入口 | `buildTurnDisplayBlocks`、`ChatMessagesPane`、`TurnNonBodyGroup` | 正文出现后非正文组默认折叠，正文直接可见；工具调用前后夹杂的过程说明也折叠；仅 live 执行默认展开，历史或非 live 执行默认折叠；纯工具块只显示“工具调用N次”汇总按钮，展开后平铺工具卡且不重复 Codex/时间戳；子任务步骤不显示具体工具类型 | 浏览器截图证据保留在对应归档提案中，长期规格测试固定核心状态合同 |
+| Codex/Pi 聊天默认 TUI-first | 打开会话先显示终端 TUI，渲染视图由用户主动触发 | `tests/specs/chat-tui-session-boundary.spec.ts` | 真实聊天入口源码和 TUI session key 模块 | `ChatInterface`、`chatTuiSessionKey`、`shell-websocket` | 默认可进入 TUI 面板；提供渲染快照和返回 TUI 入口；TUI 会话键区分 Provider 与 route/provider session 身份 | 真实浏览器截图证据保留在对应归档提案中 |
+| JSONL 渲染视图是冻结快照 | 点击渲染读取一次，自动刷新事件不改写快照 | `tests/specs/chat-render-snapshot-controller.spec.ts` | 生产 `renderSnapshotController` 纯逻辑 | `renderSnapshotController`、`sessionRuntimeController` | 默认模式为 TUI；点击渲染生成 snapshot version；`projects_updated`、`codex-complete`、`pi-complete`、`externalMessageUpdate` 不自动刷新；重新渲染才替换快照 | Provider JSONL flush 延迟只影响用户点击当刻可读内容 |
 
 ### 需求：Codex live assistant 不显示冗余元信息
 
@@ -72,6 +74,26 @@
 - 并且同一批量工具组的摘要必须展示真实命令数量
 - 并且历史回放中的字符串 `toolInput`、拆分的 `tool_use` / `tool_result` 形态不得导致命令数量少算或多算
 
+### 需求：Codex/Pi 聊天默认 TUI-first
+
+#### 场景：打开会话先显示终端 TUI，渲染视图由用户主动触发
+
+- 给定用户打开 Codex 或 Pi manual session
+- 当聊天页解析会话身份并挂载终端面板
+- 那么默认视图必须是 TUI，而不是自动读取 JSONL 后显示富渲染消息
+- 并且页面必须提供用户主动渲染 JSONL 快照的入口
+- 并且从渲染视图返回 TUI 时必须保留原终端会话键
+
+### 需求：JSONL 渲染视图是冻结快照
+
+#### 场景：点击渲染读取一次，自动刷新事件不改写快照
+
+- 给定用户已经点击“渲染”生成 JSONL snapshot
+- 当 `projects_updated`、`codex-complete`、`pi-complete` 或 `externalMessageUpdate` 到达
+- 那么当前 snapshot messages 和 snapshot version 不得自动变化
+- 并且只有用户再次点击“重新渲染”才允许重新读取 JSONL 并替换 snapshot
+- 并且返回 TUI 不得清空已有 snapshot，也不得改变终端会话键
+
 ## 契约测试
 
 ### `tests/specs/chat-rendering-parity.spec.tsx`
@@ -80,3 +102,15 @@
 - 真实数据来源：通过 Vite SSR 加载生产 `MessageComponent`、`ThemeProvider`、生产 `sessionMessageMerge`、`nativeRuntimeTranscript` 和 `buildTurnDisplayBlocks`，输入使用真实 `ChatMessage` 字段组合与真实 Codex runtime event shape。
 - 入口路径：`pnpm exec tsx --test tests/specs/chat-rendering-parity.spec.tsx`
 - 用户可见断言：以 SSR HTML 和 transcript 顺序检查用户能看到的正文、元信息、气泡顺序、工具卡 anchor 与卡片结构。
+
+### `tests/specs/chat-tui-session-boundary.spec.ts`
+
+- 覆盖核心业务契约：Codex/Pi TUI session key 必须区分 Provider、项目路径、route session 和 Provider session；Pi route-backed TUI 必须用 `providerSessionId` 恢复；Provider TUI WebSocket 断开后保留 PTY。
+- 真实数据来源：生产 `chatTuiSessionKey` 模块、聊天页入口和 shell WebSocket relay 源码。
+- 入口路径：`pnpm exec tsx --test tests/specs/chat-tui-session-boundary.spec.ts`
+
+### `tests/specs/chat-render-snapshot-controller.spec.ts`
+
+- 覆盖核心业务契约：默认 TUI 模式、用户渲染生成冻结 snapshot、自动刷新事件不改写 snapshot、重新渲染才增加版本、返回 TUI 保留会话键。
+- 真实数据来源：生产 `renderSnapshotController` 纯逻辑。
+- 入口路径：`pnpm exec tsx --test tests/specs/chat-render-snapshot-controller.spec.ts`

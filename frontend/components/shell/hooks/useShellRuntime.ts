@@ -13,6 +13,7 @@ import { copyTextToClipboard } from '../../../utils/clipboard';
 export function useShellRuntime({
   selectedProject,
   selectedSession,
+  provider,
   initialCommand,
   isPlainShell,
   isDarkMode,
@@ -34,6 +35,7 @@ export function useShellRuntime({
 
   const selectedProjectRef = useRef(selectedProject);
   const selectedSessionRef = useRef(selectedSession);
+  const providerRef = useRef(provider);
   const initialCommandRef = useRef(initialCommand);
   const isPlainShellRef = useRef(isPlainShell);
   const onProcessCompleteRef = useRef(onProcessComplete);
@@ -44,10 +46,11 @@ export function useShellRuntime({
   useEffect(() => {
     selectedProjectRef.current = selectedProject;
     selectedSessionRef.current = selectedSession;
+    providerRef.current = provider;
     initialCommandRef.current = initialCommand;
     isPlainShellRef.current = isPlainShell;
     onProcessCompleteRef.current = onProcessComplete;
-  }, [selectedProject, selectedSession, initialCommand, isPlainShell, onProcessComplete]);
+  }, [selectedProject, selectedSession, provider, initialCommand, isPlainShell, onProcessComplete]);
 
   const setCurrentAuthUrl = useCallback((nextAuthUrl: string) => {
     authUrlRef.current = nextAuthUrl;
@@ -159,6 +162,7 @@ export function useShellRuntime({
     fitAddonRef,
     selectedProjectRef,
     selectedSessionRef,
+    providerRef,
     initialCommandRef,
     isPlainShellRef,
     onProcessCompleteRef,

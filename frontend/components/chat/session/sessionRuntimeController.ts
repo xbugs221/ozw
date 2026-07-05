@@ -67,6 +67,10 @@ import {
   resolveSessionRoutingContext,
   type PendingViewSession,
 } from './sessionIdentity';
+import {
+  shouldIgnoreSnapshotAutoRefresh,
+  type RenderSnapshotState,
+} from './renderSnapshotController';
 
 const INITIAL_VISIBLE_MESSAGES = 100;
 const MIN_HISTORY_PREFETCH_DISTANCE_PX = 240;
@@ -80,6 +84,7 @@ export interface UseChatSessionStateArgs {
   isRealtimeConnected?: boolean;
   autoScrollToBottom?: boolean;
   externalMessageUpdate?: number;
+  renderSnapshotState?: RenderSnapshotState;
   resetStreamingState: () => void;
   pendingViewSessionRef: MutableRefObject<PendingViewSession | null>;
 }
@@ -126,6 +131,7 @@ export function useChatSessionState({
   isRealtimeConnected = false,
   autoScrollToBottom,
   externalMessageUpdate,
+  renderSnapshotState,
   resetStreamingState,
   pendingViewSessionRef,
 }: UseChatSessionStateArgs) {
@@ -1093,12 +1099,20 @@ export function useChatSessionState({
       return;
     }
 
+    if (
+      renderSnapshotState
+      && shouldIgnoreSnapshotAutoRefresh(renderSnapshotState, { type: 'externalMessageUpdate' })
+    ) {
+      return;
+    }
+
     void appendLatestSessionMessages();
     // 通过 ref 读取 project/session，依赖不包含对象引用。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     appendLatestSessionMessages,
     externalMessageUpdate,
+    renderSnapshotState,
   ]);
 
   useEffect(() => {

@@ -7,6 +7,70 @@ import type { WebSocket } from 'ws';
 type LooseRecord = Record<string, any>;
 
 /**
+ * 归一化聊天 TUI provider，保留 Codex/Pi 的 PTY 边界。
+ */
+function normalizeShellProvider(provider: unknown): 'codex' | 'pi' | 'plain-shell' {
+    if (provider === 'pi') {
+        return 'pi';
+    }
+    if (provider === 'plain-shell') {
+        return 'plain-shell';
+    }
+    return 'codex';
+}
+
+/**
+ * 构建 provider 对应的 CLI 启动或恢复命令。
+ */
+function buildProviderShellCommand(input: {
+    os: any;
+    provider: 'codex' | 'pi';
+    projectPath: string;
+    hasSession: boolean;
+    resumeSessionId?: string | null;
+}): string {
+    const { os, provider, projectPath, hasSession, resumeSessionId } = input;
+    const cliName = provider === 'pi' ? 'pi' : 'codex';
+    if (os.platform() === 'win32') {
+        if (hasSession && resumeSessionId) {
+            return `Set-Location -Path "${projectPath}"; ${cliName} resume "${resumeSessionId}"; if ($LASTEXITCODE -ne 0) { ${cliName} }`;
+        }
+        return `Set-Location -Path "${projectPath}"; ${cliName}`;
+    }
+
+    if (hasSession && resumeSessionId) {
+        return `cd "${projectPath}" && ${cliName} resume "${resumeSessionId}" || ${cliName}`;
+    }
+    return `cd "${projectPath}" && ${cliName}`;
+}
+
+/**
+ * 解析 shell init 中用于 resume 和 PTY 隔离的会话身份。
+ */
+function resolveShellSessionIdentity(data: LooseRecord): {
+    routeSessionId: string | null;
+    providerSessionId: string | null;
+    resumeSessionId: string | null;
+    ptyIdentity: string;
+} {
+    const routeSessionId = typeof data.routeSessionId === 'string' && data.routeSessionId.trim()
+        ? data.routeSessionId.trim()
+        : null;
+    const providerSessionId = typeof data.providerSessionId === 'string' && data.providerSessionId.trim()
+        ? data.providerSessionId.trim()
+        : typeof data.sessionId === 'string' && data.sessionId.trim() && !/^c\d+$/.test(data.sessionId.trim())
+            ? data.sessionId.trim()
+            : null;
+    const resumeSessionId = providerSessionId;
+    const ptyIdentity = [
+        routeSessionId || 'no-route-session',
+        providerSessionId || 'no-provider-session'
+    ].join('_');
+
+    return { routeSessionId, providerSessionId, resumeSessionId, ptyIdentity };
+}
+
+/**
  * 关闭并清理所有缓存 PTY session。
  */
 export function closeShellPtySessions(runtime: any): void {
@@ -42,9 +106,14 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
 
                 if (data.type === 'init') {
                     const projectPath = data.projectPath || process.cwd();
-                    const sessionId = data.sessionId;
-                    const hasSession = data.hasSession;
-                    const provider = data.provider === 'plain-shell' ? 'plain-shell' : 'codex';
+                    const {
+                        routeSessionId,
+                        providerSessionId,
+                        resumeSessionId,
+                        ptyIdentity
+                    } = resolveShellSessionIdentity(data);
+                    const hasSession = Boolean(data.hasSession && resumeSessionId);
+                    const provider = normalizeShellProvider(data.provider);
                     const initialCommand = data.initialCommand;
                     const isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell';
                     keepSessionAliveOnDisconnect = !isPlainShell;
@@ -61,7 +130,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     const commandSuffix = isPlainShell && initialCommand
                         ? `_cmd_${Buffer.from(initialCommand).toString('base64').slice(0, 16)}`
                         : '';
-                    ptySessionKey = `${projectPath}_${sessionId || 'default'}${commandSuffix}`;
+                    ptySessionKey = `${projectPath}_${provider}_${ptyIdentity}${commandSuffix}`;
 
                     // Kill any existing login session before starting fresh
                     if (isLoginCommand) {
@@ -103,7 +172,10 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     }
 
                     console.log('[INFO] Starting shell in:', projectPath);
-                    console.log('📋 Session info:', hasSession ? `Resume session ${sessionId}` : (isPlainShell ? 'Plain shell mode' : 'New session'));
+                    console.log('📋 Session info:', hasSession ? `Resume session ${resumeSessionId}` : (isPlainShell ? 'Plain shell mode' : 'New session'));
+                    if (routeSessionId || providerSessionId) {
+                        console.log('🧭 Session identity:', { routeSessionId, providerSessionId });
+                    }
                     console.log('🤖 Provider:', isPlainShell ? 'plain-shell' : provider);
                     if (initialCommand) {
                         console.log('⚡ Initial command:', initialCommand);
@@ -114,9 +186,9 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     if (isPlainShell) {
                         welcomeMsg = `\x1b[36mStarting terminal in: ${projectPath}\x1b[0m\r\n`;
                     } else {
-                        const providerName = 'Codex';
+                        const providerName = provider === 'pi' ? 'Pi' : 'Codex';
                         welcomeMsg = hasSession ?
-                            `\x1b[36mResuming ${providerName} session ${sessionId} in: ${projectPath}\x1b[0m\r\n` :
+                            `\x1b[36mResuming ${providerName} session ${resumeSessionId} in: ${projectPath}\x1b[0m\r\n` :
                             `\x1b[36mStarting new ${providerName} session in: ${projectPath}\x1b[0m\r\n`;
                     }
 
@@ -139,23 +211,14 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                     ? `cd "${projectPath}" && ${initialCommand}`
                                     : `cd "${projectPath}" && exec "${process.env.SHELL || '/bin/bash'}" -l`;
                             }
-                        } else if (provider === 'codex') {
-                            // Use codex command
-                            if (os.platform() === 'win32') {
-                                if (hasSession && sessionId) {
-                                    // Try to resume session, but with fallback to a new session if it fails
-                                    shellCommand = `Set-Location -Path "${projectPath}"; codex resume "${sessionId}"; if ($LASTEXITCODE -ne 0) { codex }`;
-                                } else {
-                                    shellCommand = `Set-Location -Path "${projectPath}"; codex`;
-                                }
-                            } else {
-                                if (hasSession && sessionId) {
-                                    // Try to resume session, but with fallback to a new session if it fails
-                                    shellCommand = `cd "${projectPath}" && codex resume "${sessionId}" || codex`;
-                                } else {
-                                    shellCommand = `cd "${projectPath}" && codex`;
-                                }
-                            }
+                        } else if (provider === 'codex' || provider === 'pi') {
+                            shellCommand = buildProviderShellCommand({
+                                os,
+                                provider,
+                                projectPath,
+                                hasSession,
+                                resumeSessionId,
+                            });
                         } else {
                             throw new Error(`Unsupported shell provider: ${provider}`);
                         }
@@ -192,7 +255,9 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             buffer: [],
                             timeoutId: null,
                             projectPath,
-                            sessionId
+                            sessionId: resumeSessionId,
+                            routeSessionId,
+                            providerSessionId
                         });
 
                         // Handle data output
