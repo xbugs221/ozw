@@ -138,8 +138,12 @@ export const resolveRouteSelection = (
   }
 
   if (sessionRouteIndex && routeSegments.length === 1) {
+    const searchParams = new URLSearchParams(search);
+    const hintedProvider = searchParams.get('provider') === 'pi' ? 'pi' : null;
     const session = getProjectSessions(matchedProject).find((entry) => (
-      entry.routeIndex === sessionRouteIndex && !isWorkflowOwnedSession(matchedProject, entry)
+      entry.routeIndex === sessionRouteIndex
+      && !isWorkflowOwnedSession(matchedProject, entry)
+      && (!hintedProvider || (entry.__provider || 'codex') === hintedProvider)
     )) || null;
     return {
       project: matchedProject,
@@ -149,8 +153,8 @@ export const resolveRouteSelection = (
         routeIndex: sessionRouteIndex,
         title: `会话${sessionRouteIndex}`,
         summary: `会话${sessionRouteIndex}`,
-        provider: 'codex',
-        __provider: 'codex',
+        provider: hintedProvider || 'codex',
+        __provider: hintedProvider || 'codex',
         projectPath: matchedProject.fullPath || matchedProject.path || '',
         __projectName: matchedProject.name,
       } as ProjectSession,

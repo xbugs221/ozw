@@ -13,9 +13,55 @@ import { useDeviceSettings } from '../../hooks/useDeviceSettings';
 import { useSessionProtection } from '../../hooks/useSessionProtection';
 import { useProjectsState } from '../../hooks/useProjectsState';
 import { useUiPreferences } from '../../hooks/useUiPreferences';
-import type { SessionProvider } from '../../types/app';
+import type { Project, ProjectSession, SessionProvider } from '../../types/app';
 import { buildProjectSessionRoute, buildWorkflowChildSessionRoute } from '../../utils/projectRoute';
 import { findWorkflowChildSession, hasWorkflowChildSession } from '../../utils/workflowSessions';
+
+function hasStableSessionRoute(session: Pick<ProjectSession, 'id' | 'routeIndex'>): boolean {
+  /**
+   * 判断 session 是否能使用项目内 cN 短路由。
+   */
+  const routeIndex = Number(session.routeIndex);
+  return (Number.isInteger(routeIndex) && routeIndex > 0) || /^c\d+$/.test(String(session.id || ''));
+}
+
+function getSessionProvider(session: Partial<ProjectSession> | null | undefined, fallback?: SessionProvider): SessionProvider {
+  /**
+   * 从 session 字段和调用方提示中解析 provider，默认保持 Codex 兼容行为。
+   */
+  return session?.__provider === 'pi' || session?.provider === 'pi' || fallback === 'pi' ? 'pi' : 'codex';
+}
+
+function buildSessionNavigationUrl(
+  project: Project,
+  session: ProjectSession,
+  searchParams: URLSearchParams,
+  fallbackProvider?: SessionProvider,
+): string {
+  /**
+   * 生成项目会话跳转 URL；没有 cN 绑定的 provider 历史会话走兼容路由。
+   */
+  const provider = getSessionProvider(session, fallbackProvider);
+  const projectPath = session.projectPath || project.fullPath || project.path || '';
+  const nextParams = new URLSearchParams(searchParams);
+
+  if (hasStableSessionRoute(session)) {
+    const route = buildProjectSessionRoute(project, session);
+    if (provider === 'pi') {
+      nextParams.set('provider', provider);
+      nextParams.set('projectPath', projectPath);
+    }
+    return `${route}${nextParams.toString() ? `?${nextParams.toString()}` : ''}`;
+  }
+
+  nextParams.set('provider', provider);
+  nextParams.set('projectPath', projectPath);
+  const sessionSummary = String(session.summary || session.title || session.name || '').trim();
+  if (sessionSummary) {
+    nextParams.set('sessionSummary', sessionSummary);
+  }
+  return `/session/${encodeURIComponent(String(session.id || ''))}?${nextParams.toString()}`;
+}
 
 export default function AppContent() {
   /**
@@ -162,6 +208,7 @@ export default function AppContent() {
       || project.path === options?.projectPath
       || (project.sessions || []).some((session) => session.id === targetSessionId)
       || (project.codexSessions || []).some((session) => session.id === targetSessionId)
+      || (project.piSessions || []).some((session) => session.id === targetSessionId)
       || (project.workflows || []).some((workflow) => (
         workflowHasTargetChildSession(workflow)
       ))
@@ -170,7 +217,11 @@ export default function AppContent() {
       ? [
           ...(matchingProject.sessions || []),
           ...(matchingProject.codexSessions || []),
-        ].find((session) => session.id === targetSessionId) || null
+          ...(matchingProject.piSessions || []),
+        ].find((session) => (
+          session.id === targetSessionId
+          && (!requestedProvider || getSessionProvider(session, requestedProvider) === requestedProvider)
+        )) || null
       : null;
     const searchResultSession = matchingProject && !targetSession && Number.isInteger(options?.routeIndex)
       ? {
@@ -262,8 +313,7 @@ export default function AppContent() {
     }
     const routeSession = targetSession || searchResultSession;
     if (matchingProject && routeSession) {
-      const route = buildProjectSessionRoute(matchingProject, routeSession);
-      navigate(`${route}${nextSearchParams.toString() ? `?${nextSearchParams.toString()}` : ''}`, {
+      navigate(buildSessionNavigationUrl(matchingProject, routeSession, nextSearchParams, requestedProvider), {
         state: location.state,
       });
       return;

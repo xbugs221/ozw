@@ -97,6 +97,29 @@ test('project routes keep project session and provider ownership stable', () => 
   assert.equal(shouldPollWorkflowPlanningSession(project.workflows[0]), true);
 });
 
+test('project cN route honors provider hint for Pi sessions', () => {
+  /**
+   * Pi 页面带 provider=pi 时，刷新或重进 cN URL 不能被同编号 Codex 会话抢占。
+   */
+  const project = buildProjectFixture();
+  project.codexSessions.push({
+    id: 'codex-route-2',
+    routeIndex: 2,
+    title: 'Codex route 2',
+    __provider: 'codex',
+    projectPath: '/work/demo',
+  });
+  const projects = [project] as any[];
+
+  const defaultRoute = resolveRouteSelection(projects, '/projects/demo/c2');
+  assert.equal(defaultRoute.session?.id, 'codex-route-2');
+  assert.equal(defaultRoute.session?.__provider, 'codex');
+
+  const hintedPiRoute = resolveRouteSelection(projects, '/projects/demo/c2', 'provider=pi&projectPath=/work/demo');
+  assert.equal(hintedPiRoute.session?.id, 'pi-2');
+  assert.equal(hintedPiRoute.session?.__provider, 'pi');
+});
+
 test('project refresh preserves loaded details and replaces temporary cN selection', () => {
   /**
    * 轻量列表刷新只能更新 summary 字段，不能抹掉用户当前已加载的详情和 provider sessions。

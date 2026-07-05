@@ -39,6 +39,48 @@ const readPersistedTab = (): AppTab => {
   }
   return 'chat';
 };
+
+function hasStableSessionRoute(session: ProjectSession): boolean {
+  /**
+   * 判断 session 是否能使用项目内 cN 短路由。
+   */
+  const routeIndex = Number(session.routeIndex);
+  return (Number.isInteger(routeIndex) && routeIndex > 0) || /^c\d+$/.test(String(session.id || ''));
+}
+
+function buildSessionNavigationUrl(
+  project: Pick<Project, 'fullPath' | 'path' | 'name' | 'routePath'>,
+  session: ProjectSession,
+): string {
+  /**
+   * 为项目会话生成导航 URL；无 cN 绑定的 provider 历史会话回退到兼容路由。
+   */
+  const provider: SessionProvider = session.__provider === 'pi' ? 'pi' : 'codex';
+  const projectPath = session.projectPath || project.fullPath || project.path || '';
+
+  if (hasStableSessionRoute(session)) {
+    const route = buildProjectSessionRoute(project, session);
+    if (provider !== 'pi') {
+      return route;
+    }
+    const params = new URLSearchParams({
+      provider,
+      projectPath,
+    });
+    return `${route}?${params.toString()}`;
+  }
+
+  const params = new URLSearchParams({
+    provider,
+    projectPath,
+  });
+  const sessionSummary = String(session.summary || session.title || session.name || '').trim();
+  if (sessionSummary) {
+    params.set('sessionSummary', sessionSummary);
+  }
+  return `/session/${encodeURIComponent(String(session.id || ''))}?${params.toString()}`;
+}
+
 export function useProjectsState({
   locationPathname,
   locationSearch = '',
@@ -313,7 +355,7 @@ export function useProjectsState({
         routePath: selectedProject?.routePath,
       };
       navigate(
-        buildProjectSessionRoute(sessionProject, session),
+        buildSessionNavigationUrl(sessionProject, session),
       );
     },
     [activeTab, navigate, selectedProject?.fullPath, selectedProject?.name, selectedProject?.path, selectedProject?.routePath],
