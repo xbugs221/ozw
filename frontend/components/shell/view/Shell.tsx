@@ -2,7 +2,8 @@
  * Interactive shell view.
  * Keeps the terminal lifecycle and connection controls aligned with the current project/session context.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import '@xterm/xterm/css/xterm.css';
 import type { Project, ProjectSession } from '../../../types/app';
@@ -26,6 +27,8 @@ type ShellProps = {
   minimal?: boolean;
   autoConnect?: boolean;
   isActive?: boolean;
+  headerActions?: ReactNode;
+  onTerminalInputReady?: (sendInput: ((data: string) => boolean) | null) => void;
 };
 
 export default function Shell({
@@ -38,6 +41,8 @@ export default function Shell({
   minimal = false,
   autoConnect = false,
   isActive,
+  headerActions,
+  onTerminalInputReady,
 }: ShellProps) {
   const { t } = useTranslation('chat');
   const { isDarkMode } = useTheme();
@@ -82,6 +87,19 @@ export default function Shell({
     () => (sessionDisplayName ? sessionDisplayName.slice(0, 50) : null),
     [sessionDisplayName],
   );
+
+  useEffect(() => {
+    /**
+     * PURPOSE: Let a parent toolbar insert text into the active PTY without
+     * reaching into xterm internals.
+     */
+    if (!onTerminalInputReady) {
+      return undefined;
+    }
+
+    onTerminalInputReady(sendTerminalInput);
+    return () => onTerminalInputReady(null);
+  }, [onTerminalInputReady, sendTerminalInput]);
 
   const handleRestartShell = useCallback(() => {
     setIsRestarting(true);
@@ -153,6 +171,7 @@ export default function Shell({
         restartLabel={t('shell.actions.restart')}
         restartTitle={t('shell.actions.restartTitle')}
         disableRestart={isRestarting || isConnected}
+        extraActions={headerActions}
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white dark:bg-gray-900">

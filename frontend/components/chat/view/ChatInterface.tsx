@@ -1,23 +1,22 @@
 /**
  * Chat interface container.
- * Coordinates composer, realtime handlers, session state, and resilience UX such as network timeout feedback.
+ * Coordinates the provider TUI, rendered transcript snapshots, realtime handlers, and session state.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
-import ChatComposer from './subcomponents/ChatComposer';
 import Shell from '../../shell/view/Shell';
 import type { ChatInterfaceProps } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
-import { useChatComposerState } from '../hooks/useChatComposerState';
-import type { Provider } from '../types/types';
-import { buildPiQueueState, isPiQueueForActiveSession, type PiQueueState } from '../utils/piQueueState';
-import { api } from '../../../utils/api';
+import type { ChatAttachment, Provider } from '../types/types';
+import { api, authenticatedFetch } from '../../../utils/api';
+import { validateChatAttachmentQueue } from '../composer/attachmentQueue';
 import { hasSessionControlChanged } from '../composer/sessionControlState';
 import {
+  getSessionLoadId,
   isCbwRouteSessionId,
   isTemporarySessionId,
   resolveProjectSessionProvider,
@@ -34,9 +33,15 @@ import {
 import { useChatSearchNavigation } from './chatInterfaceSearchNavigation';
 import { useChatStatusReconcile } from './chatInterfaceStatusReconcile';
 
-const NETWORK_RESPONSE_TIMEOUT_MS = 30_000;
-const NETWORK_TIMEOUT_MESSAGE =
-  '30 秒内没有收到服务端响应，疑似网络连接异常。请检查网络后重试。';
+const Upload = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => (
+  <svg className={cls || 'h-4 w-4'} stroke="currentColor" strokeWidth={sw || 2} fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);
+
+type TuiTerminalInputSender = (data: string) => boolean;
 
 /**
  * Build the project identity needed by session-scoped config APIs.
@@ -50,25 +55,49 @@ const resolveSessionConfigTarget = (
 });
 
 /**
- * Identify whether a WebSocket message can be treated as backend activity for chat requests.
+ * Resolve the upload owner used by the existing attachment API.
  */
-const isBackendResponseMessage = (messageType?: string): boolean => {
-  if (!messageType) {
-    return false;
+function resolveUploadProjectName(
+  selectedProject: ChatInterfaceProps['selectedProject'],
+  selectedSession: ChatInterfaceProps['selectedSession'],
+): string {
+  /**
+   * PURPOSE: Keep TUI uploads in the same project namespace as legacy chat
+   * composer uploads.
+   */
+  return selectedSession?.__projectName || selectedProject?.name || '';
+}
+
+/**
+ * Format uploaded attachment paths as one TUI input fragment.
+ */
+function buildTuiAttachmentPathInsertion(paths: string[]): string {
+  /**
+   * PURPOSE: Insert file references without newline characters so selecting a
+   * file never submits the TUI prompt unexpectedly.
+   */
+  const mentions = paths
+    .map((filePath) => filePath.trim())
+    .filter(Boolean)
+    .map((filePath) => `@${filePath}`)
+    .join(' ');
+  return mentions ? ` ${mentions} ` : '';
+}
+
+/**
+ * Choose the path that should be inserted into the TUI prompt for one upload.
+ */
+function resolveTuiAttachmentPath(attachment: ChatAttachment): string {
+  /**
+   * PURPOSE: Prefer the filesystem path agents can inspect directly while
+   * preserving a fallback for older attachment payloads.
+   */
+  if (typeof attachment.absolutePath === 'string' && attachment.absolutePath.trim()) {
+    return attachment.absolutePath.trim();
   }
 
-  if (
-    messageType === 'projects_updated'
-    || messageType === 'loading_progress'
-    || messageType === 'session-model-state-updated'
-    || messageType === 'session-queue-state'
-    || messageType === 'session-subscribed'
-  ) {
-    return false;
-  }
-
-  return true;
-};
+  return typeof attachment.relativePath === 'string' ? attachment.relativePath.trim() : '';
+}
 
 function ChatInterface({
   selectedProject,
@@ -77,8 +106,6 @@ function ChatInterface({
   sendMessage,
   messageHistory,
   onFileOpen,
-  onInputFocusChange,
-  onSessionActive,
   onSessionInactive,
   onReplaceTemporarySession,
   onNavigateToSession,
@@ -99,16 +126,19 @@ function ChatInterface({
   const pendingViewSessionRef = useRef<PendingViewSession | null>(null);
   const dispatchedSessionAutoInitsRef = useRef<Set<string>>(new Set());
   const surfacedWorkflowApplyFailuresRef = useRef<Set<string>>(new Set());
-  const pendingNetworkTimeoutRef = useRef<number | null>(null);
-  const awaitingBackendResponseRef = useRef(false);
   const statusReconcileKeyRef = useRef<string | null>(null);
+  const tuiTerminalInputRef = useRef<TuiTerminalInputSender | null>(null);
+  const tuiUploadInputRef = useRef<HTMLInputElement>(null);
+  const renderedSnapshotTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [workflowTurnOutcomes, setWorkflowTurnOutcomes] = useState<Record<string, 'completed' | 'failed'>>({});
   const [isFollowingLatest, setIsFollowingLatest] = useState(false);
   const [searchHighlightRetry, setSearchHighlightRetry] = useState(0);
-  const [piQueueState, setPiQueueState] = useState<PiQueueState | null>(null);
-  const [activeTurnStartedAt, setActiveTurnStartedAt] = useState<string | null>(null);
+  const [, setActiveTurnStartedAt] = useState<string | null>(null);
   const [bookmarkScrollTargetKey, setBookmarkScrollTargetKey] = useState<string | null>(null);
   const [isRenderingSnapshot, setIsRenderingSnapshot] = useState(false);
+  const [, setRenderedSnapshotInput] = useState('');
+  const [isUploadingTuiAttachment, setIsUploadingTuiAttachment] = useState(false);
+  const [tuiUploadError, setTuiUploadError] = useState('');
 
   const resetStreamingState = useCallback(() => {
     if (streamTimerRef.current) {
@@ -127,17 +157,10 @@ function ChatInterface({
     codexReasoningEffort,
     setCodexReasoningEffort,
     codexReasoningOptions,
-    codexServiceTier,
-    setCodexServiceTier,
-    codexServiceTierOptions,
-    codexFastServiceTier,
     piModel,
     setPiModel,
-    piModelOptions,
-    piModelCatalogLoaded,
     piThinkingLevel,
     setPiThinkingLevel,
-    piThinkingOptions,
     setPendingPermissionRequests,
   } = useChatProviderState({
     selectedSession,
@@ -165,25 +188,6 @@ function ChatInterface({
     provider,
     selectedSession?.__provider,
   ]);
-  const isPiModelSelectable = useMemo(() => {
-    return piModelOptions.some((option) => option.value === piModel);
-  }, [piModel, piModelOptions]);
-  const piUnavailableMessage = useMemo(() => {
-    /**
-     * Keep the visible composer disabled state and submit guard aligned while
-     * Pi model discovery is loading or unavailable.
-     */
-    if (effectiveProvider !== 'pi') {
-      return '';
-    }
-    if (!piModelCatalogLoaded) {
-      return 'Loading Pi model catalog...';
-    }
-    if (!isPiModelSelectable) {
-      return 'Pi is unavailable. Configure Pi authentication before sending.';
-    }
-    return '';
-  }, [effectiveProvider, isPiModelSelectable, piModelCatalogLoaded]);
   const [codexModelSwitchSessionId, setCodexModelSwitchSessionId] = useState<string | null>(null);
   const codexModelRef = useRef(codexModel);
   codexModelRef.current = codexModel;
@@ -200,12 +204,17 @@ function ChatInterface({
       : isCbwRouteSessionId(selectedSession?.id || '')
         ? selectedSession?.id || ''
         : null;
+    const providerSessionId = typeof selectedSession?.providerSessionId === 'string' && selectedSession.providerSessionId.trim()
+      ? selectedSession.providerSessionId.trim()
+      : typeof selectedSession?.id === 'string' && selectedSession.id.trim()
+        ? selectedSession.id.trim()
+        : null;
 
     return buildChatTuiSessionKey({
       projectPath: selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '',
       provider: effectiveProvider === 'pi' ? 'pi' : 'codex',
       routeSessionId,
-      providerSessionId: selectedSession?.providerSessionId || selectedSession?.id || null,
+      providerSessionId,
     });
   }, [
     effectiveProvider,
@@ -231,20 +240,16 @@ function ChatInterface({
     setIsLoading,
     currentSessionId,
     setCurrentSessionId,
-    sessionMessages,
     setSessionMessages,
     sessionMessagesError,
     isLoadingSessionMessages,
     isLoadingMoreMessages,
     hasMoreMessages,
     totalMessages,
-    isSystemSessionChange,
     setIsSystemSessionChange,
     canAbortSession,
     setCanAbortSession,
-    isUserScrolledUp,
     setIsUserScrolledUp,
-    tokenBudget,
     setTokenBudget,
     visibleMessageCount,
     visibleMessages,
@@ -259,8 +264,6 @@ function ChatInterface({
     createDiff,
     scrollContainerRef,
     scrollToBottom,
-    scrollToBottomAndReset,
-    handleScroll,
     handleWheel,
     handleTouchStart,
     handleTouchMove,
@@ -282,11 +285,6 @@ function ChatInterface({
     (selectedSession?.id && !isTemporarySessionId(selectedSession.id))
     || (currentSessionId && !isTemporarySessionId(currentSessionId)),
   );
-  const activePiQueueState = useMemo(() => {
-    return isPiQueueForActiveSession(piQueueState, currentSessionId, selectedSession?.id)
-      ? piQueueState
-      : null;
-  }, [currentSessionId, piQueueState, selectedSession?.id]);
   const conversationBookmarks = useMemo(
     () => buildConversationBookmarks(chatMessages),
     [chatMessages],
@@ -330,7 +328,26 @@ function ChatInterface({
   const handleRenderSnapshot = useCallback(async () => {
     setIsRenderingSnapshot(true);
     try {
-      const messages = await loadSessionMessages();
+      const projectName = selectedSession?.__projectName || selectedProject?.name || '';
+      const sessionId = getSessionLoadId(selectedSession) || currentSessionId || '';
+      const projectPath = selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '';
+      if (!projectName || !sessionId) {
+        setRenderSnapshotState((previous) =>
+          applyUserRenderSnapshot(previous, {
+            messages: [],
+            loadedAt: new Date().toISOString(),
+          }),
+        );
+        return;
+      }
+
+      const messages = await loadSessionMessages(
+        projectName,
+        sessionId,
+        false,
+        effectiveProvider,
+        projectPath,
+      );
       setRenderSnapshotState((previous) =>
         applyUserRenderSnapshot(previous, {
           messages: Array.isArray(messages) ? messages as any[] : [],
@@ -340,118 +357,105 @@ function ChatInterface({
     } finally {
       setIsRenderingSnapshot(false);
     }
-  }, [loadSessionMessages]);
+  }, [
+    currentSessionId,
+    effectiveProvider,
+    loadSessionMessages,
+    selectedProject?.fullPath,
+    selectedProject?.name,
+    selectedProject?.path,
+    selectedSession,
+  ]);
 
   const handleReturnToTui = useCallback(() => {
     setRenderSnapshotState((previous) => returnToTuiMode(previous));
   }, []);
 
-  const {
-    input,
-    setInput,
-    textareaRef,
-    inputHighlightRef,
-    isTextareaExpanded,
-    filteredCommands,
-    frequentCommands,
-    showCommandMenu,
-    selectedCommandIndex,
-    resetCommandMenuState,
-    handleCommandSelect,
-    handleToggleCommandMenu,
-    showFileDropdown,
-    fileSearchQuery,
-    setFileSearchQuery,
-    fileTree,
-    expandedFileTreePaths,
-    toggleFileTreeDirectory,
-    filteredFiles,
-    selectedFileIndex,
-    renderInputWithMentions,
-    selectFile,
-    openFileDropdown,
-    handleFileMentionsKeyDown,
-    attachedUploads,
-    setAttachedUploads,
-    uploadingAttachments,
-    attachmentErrors,
-    isComposerSubmitting,
-    getRootProps,
-    getInputProps,
-    isDragActive,
-    openAttachmentPicker,
-    handleAttachmentSelection,
-    handleSubmit,
-    handleInputChange,
-    handleKeyDown,
-    handlePaste,
-    handleTextareaClick,
-    handleTextareaInput,
-    syncInputOverlayScroll,
-    handleAbortSession,
-    handleTranscript,
-    handleInputFocusChange,
-    isInputFocused,
-  } = useChatComposerState({
-    selectedProject,
-    selectedSession,
-    currentSessionId,
-    provider: effectiveProvider,
-    codexModel,
-    piModel,
-    piThinkingLevel,
-    piCanSend: effectiveProvider !== 'pi' || !piUnavailableMessage,
-    piUnavailableMessage,
-    codexModelSwitchSessionId,
-    codexReasoningEffort,
-    codexServiceTier,
-    canAbortSession,
-    tokenBudget,
-    chatMessages,
-    sendMessage,
-    onSessionActive,
-    onInputFocusChange,
-    onFileOpen,
-    onShowSettings,
-    pendingViewSessionRef,
-    scrollToBottom,
-    setChatMessages,
-    setSessionMessages,
-    setIsLoading,
-    setCanAbortSession,
-    setIsUserScrolledUp,
-    setPendingPermissionRequests,
-    onRequestDispatched: () => {
-      awaitingBackendResponseRef.current = true;
-      if (pendingNetworkTimeoutRef.current) {
-        clearTimeout(pendingNetworkTimeoutRef.current);
+  const handleTuiTerminalInputReady = useCallback((sendInput: TuiTerminalInputSender | null) => {
+    /**
+     * PURPOSE: Store the active PTY sender so upload controls can insert paths
+     * into whichever TUI instance is currently mounted.
+     */
+    tuiTerminalInputRef.current = sendInput;
+  }, []);
+
+  const handleTuiAttachmentUpload = useCallback(async (files: File[]) => {
+    /**
+     * PURPOSE: Persist selected browser files, then insert their saved paths
+     * into the TUI input line instead of sending a legacy web chat message.
+     */
+    const { accepted, rejected } = validateChatAttachmentQueue(files);
+    if (accepted.length === 0) {
+      setTuiUploadError(rejected[0]?.reason || t('input.noAttachmentSelected', { defaultValue: '未选择文件' }));
+      return;
+    }
+
+    const projectName = resolveUploadProjectName(selectedProject, selectedSession);
+    if (!projectName) {
+      setTuiUploadError(t('input.uploadProjectMissing', { defaultValue: '无法确定上传项目' }));
+      return;
+    }
+
+    setIsUploadingTuiAttachment(true);
+    setTuiUploadError('');
+
+    try {
+      const formData = new FormData();
+      accepted.forEach((file) => {
+        formData.append('attachments', file);
+      });
+      formData.append('relativePaths', JSON.stringify(
+        accepted.map((file) => file.webkitRelativePath || file.name),
+      ));
+
+      const response = await authenticatedFetch(`/api/projects/${encodeURIComponent(projectName)}/upload-attachments`, {
+        method: 'POST',
+        headers: {},
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
 
-      pendingNetworkTimeoutRef.current = window.setTimeout(() => {
-        if (!awaitingBackendResponseRef.current) {
-          return;
-        }
+      const result = await response.json() as { attachments?: ChatAttachment[] };
+      const uploadedPaths = (Array.isArray(result.attachments) ? result.attachments : [])
+        .map(resolveTuiAttachmentPath)
+        .filter(Boolean);
+      const insertion = buildTuiAttachmentPathInsertion(uploadedPaths);
+      if (!insertion) {
+        throw new Error(t('input.uploadPathMissing', { defaultValue: '上传成功但未返回文件路径' }));
+      }
 
-        awaitingBackendResponseRef.current = false;
-        pendingNetworkTimeoutRef.current = null;
-        setIsLoading(false);
-        setCanAbortSession(false);
-        setChatMessages((previous) => [
-          ...previous,
-          {
-            type: 'error',
-            content: NETWORK_TIMEOUT_MESSAGE,
-            timestamp: new Date(),
-          },
-        ]);
-      }, NETWORK_RESPONSE_TIMEOUT_MS);
-    },
-  });
-  // 用 ref 持有 input/focus 值，避免输入变化重建状态轮询定时器
-  const inputRef = useRef(input);
-  inputRef.current = input;
-  const isInputFocusedRef = useRef(isInputFocused);
-  isInputFocusedRef.current = isInputFocused;
+      const sent = tuiTerminalInputRef.current?.(insertion) || false;
+      if (!sent) {
+        setTuiUploadError(t('input.tuiNotReady', { defaultValue: 'TUI 未连接，文件已上传但路径未插入' }));
+        return;
+      }
+
+      if (rejected.length > 0) {
+        setTuiUploadError(t('input.uploadPartialRejected', {
+          count: rejected.length,
+          defaultValue: `${rejected.length} 个文件未上传`,
+        }));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('input.uploadFailed', { defaultValue: '上传失败' });
+      setTuiUploadError(message);
+    } finally {
+      setIsUploadingTuiAttachment(false);
+    }
+  }, [selectedProject, selectedSession, t]);
+
+  const handleTuiAttachmentSelection = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    /**
+     * PURPOSE: Reset the file input after every pick so selecting the same file
+     * twice still triggers a browser change event.
+     */
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    void handleTuiAttachmentUpload(files);
+  }, [handleTuiAttachmentUpload]);
 
   const handleSetCodexModel = useCallback(
     (nextModel: string) => {
@@ -554,15 +558,6 @@ function ChatInterface({
       codexModel,
       persistSessionModelState,
       setCodexReasoningEffort,
-    ],
-  );
-
-  const handleSetCodexServiceTier = useCallback(
-    (nextServiceTier: string) => {
-      setCodexServiceTier(nextServiceTier);
-    },
-    [
-      setCodexServiceTier,
     ],
   );
 
@@ -780,37 +775,8 @@ function ChatInterface({
         }
       }
 
-      if (message.type === 'session-queue-state' && message.provider === 'pi') {
-        const nextQueueState = buildPiQueueState(message);
-        if (isPiQueueForActiveSession(nextQueueState, currentSessionId, selectedSession?.id)) {
-          setPiQueueState(nextQueueState);
-        }
-      }
-
-      if (!awaitingBackendResponseRef.current) {
-        return;
-      }
-
-      if (!isBackendResponseMessage(message.type)) {
-        return;
-      }
-
-      awaitingBackendResponseRef.current = false;
-      if (pendingNetworkTimeoutRef.current) {
-        clearTimeout(pendingNetworkTimeoutRef.current);
-        pendingNetworkTimeoutRef.current = null;
-      }
     },
   });
-
-  useEffect(() => {
-    return () => {
-      if (pendingNetworkTimeoutRef.current) {
-        clearTimeout(pendingNetworkTimeoutRef.current);
-        pendingNetworkTimeoutRef.current = null;
-      }
-    };
-  }, []);
 
   useEffect(() => {
     /**
@@ -867,26 +833,6 @@ function ChatInterface({
   });
 
   useEffect(() => {
-    if (!isLoading || !canAbortSession) {
-      return;
-    }
-
-    const handleGlobalEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.repeat || event.defaultPrevented) {
-        return;
-      }
-
-      event.preventDefault();
-      handleAbortSession();
-    };
-
-    document.addEventListener('keydown', handleGlobalEscape, { capture: true });
-    return () => {
-      document.removeEventListener('keydown', handleGlobalEscape, { capture: true });
-    };
-  }, [canAbortSession, handleAbortSession, isLoading]);
-
-  useEffect(() => {
     return () => {
       resetStreamingState();
     };
@@ -939,6 +885,51 @@ function ChatInterface({
     setIsUserScrolledUp,
   ]);
 
+  const tuiHeaderActions = (
+    <div className="flex min-w-0 items-center gap-2">
+      <input
+        ref={tuiUploadInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        data-testid="chat-tui-upload-input"
+        onChange={handleTuiAttachmentSelection}
+      />
+      {tuiUploadError && (
+        <span
+          className="hidden max-w-[180px] truncate text-xs text-red-600 dark:text-red-300 md:inline"
+          title={tuiUploadError}
+        >
+          {tuiUploadError}
+        </span>
+      )}
+      <button
+        type="button"
+        data-testid="chat-tui-upload-attachment-button"
+        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-700"
+        disabled={isUploadingTuiAttachment}
+        title={t('input.uploadImageOrFile', { defaultValue: '上传图片/文件' })}
+        onClick={() => tuiUploadInputRef.current?.click()}
+      >
+        <Upload className="h-3.5 w-3.5" strokeWidth={2} />
+        <span className="hidden sm:inline">
+          {isUploadingTuiAttachment
+            ? t('input.uploading', { defaultValue: '上传中' })
+            : t('input.uploadImageOrFile', { defaultValue: '上传图片/文件' })}
+        </span>
+      </button>
+      <button
+        type="button"
+        data-testid="chat-render-snapshot-button"
+        className="inline-flex h-7 items-center rounded-md border border-gray-300 bg-white px-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-700"
+        disabled={isRenderingSnapshot}
+        onClick={() => void handleRenderSnapshot()}
+      >
+        {isRenderingSnapshot ? '渲染中' : '渲染'}
+      </button>
+    </div>
+  );
+
   if (!selectedProject) {
     const selectedProviderLabel =
       effectiveProvider === 'codex'
@@ -975,22 +966,13 @@ function ChatInterface({
             className={renderSnapshotState.mode === 'tui' ? 'min-h-0 flex-1' : 'hidden'}
           >
             <div className="flex h-full min-h-0 flex-col">
-              <div className="flex items-center justify-end gap-2 border-b border-border px-3 py-2">
-                <button
-                  type="button"
-                  data-testid="chat-render-snapshot-button"
-                  className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted disabled:opacity-50"
-                  disabled={isRenderingSnapshot}
-                  onClick={() => void handleRenderSnapshot()}
-                >
-                  {isRenderingSnapshot ? '渲染中' : '渲染'}
-                </button>
-              </div>
               <Shell
                 selectedProject={selectedProject}
                 selectedSession={selectedSession}
                 provider={effectiveProvider === 'pi' ? 'pi' : 'codex'}
                 autoConnect
+                headerActions={tuiHeaderActions}
+                onTerminalInputReady={handleTuiTerminalInputReady}
               />
             </div>
           </div>
@@ -1034,14 +1016,14 @@ function ChatInterface({
             currentSessionId={currentSessionId}
             provider={effectiveProvider}
             setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
-            textareaRef={textareaRef}
+            textareaRef={renderedSnapshotTextareaRef}
             codexModel={codexModel}
             setCodexModel={handleSetCodexModel}
             codexModelOptions={codexModelOptions}
             codexReasoningEffort={codexReasoningEffort}
             setCodexReasoningEffort={handleSetCodexReasoningEffort}
             codexReasoningOptions={codexReasoningOptions}
-            setInput={setInput}
+            setInput={setRenderedSnapshotInput}
             isLoadingMoreMessages={isLoadingMoreMessages}
             hasMoreMessages={hasMoreMessages}
             totalMessages={totalMessages}
@@ -1066,96 +1048,6 @@ function ChatInterface({
             </div>
           )}
 
-          <ChatComposer
-          isLoading={isLoading}
-          isComposerSubmitting={isComposerSubmitting}
-          onAbortSession={handleAbortSession}
-          provider={effectiveProvider}
-          codexModel={codexModel}
-          setCodexModel={handleSetCodexModel}
-          codexModelOptions={codexModelOptions}
-          codexReasoningEffort={codexReasoningEffort}
-          setCodexReasoningEffort={handleSetCodexReasoningEffort}
-          codexReasoningOptions={codexReasoningOptions}
-          codexServiceTier={codexServiceTier}
-          setCodexServiceTier={handleSetCodexServiceTier}
-          codexServiceTierOptions={codexServiceTierOptions}
-          codexFastServiceTier={codexFastServiceTier}
-          piModel={piModel}
-          setPiModel={handleSetPiModel}
-          piModelOptions={piModelOptions}
-          piThinkingLevel={piThinkingLevel}
-          setPiThinkingLevel={handleSetPiThinkingLevel}
-          piThinkingOptions={piThinkingOptions}
-          piQueueState={activePiQueueState}
-          piUnavailableMessage={piUnavailableMessage}
-          activeTurnStartedAt={activeTurnStartedAt}
-          onToggleCommandMenu={handleToggleCommandMenu}
-          onToggleFileMenu={openFileDropdown}
-          hasMessages={chatMessages.length > 0 || visibleMessages.length > 0 || sessionMessages.length > 0}
-          isFollowingLatest={isFollowingLatest}
-          onToggleFollowLatest={() => {
-            setIsFollowingLatest((current) => {
-              const next = !current;
-              if (next) {
-                scrollToBottomAndReset();
-                setIsUserScrolledUp(false);
-              }
-              return next;
-            });
-          }}
-          onSubmit={handleSubmit}
-          isDragActive={isDragActive}
-          attachedUploads={attachedUploads}
-          onRemoveAttachment={(index) =>
-            setAttachedUploads((previous) =>
-              previous.filter((_, currentIndex) => currentIndex !== index),
-            )
-          }
-          uploadingAttachments={uploadingAttachments}
-          attachmentErrors={attachmentErrors}
-          showFileDropdown={showFileDropdown}
-          fileSearchQuery={fileSearchQuery}
-          onFileSearchQueryChange={setFileSearchQuery}
-          fileTree={fileTree}
-          expandedFileTreePaths={expandedFileTreePaths}
-          onToggleFileTreeDirectory={toggleFileTreeDirectory}
-          filteredFiles={filteredFiles}
-          selectedFileIndex={selectedFileIndex}
-          onSelectFile={selectFile}
-          onFileMenuKeyDown={handleFileMentionsKeyDown}
-          filteredCommands={filteredCommands}
-          selectedCommandIndex={selectedCommandIndex}
-          onCommandSelect={handleCommandSelect}
-          onCloseCommandMenu={resetCommandMenuState}
-          isCommandMenuOpen={showCommandMenu}
-          frequentCommands={frequentCommands}
-          getRootProps={getRootProps as (...args: unknown[]) => Record<string, unknown>}
-          getInputProps={getInputProps as (...args: unknown[]) => Record<string, unknown>}
-          openAttachmentPicker={openAttachmentPicker}
-          onAttachmentSelection={handleAttachmentSelection}
-          inputHighlightRef={inputHighlightRef}
-          renderInputWithMentions={renderInputWithMentions}
-          textareaRef={textareaRef}
-          input={input}
-          onInputChange={handleInputChange}
-          onTextareaClick={handleTextareaClick}
-          onTextareaKeyDown={handleKeyDown}
-          onTextareaPaste={handlePaste}
-          onTextareaScrollSync={syncInputOverlayScroll}
-          onTextareaInput={handleTextareaInput}
-          onInputFocusChange={handleInputFocusChange}
-          placeholder={t('input.placeholder', {
-              provider:
-              effectiveProvider === 'codex'
-                ? t('messageTypes.codex')
-                : effectiveProvider === 'pi'
-                  ? t('messageTypes.pi')
-                  : t('messageTypes.codex'),
-          })}
-          isTextareaExpanded={isTextareaExpanded}
-          onTranscript={handleTranscript}
-          />
         </div>
       </div>
     </>

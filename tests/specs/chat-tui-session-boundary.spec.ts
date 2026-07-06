@@ -83,7 +83,10 @@ test('聊天页默认 TUI-first，并保留渲染快照入口', () => {
 
   assert.match(source, /ChatTuiPanel|chat-tui-panel/, 'ChatInterface 必须接入 TUI 面板');
   assert.match(source, /chat-render-snapshot-button|renderSnapshot/i, '聊天页必须提供用户主动渲染 JSONL 快照入口');
+  assert.match(source, /chat-tui-upload-attachment-button/, '聊天页必须提供上传图片或文件并插入 TUI 路径的入口');
+  assert.match(source, /onTerminalInputReady/, '上传后的文件路径必须通过终端输入通道插入 TUI');
   assert.match(source, /chat-return-tui-button|returnToTui/i, '渲染视图必须能返回 TUI');
+  assert.doesNotMatch(source, /<ChatComposer\b/, 'TUI-first 会话页不应再渲染旧聊天输入框');
   assert.doesNotMatch(
     source,
     /selectedSession[\s\S]{0,240}loadSessionMessages\(/,
