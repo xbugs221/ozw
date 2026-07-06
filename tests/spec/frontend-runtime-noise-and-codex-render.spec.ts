@@ -81,6 +81,42 @@ async function writeCodexSession(sessionId: string): Promise<void> {
 }
 
 /**
+ * Write a Codex session with enough messages to require paged history loading.
+ */
+async function writeLongCodexRenderSession(sessionId: string, messageCount: number): Promise<void> {
+  /** docstring：用真实 JSONL 长历史验证“渲染”快照读取完整会话，而不是只读第一页。 */
+  const sessionPath = codexSessionPath(sessionId);
+  await fs.mkdir(path.dirname(sessionPath), { recursive: true });
+
+  const entries = [
+    {
+      type: 'session_meta',
+      timestamp: '2026-06-05T09:00:00.000Z',
+      payload: {
+        id: sessionId,
+        cwd: PRIMARY_FIXTURE_PROJECT_PATH,
+        model: 'gpt-5-codex',
+      },
+    },
+  ];
+
+  for (let index = 1; index <= messageCount; index += 1) {
+    const marker = String(index).padStart(3, '0');
+    entries.push({
+      type: 'response_item',
+      timestamp: new Date(Date.UTC(2026, 5, 5, 9, index, 0)).toISOString(),
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: `Codex full render snapshot turn ${marker}` }],
+      },
+    });
+  }
+
+  await fs.writeFile(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+}
+
+/**
  * Install a fake WebSocket that lets the test emit backend messages through the
  * same browser event surface used by the production chat UI.
  */
@@ -277,4 +313,31 @@ test('Codex WS add/update 文件变更 JSON 字符串不会作为 assistant raw 
 
   await fs.mkdir(EVIDENCE_DIR, { recursive: true });
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'codex-after-ws-json.png'), fullPage: true });
+});
+
+test('Codex 渲染快照会分页加载完整长会话历史', async ({ page }) => {
+  /**
+   * 业务场景：用户在 Codex TUI 会话中点击“渲染”，期望看到完整历史快照。
+   * 失败含义：如果这里失败，渲染快照仍只读取首个 100 条分页窗口。
+   */
+  const sessionId = 'proposal-75-codex-full-render-snapshot';
+  await writeLongCodexRenderSession(sessionId, 130);
+
+  const params = new URLSearchParams({
+    provider: 'codex',
+    projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
+  });
+  await page.goto(`/session/${sessionId}?${params.toString()}`, { waitUntil: 'networkidle' });
+  await expect(page.getByTestId('chat-render-snapshot-button')).toBeVisible();
+
+  await page.getByTestId('chat-render-snapshot-button').click();
+
+  const snapshotPane = page.getByTestId('chat-rendered-snapshot-pane');
+  const chat = page.getByTestId('chat-scroll-container').last();
+  await expect(snapshotPane).toBeVisible();
+  await expect(chat).toContainText('Codex full render snapshot turn 001');
+  await expect(chat).toContainText('Codex full render snapshot turn 130');
+
+  await fs.mkdir(EVIDENCE_DIR, { recursive: true });
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'codex-full-render-snapshot.png'), fullPage: true });
 });

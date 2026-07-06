@@ -11,6 +11,9 @@ export type SessionBulkMessageApi = (
   limit: number,
   offset: number,
   provider: string,
+  afterLine?: number | null,
+  afterCursor?: string | null,
+  projectPath?: string,
 ) => Promise<Response>;
 
 export type SessionBulkMessageResult = {
@@ -18,17 +21,31 @@ export type SessionBulkMessageResult = {
   total: number;
 };
 
+/**
+ * Pick the next request offset from backend raw-line metadata when available.
+ */
+function resolveNextBulkMessageOffset(data: Record<string, unknown>, offset: number, loadedCount: number): number {
+  /** The messages API paginates by raw JSONL lines, not always by rendered row count. */
+  const nextRawLineOffset = Number(data?.nextRawLineOffset);
+  if (Number.isSafeInteger(nextRawLineOffset) && nextRawLineOffset > offset) {
+    return nextRawLineOffset;
+  }
+  return offset + loadedCount;
+}
+
 export async function loadSessionMessagesInPages({
   sessionMessages,
   projectName,
   sessionId,
   provider,
+  projectPath = '',
   pageSize = SESSION_BULK_MESSAGE_PAGE_SIZE,
 }: {
   sessionMessages: SessionBulkMessageApi;
   projectName: string;
   sessionId: string;
   provider: string;
+  projectPath?: string;
   pageSize?: number;
 }): Promise<SessionBulkMessageResult> {
   /** Fetch every available page using an explicit upper bound per request. */
@@ -37,7 +54,7 @@ export async function loadSessionMessagesInPages({
   let total = 0;
 
   while (true) {
-    const response = await sessionMessages(projectName, sessionId, pageSize, offset, provider);
+    const response = await sessionMessages(projectName, sessionId, pageSize, offset, provider, null, null, projectPath);
     if (!response.ok) {
       throw new Error('Failed to load all session messages');
     }
@@ -50,6 +67,6 @@ export async function loadSessionMessagesInPages({
     if (!data?.hasMore || pageMessages.length === 0 || messages.length >= total) {
       return { messages, total: Math.max(total, messages.length) };
     }
-    offset += pageMessages.length;
+    offset = resolveNextBulkMessageOffset(data, offset, pageMessages.length);
   }
 }

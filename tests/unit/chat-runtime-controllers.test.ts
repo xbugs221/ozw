@@ -4,6 +4,7 @@
  */
 import { expect, it } from 'vitest';
 import { buildSessionLoadPlan, applySessionLoadResult, buildVisibleMessageWindow } from '../../frontend/components/chat/session/chatSessionLifecycleController.ts';
+import { loadSessionMessagesInPages } from '../../frontend/components/chat/session/sessionBulkMessageLoader.ts';
 import { buildSubmitRequest, resolveSubmitDisabledReason, createPendingUserMessage } from '../../frontend/components/chat/composer/composerSubmitRuntime.ts';
 import { routeChatRealtimeEvent, applyRealtimeSessionEvent } from '../../frontend/components/chat/realtime/chatRealtimeEventRouter.ts';
 import { appendStreamingChunk, finalizeStreamingMessage } from '../../frontend/components/chat/realtime/streamingMessageController.ts';
@@ -21,6 +22,31 @@ it('chatSessionLifecycleController plans pagination and visible windows', () => 
     { type: 'assistant', content: 'new 4', timestamp: '2026-06-27T00:00:03.000Z', messageKey: 'm4' },
     { type: 'assistant', content: 'new 5', timestamp: '2026-06-27T00:00:04.000Z', messageKey: 'm5' },
   ], 2, 'message-assistant-m3').map((message) => message.content)).toEqual(['old 2', 'old 3']);
+});
+
+it('sessionBulkMessageLoader follows backend raw-line offsets', async () => {
+  /** Codex JSONL raw lines can produce fewer rendered messages than consumed raw rows. */
+  const offsets: number[] = [];
+  const projectPaths: string[] = [];
+  const result = await loadSessionMessagesInPages({
+    sessionMessages: async (_projectName, _sessionId, _limit, offset, _provider, _afterLine, _afterCursor, projectPath) => {
+      offsets.push(offset);
+      projectPaths.push(projectPath || '');
+      const page = offset === 0
+        ? { messages: ['rendered-1'], total: 2, hasMore: true, nextRawLineOffset: 3 }
+        : { messages: ['rendered-2'], total: 2, hasMore: false, nextRawLineOffset: 6 };
+      return new Response(JSON.stringify(page), { status: 200 });
+    },
+    projectName: 'fixture-project',
+    sessionId: 'c12',
+    provider: 'codex',
+    projectPath: '/tmp/fixture-project',
+    pageSize: 3,
+  });
+
+  expect(offsets).toEqual([0, 3]);
+  expect(projectPaths).toEqual(['/tmp/fixture-project', '/tmp/fixture-project']);
+  expect(result.messages).toEqual(['rendered-1', 'rendered-2']);
 });
 
 it('composerSubmitRuntime blocks empty sends and builds pending messages', () => {

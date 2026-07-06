@@ -98,7 +98,8 @@ test('shell relay 支持 Pi TUI，且不能把 Pi 归一成 Codex', () => {
   const source = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket TUI relay');
 
   assert.match(source, /provider[\s\S]{0,120}'pi'|provider[\s\S]{0,120}"pi"/, 'shell init 必须识别 provider=pi');
-  assert.match(source, /pi\s+resume|buildPi|Pi/, 'shell command builder 必须有 Pi TUI 启动或恢复路径');
+  assert.match(source, /provider === 'pi'[\s\S]{0,120}--session\s+"\$\{resumeSessionId\}"/, 'shell command builder 必须用 pi --session 恢复 Pi TUI');
+  assert.doesNotMatch(source, /pi\s+resume\s+["']?\$\{resumeSessionId\}/, 'Pi TUI 不得使用 Codex 风格的 pi resume 子命令');
   assert.doesNotMatch(
     source,
     /function\s+normalizeShellSessionProvider[\s\S]{0,160}return\s+'codex'/,

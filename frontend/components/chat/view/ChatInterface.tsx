@@ -15,6 +15,7 @@ import type { ChatAttachment, Provider } from '../types/types';
 import { api, authenticatedFetch } from '../../../utils/api';
 import { validateChatAttachmentQueue } from '../composer/attachmentQueue';
 import { hasSessionControlChanged } from '../composer/sessionControlState';
+import { convertSessionMessages } from '../utils/messageTransforms';
 import {
   getSessionLoadId,
   isCbwRouteSessionId,
@@ -30,6 +31,7 @@ import {
   createInitialRenderSnapshotState,
   returnToTuiMode,
 } from '../session/renderSnapshotController';
+import { loadSessionMessagesInPages } from '../session/sessionBulkMessageLoader';
 import { useChatSearchNavigation } from './chatInterfaceSearchNavigation';
 import { useChatStatusReconcile } from './chatInterfaceStatusReconcile';
 
@@ -341,16 +343,17 @@ function ChatInterface({
         return;
       }
 
-      const messages = await loadSessionMessages(
+      const { messages } = await loadSessionMessagesInPages({
+        sessionMessages: api.sessionMessages,
         projectName,
         sessionId,
-        false,
-        effectiveProvider,
+        provider: effectiveProvider === 'pi' ? 'pi' : 'codex',
         projectPath,
-      );
+      });
+      const snapshotMessages = convertSessionMessages(Array.isArray(messages) ? messages : []);
       setRenderSnapshotState((previous) =>
         applyUserRenderSnapshot(previous, {
-          messages: Array.isArray(messages) ? messages as any[] : [],
+          messages: snapshotMessages as any[],
           loadedAt: new Date().toISOString(),
         }),
       );
@@ -360,7 +363,6 @@ function ChatInterface({
   }, [
     currentSessionId,
     effectiveProvider,
-    loadSessionMessages,
     selectedProject?.fullPath,
     selectedProject?.name,
     selectedProject?.path,

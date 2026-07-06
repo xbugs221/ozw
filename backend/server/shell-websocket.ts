@@ -31,15 +31,18 @@ function buildProviderShellCommand(input: {
 }): string {
     const { os, provider, projectPath, hasSession, resumeSessionId } = input;
     const cliName = provider === 'pi' ? 'pi' : 'codex';
+    const resumeCommand = provider === 'pi'
+        ? `${cliName} --session "${resumeSessionId}"`
+        : `${cliName} resume "${resumeSessionId}"`;
     if (os.platform() === 'win32') {
         if (hasSession && resumeSessionId) {
-            return `Set-Location -Path "${projectPath}"; ${cliName} resume "${resumeSessionId}"; if ($LASTEXITCODE -ne 0) { ${cliName} }`;
+            return `Set-Location -Path "${projectPath}"; ${resumeCommand}; if ($LASTEXITCODE -ne 0) { ${cliName} }`;
         }
         return `Set-Location -Path "${projectPath}"; ${cliName}`;
     }
 
     if (hasSession && resumeSessionId) {
-        return `cd "${projectPath}" && ${cliName} resume "${resumeSessionId}" || ${cliName}`;
+        return `cd "${projectPath}" && ${resumeCommand} || ${cliName}`;
     }
     return `cd "${projectPath}" && ${cliName}`;
 }

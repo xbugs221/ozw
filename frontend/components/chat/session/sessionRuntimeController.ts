@@ -1295,7 +1295,9 @@ export function useChatSessionState({
     if (isLoadingAllMessagesRef.current) return;
     const { reveal = false, silent = false } = options;
     const sessionProvider = resolveSessionProvider(selectedProject, selectedSession) || 'codex';
-    const sessionProjectName = getSessionProjectName(selectedProject, selectedSession);
+    const sessionContext = resolveSessionRoutingContext(selectedProject, selectedSession, sessionProvider);
+    const sessionProjectName = sessionContext.projectName || getSessionProjectName(selectedProject, selectedSession);
+    const sessionProjectPath = sessionContext.projectPath;
 
     const requestSessionId = selectedSession.id;
 
@@ -1317,6 +1319,7 @@ export function useChatSessionState({
         projectName: sessionProjectName,
         sessionId: requestSessionId,
         provider: sessionProvider,
+        projectPath: sessionProjectPath,
       });
 
       if (currentSessionId !== requestSessionId) return;
