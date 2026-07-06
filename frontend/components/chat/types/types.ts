@@ -4,7 +4,6 @@
  */
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 import type { NewSessionOptions } from '../../../utils/workflowAutoStart';
-import type { ConversationBookmark } from '../utils/conversationBookmarks';
 
 type SocketMessageEnvelope = { sequence: number; message: any };
 
@@ -125,11 +124,6 @@ export interface ChatInterfaceProps {
   showThinking?: boolean;
   autoScrollToBottom?: boolean;
   externalMessageUpdate?: number;
-  onBookmarkControlsChange?: (
-    controls: {
-      bookmarks: ConversationBookmark[];
-      onBookmarkSelect: (messageKey: string) => void;
-    } | null,
-  ) => void;
+  renderSnapshotRequestId?: number;
   onTaskClick?: (...args: unknown[]) => void;
 }

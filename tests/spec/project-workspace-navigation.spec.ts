@@ -116,6 +116,23 @@ test.describe('项目工作区导航壳层', () => {
     );
   });
 
+  test('顶部主页和消息入口互不抢占', async ({ page }) => {
+    await openFixtureProject(page);
+
+    await expect(page.getByTestId('project-workspace-overview')).toBeVisible();
+    await expect(page.getByTestId('tab-overview')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByTestId('tab-chat').click();
+    await expect(page.getByTestId('project-workspace-overview')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: /Render|渲染/ })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: /Terminal input|消息输入|Message input/i })).toBeVisible();
+
+    await page.getByTestId('tab-overview').click();
+    await expect(page).toHaveURL(/\/workspace\/fixture-project$/);
+    await expect(page.getByTestId('project-workspace-overview')).toBeVisible();
+    await expect(page.getByTestId('tab-overview')).toHaveAttribute('aria-pressed', 'true');
+  });
+
   test('点击左侧项目名返回项目主页', async ({ page }) => {
     await openFixtureProject(page);
     await openFixtureManualSessionFromOverview(page);

@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
+import ConversationBookmarks from './subcomponents/ConversationBookmarks';
 import Shell from '../../shell/view/Shell';
 import type { ChatInterfaceProps } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
@@ -29,7 +30,6 @@ import { buildChatTuiSessionKey } from '../tui/chatTuiSessionKey';
 import {
   applyUserRenderSnapshot,
   createInitialRenderSnapshotState,
-  returnToTuiMode,
 } from '../session/renderSnapshotController';
 import { loadSessionMessagesInPages } from '../session/sessionBulkMessageLoader';
 import { useChatSearchNavigation } from './chatInterfaceSearchNavigation';
@@ -118,7 +118,7 @@ function ChatInterface({
   showThinking,
   autoScrollToBottom,
   externalMessageUpdate,
-  onBookmarkControlsChange,
+  renderSnapshotRequestId = 0,
 }: ChatInterfaceProps) {
   const { t } = useTranslation('chat');
   const location = useLocation();
@@ -291,6 +291,10 @@ function ChatInterface({
     () => buildConversationBookmarks(chatMessages),
     [chatMessages],
   );
+  const renderedSnapshotBookmarks = useMemo(
+    () => buildConversationBookmarks(renderSnapshotState.snapshotMessages as any[]),
+    [renderSnapshotState.snapshotMessages],
+  );
   const onBookmarkSelect = useCallback((messageKey: string) => {
     if (!messageKey) {
       return;
@@ -309,24 +313,6 @@ function ChatInterface({
     loadMessagesUntilTarget,
     revealLoadedMessage,
   ]);
-  useEffect(() => {
-    if (conversationBookmarks.length === 0) {
-      onBookmarkControlsChange?.(null);
-      return;
-    }
-
-    onBookmarkControlsChange?.({
-      bookmarks: conversationBookmarks,
-      onBookmarkSelect,
-    });
-
-    return () => onBookmarkControlsChange?.(null);
-  }, [
-    conversationBookmarks,
-    onBookmarkControlsChange,
-    onBookmarkSelect,
-  ]);
-
   const handleRenderSnapshot = useCallback(async () => {
     setIsRenderingSnapshot(true);
     try {
@@ -369,9 +355,51 @@ function ChatInterface({
     selectedSession,
   ]);
 
-  const handleReturnToTui = useCallback(() => {
-    setRenderSnapshotState((previous) => returnToTuiMode(previous));
-  }, []);
+  useEffect(() => {
+    /**
+     * The top-level Messages tab is the single entry for rendering a transcript
+     * snapshot, so the TUI toolbar does not need a second Render button.
+     */
+    if (renderSnapshotRequestId <= 0 || !selectedSession) {
+      return;
+    }
+
+    void handleRenderSnapshot();
+  }, [handleRenderSnapshot, renderSnapshotRequestId, selectedSession]);
+
+  useEffect(() => {
+    /**
+     * Rendering from the Messages tab should land on the newest transcript
+     * content, matching the TUI tail-first workflow instead of showing history
+     * from the top.
+     */
+    if (renderSnapshotState.mode !== 'renderedSnapshot') {
+      return undefined;
+    }
+
+    let secondFrameId: number | null = null;
+    const focusTail = () => {
+      scrollToBottom();
+      scrollContainerRef.current?.focus({ preventScroll: true });
+    };
+    const firstFrameId = window.requestAnimationFrame(() => {
+      focusTail();
+      secondFrameId = window.requestAnimationFrame(focusTail);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstFrameId);
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+      }
+    };
+  }, [
+    renderSnapshotState.mode,
+    renderSnapshotState.snapshotMessages.length,
+    renderSnapshotState.snapshotVersion,
+    scrollContainerRef,
+    scrollToBottom,
+  ]);
 
   const handleTuiTerminalInputReady = useCallback((sendInput: TuiTerminalInputSender | null) => {
     /**
@@ -920,15 +948,6 @@ function ChatInterface({
             : t('input.uploadImageOrFile', { defaultValue: '上传图片/文件' })}
         </span>
       </button>
-      <button
-        type="button"
-        data-testid="chat-render-snapshot-button"
-        className="inline-flex h-7 items-center rounded-md border border-gray-300 bg-white px-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-700"
-        disabled={isRenderingSnapshot}
-        onClick={() => void handleRenderSnapshot()}
-      >
-        {isRenderingSnapshot ? '渲染中' : '渲染'}
-      </button>
     </div>
   );
 
@@ -984,27 +1003,13 @@ function ChatInterface({
               data-testid="chat-rendered-snapshot-pane"
               data-snapshot-version={renderSnapshotState.snapshotVersion}
               data-display-mode={renderSnapshotState.mode}
-              className="min-h-0 flex-1 flex flex-col"
+              className="relative min-h-0 flex-1 flex flex-col"
             >
-              <div className="flex items-center justify-end gap-2 border-b border-border px-3 py-2">
-                <button
-                  type="button"
-                  data-testid="chat-return-tui-button"
-                  className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
-                  onClick={handleReturnToTui}
-                >
-                  返回 TUI
-                </button>
-                <button
-                  type="button"
-                  data-testid="chat-rerender-snapshot-button"
-                  className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted disabled:opacity-50"
-                  disabled={isRenderingSnapshot}
-                  onClick={() => void handleRenderSnapshot()}
-                >
-                  {isRenderingSnapshot ? '渲染中' : '重新渲染'}
-                </button>
-              </div>
+              <ConversationBookmarks
+                bookmarks={renderedSnapshotBookmarks}
+                onBookmarkSelect={onBookmarkSelect}
+                placement="floating"
+              />
               <ChatMessagesPane
             scrollContainerRef={scrollContainerRef}
             onWheel={handleWheel}

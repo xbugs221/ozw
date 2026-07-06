@@ -29,6 +29,7 @@ type ShellProps = {
   isActive?: boolean;
   headerActions?: ReactNode;
   onTerminalInputReady?: (sendInput: ((data: string) => boolean) | null) => void;
+  onTerminalTerminateReady?: (terminate: (() => boolean) | null) => void;
 };
 
 export default function Shell({
@@ -43,6 +44,7 @@ export default function Shell({
   isActive,
   headerActions,
   onTerminalInputReady,
+  onTerminalTerminateReady,
 }: ShellProps) {
   const { t } = useTranslation('chat');
   const { isDarkMode } = useTheme();
@@ -61,6 +63,7 @@ export default function Shell({
     authUrlVersion,
     setVirtualCtrlActive,
     sendTerminalInput,
+    terminateShell,
     connectToShell,
     disconnectFromShell,
     openAuthUrlInBrowser,
@@ -100,6 +103,19 @@ export default function Shell({
     onTerminalInputReady(sendTerminalInput);
     return () => onTerminalInputReady(null);
   }, [onTerminalInputReady, sendTerminalInput]);
+
+  useEffect(() => {
+    /**
+     * PURPOSE: Let parent terminal tab controls explicitly end the persistent
+     * tmux session before unmounting this shell view.
+     */
+    if (!onTerminalTerminateReady) {
+      return undefined;
+    }
+
+    onTerminalTerminateReady(terminateShell);
+    return () => onTerminalTerminateReady(null);
+  }, [onTerminalTerminateReady, terminateShell]);
 
   const handleRestartShell = useCallback(() => {
     setIsRestarting(true);

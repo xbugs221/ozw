@@ -78,14 +78,15 @@ test('TUI session key 同时区分 provider、项目路径和 route/provider 会
   assert.match(piKey, /c1|pi-provider-1/, 'key 必须包含 route 或 provider session 身份');
 });
 
-test('聊天页默认 TUI-first，并保留渲染快照入口', () => {
+test('聊天页默认 TUI-first，并由消息 Tab 触发渲染快照', () => {
   const source = readRequiredSource(CHAT_INTERFACE_PATH, '聊天页 TUI-first 接入点');
 
   assert.match(source, /ChatTuiPanel|chat-tui-panel/, 'ChatInterface 必须接入 TUI 面板');
-  assert.match(source, /chat-render-snapshot-button|renderSnapshot/i, '聊天页必须提供用户主动渲染 JSONL 快照入口');
+  assert.match(source, /renderSnapshotRequestId|handleRenderSnapshot/i, '聊天页必须响应消息 Tab 触发的 JSONL 快照渲染请求');
+  assert.doesNotMatch(source, /chat-render-snapshot-button/, 'TUI 工具栏不应再提供单独的渲染按钮');
   assert.match(source, /chat-tui-upload-attachment-button/, '聊天页必须提供上传图片或文件并插入 TUI 路径的入口');
   assert.match(source, /onTerminalInputReady/, '上传后的文件路径必须通过终端输入通道插入 TUI');
-  assert.match(source, /chat-return-tui-button|returnToTui/i, '渲染视图必须能返回 TUI');
+  assert.doesNotMatch(source, /chat-return-tui-button|chat-rerender-snapshot-button/, '渲染视图不应再显示返回 TUI 或重新渲染按钮');
   assert.doesNotMatch(source, /<ChatComposer\b/, 'TUI-first 会话页不应再渲染旧聊天输入框');
   assert.doesNotMatch(
     source,

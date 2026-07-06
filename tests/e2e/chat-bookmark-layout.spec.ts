@@ -1,7 +1,7 @@
 // @ts-nocheck -- Playwright fixture auth imports are runtime-bound.
 /**
- * PURPOSE: Verify chat message bookmarks live in the top workspace tab group
- * without creating a desktop gutter or sitting beside the mobile composer.
+ * PURPOSE: Verify chat message bookmarks live as a floating control inside the
+ * rendered transcript without creating a desktop gutter.
  */
 import { test, expect } from '@playwright/test';
 import {
@@ -36,7 +36,10 @@ function createLocalAuthToken() {
  */
 async function openBookmarkFixture(page) {
   await page.goto(`/session/${HISTORY_SCROLL_SESSION_ID}`, { waitUntil: 'networkidle' });
-  await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 80');
+  await expect(page.getByTestId('tab-chat')).toBeVisible();
+  await page.getByTestId('tab-chat').click();
+  await expect(page.getByTestId('chat-rendered-snapshot-pane')).toBeVisible();
+  await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 30');
 }
 
 /**
@@ -57,36 +60,34 @@ test.beforeEach(async ({ page }) => {
   }, AUTH_TOKEN);
 });
 
-test('desktop bookmark trigger stays in the top tab group before the chat tab', async ({ page }) => {
+test('desktop bookmark trigger floats inside the rendered transcript', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await openBookmarkFixture(page);
 
   const transcriptBox = await visibleBox(page.getByTestId('chat-scroll-container').last(), 'chat transcript');
   const triggerBox = await visibleBox(page.getByTestId('chat-bookmark-trigger'), 'desktop bookmark trigger');
-  const chatTabBox = await visibleBox(page.getByTestId('tab-chat'), 'chat tab');
 
   expect(triggerBox.width).toBeLessThanOrEqual(44);
   expect(triggerBox.height).toBeLessThanOrEqual(44);
-  expect(triggerBox.x + triggerBox.width).toBeLessThanOrEqual(chatTabBox.x + 1);
-  expect(triggerBox.y).toBeLessThan(transcriptBox.y);
+  expect(triggerBox.x).toBeGreaterThan(transcriptBox.x + transcriptBox.width - 80);
+  expect(triggerBox.y).toBeGreaterThan(transcriptBox.y + transcriptBox.height * 0.35);
+  expect(triggerBox.y).toBeLessThan(transcriptBox.y + transcriptBox.height * 0.65);
 });
 
-test('mobile bookmark trigger stays in the top tab group instead of beside composer submit', async ({ page }) => {
+test('mobile bookmark trigger floats inside the rendered transcript', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openBookmarkFixture(page);
 
   const transcriptBox = await visibleBox(page.getByTestId('chat-scroll-container').last(), 'mobile chat transcript');
   const triggerBox = await visibleBox(page.getByTestId('chat-bookmark-trigger'), 'mobile bookmark trigger');
-  const chatTabBox = await visibleBox(page.getByTestId('tab-chat'), 'mobile chat tab');
-  const textareaBox = await visibleBox(page.locator('textarea[placeholder]').first(), 'mobile composer textarea');
 
   expect(triggerBox.width).toBeLessThanOrEqual(44);
   expect(triggerBox.height).toBeLessThanOrEqual(44);
-  expect(triggerBox.x + triggerBox.width).toBeLessThanOrEqual(chatTabBox.x + 1);
-  expect(triggerBox.y).toBeLessThan(transcriptBox.y);
-  expect(triggerBox.y + triggerBox.height).toBeLessThan(textareaBox.y - 24);
+  expect(triggerBox.x).toBeGreaterThan(transcriptBox.x + transcriptBox.width - 64);
+  expect(triggerBox.y).toBeGreaterThan(transcriptBox.y + transcriptBox.height * 0.3);
+  expect(triggerBox.y).toBeLessThan(transcriptBox.y + transcriptBox.height * 0.7);
 
   await page.getByTestId('chat-bookmark-trigger').click();
   const panelBox = await visibleBox(page.getByTestId('chat-bookmark-panel'), 'mobile bookmark panel');
-  expect(panelBox.y + panelBox.height).toBeLessThan(textareaBox.y - 8);
+  expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(triggerBox.x + 2);
 });

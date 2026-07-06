@@ -3,6 +3,8 @@
  * 业务意义：终端复连、buffer 和超时清理共享同一 runtime context，不能隐式创建多份状态。
  */
 import type { WebSocket } from 'ws';
+import { execFile } from 'node:child_process';
+import { createTmuxTerminalRuntime } from './terminal-tmux-runtime.js';
 
 type LooseRecord = Record<string, any>;
 
@@ -45,6 +47,28 @@ function buildProviderShellCommand(input: {
         return `cd "${projectPath}" && ${resumeCommand} || ${cliName}`;
     }
     return `cd "${projectPath}" && ${cliName}`;
+}
+
+/**
+ * 生成 POSIX shell 单引号参数，供 tmux 命令安全接收路径和启动命令。
+ */
+function quotePosixShell(value: string): string {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * 执行 tmux 生命周期命令，并把“session 不存在”等幂等结果收敛为日志。
+ */
+function executeTmuxLifecycleCommand(args: string[], actionLabel: string): void {
+    execFile('tmux', args, (error, stdout, stderr) => {
+        if (error) {
+            const output = String(stderr || stdout || error.message || '').trim();
+            console.warn(`tmux ${actionLabel} command finished with warning:`, output);
+            return;
+        }
+
+        console.log(`tmux ${actionLabel} command completed`);
+    });
 }
 
 /**
@@ -98,7 +122,6 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
         console.log('🐚 Shell client connected');
         let shellProcess: any = null;
         let ptySessionKey: string | null = null;
-        let keepSessionAliveOnDisconnect = false;
         let urlDetectionBuffer = '';
         const announcedAuthUrls = new Set();
 
@@ -119,7 +142,6 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     const provider = normalizeShellProvider(data.provider);
                     const initialCommand = data.initialCommand;
                     const isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell';
-                    keepSessionAliveOnDisconnect = !isPlainShell;
                     urlDetectionBuffer = '';
                     announcedAuthUrls.clear();
 
@@ -134,6 +156,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         ? `_cmd_${Buffer.from(initialCommand).toString('base64').slice(0, 16)}`
                         : '';
                     ptySessionKey = `${projectPath}_${provider}_${ptyIdentity}${commandSuffix}`;
+                    const tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
 
                     // Kill any existing login session before starting fresh
                     if (isLoginCommand) {
@@ -226,7 +249,25 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             throw new Error(`Unsupported shell provider: ${provider}`);
                         }
 
+                        if (os.platform() !== 'win32') {
+                            const sessionName = quotePosixShell(tmuxRuntime.sessionName);
+                            const tmuxStartCommand = quotePosixShell(shellCommand);
+                            shellCommand = [
+                                'command -v tmux >/dev/null 2>&1 || { echo "Error: tmux is required for persistent terminals. Please install tmux."; exit 127; }',
+                                `tmux has-session -t ${sessionName} 2>/dev/null || tmux new-session -d -s ${sessionName} ${tmuxStartCommand}`,
+                                `tmux attach-session -t ${sessionName}`,
+                            ].join(' && ');
+                        }
+
                         console.log('🔧 Executing shell command:', shellCommand);
+                        console.log('🧩 tmux session runtime:', {
+                            sessionName: tmuxRuntime.sessionName,
+                            hasSession: tmuxRuntime.hasSession().join(' '),
+                            newSession: tmuxRuntime.createSession(shellCommand).join(' '),
+                            attachSession: tmuxRuntime.attachSession().join(' '),
+                            capturePane: tmuxRuntime.capturePane().join(' '),
+                            sendKeys: tmuxRuntime.sendKeys('<input>').join(' '),
+                        });
 
                         // Use appropriate shell based on platform
                         const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
@@ -260,7 +301,8 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             projectPath,
                             sessionId: resumeSessionId,
                             routeSessionId,
-                            providerSessionId
+                            providerSessionId,
+                            tmuxSessionName: tmuxRuntime.sessionName
                         });
 
                         // Handle data output
@@ -375,6 +417,21 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         console.log('Terminal resize requested:', data.cols, 'x', data.rows);
                         shellProcess.resize(data.cols, data.rows);
                     }
+                } else if (data.type === 'kill_terminal' || data.type === 'terminateTerminal' || data.type === 'deleteTerminal') {
+                    if (ptySessionKey) {
+                        const tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
+                        console.log('🧹 Explicit terminal termination requested:', tmuxRuntime.terminateTerminal().join(' '));
+                        const [, ...killSessionArgs] = tmuxRuntime.terminateTerminal();
+                        executeTmuxLifecycleCommand(killSessionArgs, 'kill-session');
+                        const session = ptySessionsMap.get(ptySessionKey);
+                        if (session?.timeoutId) {
+                            clearTimeout(session.timeoutId);
+                        }
+                        if (session?.pty && session.pty.kill) {
+                            session.pty.kill();
+                        }
+                        ptySessionsMap.delete(ptySessionKey);
+                    }
                 }
             } catch (error: any) {
                 console.error('[ERROR] Shell WebSocket error:', error.message);
@@ -393,33 +450,16 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
             if (ptySessionKey) {
                 const session = ptySessionsMap.get(ptySessionKey);
                 if (session) {
-                    if (!keepSessionAliveOnDisconnect) {
-                        console.log('🧹 Closing plain shell PTY immediately:', ptySessionKey);
-                        if (session.timeoutId) {
-                            clearTimeout(session.timeoutId);
-                        }
-                        if (session.pty && session.pty.kill) {
-                            session.pty.kill();
-                        }
-                        ptySessionsMap.delete(ptySessionKey);
-                        return;
-                    }
-
-                    console.log('⏳ PTY session kept alive, will timeout in 30 minutes:', ptySessionKey);
+                    console.log('⏳ Terminal websocket detached; tmux session remains available:', ptySessionKey);
                     if (session.ws !== ws) {
                         console.log('ℹ️  Ignoring stale shell socket close because session already moved to a newer websocket');
                         return;
                     }
 
+                    if (session.tmuxSessionName) {
+                        executeTmuxLifecycleCommand(['detach-client', '-s', session.tmuxSessionName], 'detach-client');
+                    }
                     session.ws = null;
-
-                    session.timeoutId = setTimeout(() => {
-                        console.log('⏰ PTY session timeout, killing process:', ptySessionKey);
-                        if (session.pty && session.pty.kill) {
-                            session.pty.kill();
-                        }
-                        ptySessionsMap.delete(ptySessionKey);
-                    }, PTY_SESSION_TIMEOUT);
                 }
             }
         });

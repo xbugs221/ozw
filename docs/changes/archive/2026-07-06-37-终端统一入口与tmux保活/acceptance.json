@@ -1,0 +1,140 @@
+{
+  "summary": "验证会话入口默认打开普通终端并注入启动命令，终端由 tmux 保活，JSONL 记录视图仅由用户显式打开，桌面端终端不再固定底部 dock。",
+  "coverage": [
+    {
+      "spec": "需求：会话入口默认进入终端 / 场景：会话卡片默认打开终端并注入恢复命令",
+      "tests": ["contract-session-card-terminal-entry"],
+      "evidence": ["screenshot-session-card-terminal", "network-session-card-shell-init"],
+      "risk": "Codex 恢复命令需沿用当前 CLI 真实语义，执行阶段需用真实 fixture 确认。"
+    },
+    {
+      "spec": "需求：会话入口默认进入终端 / 场景：新建会话走同一个普通终端入口",
+      "tests": ["contract-session-card-terminal-entry"],
+      "evidence": ["screenshot-new-session-terminal"],
+      "risk": "本提案不扩展模型/推理强度配置，只要求新建入口进入终端。"
+    },
+    {
+      "spec": "需求：终端由 tmux 保活 / 场景：浏览器断线后终端进程由 tmux 继续保活",
+      "tests": ["contract-terminal-tmux-persistence"],
+      "evidence": ["runtime-log-tmux-reattach", "trace-terminal-reconnect"],
+      "risk": "后端服务重启后的恢复依赖本机 tmux session 仍存在。"
+    },
+    {
+      "spec": "需求：终端由 tmux 保活 / 场景：用户退出 TUI 后终端仍可自由执行普通命令",
+      "tests": ["contract-terminal-tmux-persistence"],
+      "evidence": ["runtime-log-ctrl-c-free-shell"],
+      "risk": "Codex 和 Pi 对 Ctrl-C 的具体表现不同，执行阶段需分别做手工或自动 QA。"
+    },
+    {
+      "spec": "需求：记录/详情是显式查看入口 / 场景：记录/详情视图由用户显式打开",
+      "tests": ["contract-terminal-layout-record-view"],
+      "evidence": ["screenshot-session-record-view"],
+      "risk": "记录/详情命名需要同步中英文 i18n。"
+    },
+    {
+      "spec": "需求：记录/详情是显式查看入口 / 场景：桌面终端不再固定底部 dock",
+      "tests": ["contract-terminal-layout-record-view"],
+      "evidence": ["screenshot-desktop-terminal-main-view"],
+      "risk": "旧布局本地存储可能残留，需要迁移或忽略 bottom dock 状态。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-terminal-tmux-persistence",
+      "source": "change_contract",
+      "path": "docs/changes/37-终端统一入口与tmux保活/tests/terminal-tmux-persistence.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/37-终端统一入口与tmux保活/tests/terminal-tmux-persistence.acceptance.test.ts",
+      "purpose": "证明后端终端生命周期由 tmux 承载，WebSocket 断开不会杀掉终端进程。",
+      "assertions": [
+        "后端 shell relay 包含 tmux session 创建、检测、attach 和 send-keys 能力",
+        "plain shell 与 provider TUI 不再使用不同保活策略",
+        "WebSocket close 不得直接 kill 终端进程",
+        "执行阶段必须产出 runtime-log-tmux-reattach: test-results/terminal-tmux-entry/tmux-reattach.log",
+        "执行阶段必须产出 trace-terminal-reconnect: test-results/terminal-tmux-entry/terminal-reconnect-trace.zip",
+        "执行阶段必须产出 runtime-log-ctrl-c-free-shell: test-results/terminal-tmux-entry/ctrl-c-free-shell.log"
+      ],
+      "expected_initial_failure": "当前实现仍使用进程内 PTY 缓存，且 plain shell 断开后会立即关闭。"
+    },
+    {
+      "id": "contract-session-card-terminal-entry",
+      "source": "change_contract",
+      "path": "docs/changes/37-终端统一入口与tmux保活/tests/session-card-terminal-entry.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/37-终端统一入口与tmux保活/tests/session-card-terminal-entry.acceptance.test.ts",
+      "purpose": "证明会话卡片和新建会话默认打开普通终端并注入启动命令，而不是默认进入 JSONL 渲染。",
+      "assertions": [
+        "会话卡片点击不再直接调用 onSelectSession 作为默认路径",
+        "前端存在会话启动命令构造和终端打开入口",
+        "记录/详情入口与终端入口分离",
+        "执行阶段必须产出 screenshot-session-card-terminal: test-results/terminal-tmux-entry/session-card-terminal.png",
+        "执行阶段必须产出 network-session-card-shell-init: test-results/terminal-tmux-entry/session-card-shell-init.har",
+        "执行阶段必须产出 screenshot-new-session-terminal: test-results/terminal-tmux-entry/new-session-terminal.png"
+      ],
+      "expected_initial_failure": "当前项目总览会话卡片仍直接选择会话，桌面主工作区仍以会话渲染页为默认入口。"
+    },
+    {
+      "id": "contract-terminal-layout-record-view",
+      "source": "change_contract",
+      "path": "docs/changes/37-终端统一入口与tmux保活/tests/terminal-layout-record-view.acceptance.test.ts",
+      "command": "pnpm exec tsx --test docs/changes/37-终端统一入口与tmux保活/tests/terminal-layout-record-view.acceptance.test.ts",
+      "purpose": "证明桌面终端从底部 dock 迁移到主工作区平行视图，并保留显式 JSONL 记录入口。",
+      "assertions": [
+        "桌面工作区不再保留 bottomDock 终端布局",
+        "终端作为 shell 主视图渲染",
+        "JSONL 记录视图保留显式入口",
+        "执行阶段必须产出 screenshot-session-record-view: test-results/terminal-tmux-entry/session-record-view.png",
+        "执行阶段必须产出 screenshot-desktop-terminal-main-view: test-results/terminal-tmux-entry/desktop-terminal-main-view.png"
+      ],
+      "expected_initial_failure": "当前桌面实现仍通过 bottomDock 渲染终端。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "screenshot-session-card-terminal",
+      "kind": "screenshot",
+      "path": "test-results/terminal-tmux-entry/session-card-terminal.png",
+      "purpose": "证明点击已有会话卡片后，主工作区显示终端而不是 JSONL 记录页；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "network-session-card-shell-init",
+      "kind": "network",
+      "path": "test-results/terminal-tmux-entry/session-card-shell-init.har",
+      "purpose": "证明 shell init 或后续注入消息包含 provider 对应启动命令；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "screenshot-new-session-terminal",
+      "kind": "screenshot",
+      "path": "test-results/terminal-tmux-entry/new-session-terminal.png",
+      "purpose": "证明新建会话选择 provider 后进入同一个普通终端视图；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "runtime-log-tmux-reattach",
+      "kind": "runtime_log",
+      "path": "test-results/terminal-tmux-entry/tmux-reattach.log",
+      "purpose": "记录断开前后 tmux session 仍存在并可重新 attach；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "trace-terminal-reconnect",
+      "kind": "trace",
+      "path": "test-results/terminal-tmux-entry/terminal-reconnect-trace.zip",
+      "purpose": "证明浏览器断线或刷新后重新连接同一个终端；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "runtime-log-ctrl-c-free-shell",
+      "kind": "runtime_log",
+      "path": "test-results/terminal-tmux-entry/ctrl-c-free-shell.log",
+      "purpose": "证明用户退出 TUI 后仍可在同一终端执行普通 shell 命令；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "screenshot-session-record-view",
+      "kind": "screenshot",
+      "path": "test-results/terminal-tmux-entry/session-record-view.png",
+      "purpose": "证明用户显式点击记录/详情后才打开 JSONL 渲染视图；该文件是本地运行产物，不进入 git。"
+    },
+    {
+      "id": "screenshot-desktop-terminal-main-view",
+      "kind": "screenshot",
+      "path": "test-results/terminal-tmux-entry/desktop-terminal-main-view.png",
+      "purpose": "证明桌面终端填充主工作区而不是底部 dock；该文件是本地运行产物，不进入 git。"
+    }
+  ]
+}

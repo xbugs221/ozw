@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export type RightDockPanel = 'files' | null;
-export type BottomDockPanel = 'terminal' | null;
+export type LowerPanelPanel = 'terminal' | null;
 
 export type RightDockSplit = {
   topPanel: 'files';
@@ -21,8 +21,8 @@ export type WorkspaceLayoutState = {
     fullscreen: boolean;
     split: RightDockSplit;
   };
-  bottomDock: {
-    activePanel: BottomDockPanel;
+  lowerPanel: {
+    activePanel: LowerPanelPanel;
     collapsed: boolean;
     height: number;
     fullscreen: boolean;
@@ -40,7 +40,7 @@ const DEFAULT_STATE: WorkspaceLayoutState = {
     fullscreen: false,
     split: null,
   },
-  bottomDock: {
+  lowerPanel: {
     activePanel: 'terminal',
     collapsed: true,
     height: 260,
@@ -57,7 +57,7 @@ function isValidRightDockPanel(value: unknown): value is RightDockPanel {
   return value === 'files' || value === null;
 }
 
-function isValidBottomDockPanel(value: unknown): value is BottomDockPanel {
+function isValidLowerPanelPanel(value: unknown): value is LowerPanelPanel {
   return value === 'terminal' || value === null;
 }
 
@@ -83,7 +83,7 @@ function migrateOldTabState(): Partial<WorkspaceLayoutState> | null {
     if (oldTab === 'files') {
       migrated.rightDock = { ...DEFAULT_STATE.rightDock, activePanel: 'files' };
     } else if (oldTab === 'shell') {
-      migrated.bottomDock = { ...DEFAULT_STATE.bottomDock, activePanel: 'terminal' };
+      migrated.lowerPanel = { ...DEFAULT_STATE.lowerPanel, activePanel: 'terminal' };
     }
     return migrated;
   } catch {
@@ -100,11 +100,11 @@ function readPersistedState(): WorkspaceLayoutState {
         typeof parsed === 'object'
         && parsed !== null
         && 'rightDock' in parsed
-        && 'bottomDock' in parsed
+        && 'lowerPanel' in parsed
       ) {
         const p = parsed as Record<string, unknown>;
         const rightDock = p.rightDock as Record<string, unknown>;
-        const bottomDock = p.bottomDock as Record<string, unknown>;
+        const lowerPanel = p.lowerPanel as Record<string, unknown>;
 
         if (
           isValidRightDockPanel(rightDock?.activePanel)
@@ -112,10 +112,10 @@ function readPersistedState(): WorkspaceLayoutState {
           && typeof rightDock?.width === 'number'
           && typeof rightDock?.fullscreen === 'boolean'
           && isValidSplit(rightDock?.split)
-          && isValidBottomDockPanel(bottomDock?.activePanel)
-          && typeof bottomDock?.collapsed === 'boolean'
-          && typeof bottomDock?.height === 'number'
-          && typeof bottomDock?.fullscreen === 'boolean'
+          && isValidLowerPanelPanel(lowerPanel?.activePanel)
+          && typeof lowerPanel?.collapsed === 'boolean'
+          && typeof lowerPanel?.height === 'number'
+          && typeof lowerPanel?.fullscreen === 'boolean'
         ) {
           return {
             rightDock: {
@@ -125,11 +125,11 @@ function readPersistedState(): WorkspaceLayoutState {
               fullscreen: rightDock.fullscreen as boolean,
               split: rightDock.split as RightDockSplit,
             },
-            bottomDock: {
-              activePanel: bottomDock.activePanel as BottomDockPanel,
-              collapsed: bottomDock.collapsed as boolean,
-              height: Math.max(MIN_BOTTOM_HEIGHT, Math.min(MAX_BOTTOM_HEIGHT, bottomDock.height as number)),
-              fullscreen: bottomDock.fullscreen as boolean,
+            lowerPanel: {
+              activePanel: lowerPanel.activePanel as LowerPanelPanel,
+              collapsed: lowerPanel.collapsed as boolean,
+              height: Math.max(MIN_BOTTOM_HEIGHT, Math.min(MAX_BOTTOM_HEIGHT, lowerPanel.height as number)),
+              fullscreen: lowerPanel.fullscreen as boolean,
             },
           };
         }
@@ -155,7 +155,7 @@ export function useWorkspaceLayoutState(isMobile: boolean) {
       return {
         ...DEFAULT_STATE,
         rightDock: { ...DEFAULT_STATE.rightDock, collapsed: true },
-        bottomDock: { ...DEFAULT_STATE.bottomDock, collapsed: true },
+        lowerPanel: { ...DEFAULT_STATE.lowerPanel, collapsed: true },
       };
     }
     return readPersistedState();
@@ -177,10 +177,10 @@ export function useWorkspaceLayoutState(isMobile: boolean) {
     }));
   }, []);
 
-  const setBottomDock = useCallback((updates: Partial<WorkspaceLayoutState['bottomDock']>) => {
+  const setLowerPanel = useCallback((updates: Partial<WorkspaceLayoutState['lowerPanel']>) => {
     setLayout((prev) => ({
       ...prev,
-      bottomDock: { ...prev.bottomDock, ...updates },
+      lowerPanel: { ...prev.lowerPanel, ...updates },
     }));
   }, []);
 
@@ -191,10 +191,10 @@ export function useWorkspaceLayoutState(isMobile: boolean) {
     }));
   }, []);
 
-  const toggleBottomDockCollapse = useCallback(() => {
+  const toggleLowerPanelCollapse = useCallback(() => {
     setLayout((prev) => ({
       ...prev,
-      bottomDock: { ...prev.bottomDock, collapsed: !prev.bottomDock.collapsed },
+      lowerPanel: { ...prev.lowerPanel, collapsed: !prev.lowerPanel.collapsed },
     }));
   }, []);
 
@@ -208,11 +208,11 @@ export function useWorkspaceLayoutState(isMobile: boolean) {
     }));
   }, []);
 
-  const setBottomDockHeight = useCallback((height: number) => {
+  const setLowerPanelHeight = useCallback((height: number) => {
     setLayout((prev) => ({
       ...prev,
-      bottomDock: {
-        ...prev.bottomDock,
+      lowerPanel: {
+        ...prev.lowerPanel,
         height: Math.max(MIN_BOTTOM_HEIGHT, Math.min(MAX_BOTTOM_HEIGHT, height)),
       },
     }));
@@ -225,10 +225,10 @@ export function useWorkspaceLayoutState(isMobile: boolean) {
     }));
   }, []);
 
-  const toggleBottomDockFullscreen = useCallback(() => {
+  const toggleLowerPanelFullscreen = useCallback(() => {
     setLayout((prev) => ({
       ...prev,
-      bottomDock: { ...prev.bottomDock, fullscreen: !prev.bottomDock.fullscreen },
+      lowerPanel: { ...prev.lowerPanel, fullscreen: !prev.lowerPanel.fullscreen },
     }));
   }, []);
 
@@ -239,7 +239,7 @@ export function useWorkspaceLayoutState(isMobile: boolean) {
       }
       return {
         ...prev,
-        bottomDock: { ...prev.bottomDock, activePanel: null, collapsed: false },
+        lowerPanel: { ...prev.lowerPanel, activePanel: null, collapsed: false },
         rightDock: {
           ...prev.rightDock,
           split: {
@@ -252,10 +252,10 @@ export function useWorkspaceLayoutState(isMobile: boolean) {
     });
   }, []);
 
-  const moveTerminalToBottom = useCallback(() => {
+  const moveTerminalToLower = useCallback(() => {
     setLayout((prev) => ({
       ...prev,
-      bottomDock: { ...prev.bottomDock, activePanel: 'terminal', collapsed: false },
+      lowerPanel: { ...prev.lowerPanel, activePanel: 'terminal', collapsed: false },
       rightDock: { ...prev.rightDock, split: null },
     }));
   }, []);
@@ -283,15 +283,15 @@ export function useWorkspaceLayoutState(isMobile: boolean) {
   return {
     layout,
     setRightDock,
-    setBottomDock,
+    setLowerPanel,
     toggleRightDockCollapse,
-    toggleBottomDockCollapse,
+    toggleLowerPanelCollapse,
     setRightDockWidth,
-    setBottomDockHeight,
+    setLowerPanelHeight,
     toggleRightDockFullscreen,
-    toggleBottomDockFullscreen,
+    toggleLowerPanelFullscreen,
     moveTerminalToRightSplit,
-    moveTerminalToBottom,
+    moveTerminalToLower,
     setRightDockSplitRatio,
     resetLayout,
   };

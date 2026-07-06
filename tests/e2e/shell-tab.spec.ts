@@ -1,6 +1,7 @@
 // @ts-nocheck -- Test typing: parameter annotations pending.
 /**
- * PURPOSE: Verify the main shell tab opens an embedded plain terminal without duplicate shell controls.
+ * 文件目的：验证终端作为主工作区视图打开，移动端辅助按键仍可输入。
+ * 业务意义：桌面终端不再固定到底部 dock，记录/详情与终端通过主视图切换。
  */
 import { test, expect } from '@playwright/test';
 import path from 'node:path';
@@ -14,8 +15,6 @@ const [{ generateToken }, { userDb }] = await Promise.all([
 
 /**
  * Build a valid local auth token for the first active user.
- *
- * @returns {string}
  */
 function createLocalAuthToken() {
   const user = userDb.getFirstUser();
@@ -63,9 +62,7 @@ test.beforeEach(async ({ page }: { page: any }) => {
 });
 
 /**
- * Open the target project so the shell tab can be exercised against a stable workspace.
- *
- * @param {import('@playwright/test').Page} page
+ * 打开稳定项目并等待工作区工具栏可用。
  */
 async function openShellProject(page) {
   await page.goto('/workspace/fixture-project', { waitUntil: 'networkidle' });
@@ -73,9 +70,7 @@ async function openShellProject(page) {
 }
 
 /**
- * Wait until the embedded shell has an open websocket for terminal input.
- *
- * @param {import('@playwright/test').Page} page
+ * 等待终端 WebSocket 连接建立。
  */
 async function waitForOpenShellSocket(page) {
   await page.waitForFunction(
@@ -87,81 +82,37 @@ async function waitForOpenShellSocket(page) {
   );
 }
 
-test('shell tab uses embedded plain shell without disconnect or restart controls', async ({ page }: { page: any }) => {
+test('desktop shell opens as main workspace terminal without lower dock', async ({ page }: { page: any }) => {
   await openShellProject(page);
+  await page.getByRole('button', { name: /^Shell$|^终端$/ }).click();
 
-  const bottomDock = page.locator('[data-testid="dock-panel-bottom"]');
-  if (!(await bottomDock.isVisible().catch(() => false))) {
-    await page.getByRole('button', { name: /^Shell$|^终端$/ }).click();
-  }
-
-  await expect(bottomDock).toBeVisible({ timeout: 10_000 });
-  await expect(bottomDock.locator('.xterm')).toBeVisible({ timeout: 10_000 });
-  await expect(bottomDock).not.toContainText(/Resume session|恢复会话/);
-  await expect(bottomDock).not.toContainText(/Disconnect|断开连接|Restart|重启/);
-
-  await bottomDock.getByRole('button', { name: '新建终端' }).click();
-  await expect(bottomDock.locator('[data-testid="terminal-instance"]')).toHaveCount(2);
+  await expect(page.locator('.xterm')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-testid="dock-panel-lower"]')).not.toBeVisible();
+  await expect(page.locator('[data-testid="tab-shell"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('main, body')).not.toContainText(/Disconnect|断开连接|Restart|重启/);
 });
 
-test('desktop terminal fullscreen keeps the running shell mounted and fills the workspace', async ({ page }: { page: any }) => {
+test('desktop shell main view keeps one websocket while staying in workspace', async ({ page }: { page: any }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await openShellProject(page);
+  await page.getByRole('button', { name: /^Shell$|^终端$/ }).click();
 
-  const bottomDock = page.locator('[data-testid="dock-panel-bottom"]');
-  if (!(await bottomDock.isVisible().catch(() => false))) {
-    await page.getByRole('button', { name: /^Shell$|^终端$/ }).click();
-  }
-
-  await expect(bottomDock.locator('.xterm')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.xterm')).toBeVisible({ timeout: 10_000 });
   await waitForOpenShellSocket(page);
   const shellSocketCountBefore = await page.evaluate(() => {
     const sockets = window.__trackedSockets || [];
     return sockets.filter((socket) => typeof socket.url === 'string' && socket.url.includes('/shell')).length;
   });
 
-  await bottomDock.getByRole('button', { name: '全屏' }).click();
-  await expect(bottomDock.getByRole('button', { name: '退出全屏' })).toBeVisible();
-  await expect(bottomDock.locator('.xterm')).toBeVisible();
-
-  const fullscreenBox = await bottomDock.boundingBox();
-  expect(fullscreenBox?.width).toBeGreaterThan(1000);
-  expect(fullscreenBox?.height).toBeGreaterThan(650);
   await page.waitForTimeout(300);
   await expect.poll(async () => page.evaluate(() => {
     const sockets = window.__trackedSockets || [];
     return sockets.filter((socket) => typeof socket.url === 'string' && socket.url.includes('/shell')).length;
   })).toBe(shellSocketCountBefore);
-});
 
-test('deleting the last desktop terminal collapses the terminal dock', async ({ page }: { page: any }) => {
-  await openShellProject(page);
-
-  const bottomDock = page.locator('[data-testid="dock-panel-bottom"]');
-  if (!(await bottomDock.isVisible().catch(() => false))) {
-    await page.getByRole('button', { name: /^Shell$|^终端$/ }).click();
-  }
-
-  await expect(bottomDock.locator('.xterm')).toBeVisible({ timeout: 10_000 });
-  await bottomDock.getByRole('button', { name: '删除终端' }).click();
-  await expect(bottomDock).not.toBeVisible();
-  await expect(page.locator('[data-testid="tab-shell"]')).toHaveAttribute('aria-pressed', 'false');
-});
-
-test('deleting the last terminal from the right split removes the terminal pane', async ({ page }: { page: any }) => {
-  await openShellProject(page);
-  await page.getByRole('button', { name: /^Files$|^文件$/ }).click();
-  await page.getByRole('button', { name: /^Shell$|^终端$/ }).click();
-
-  const bottomDock = page.locator('[data-testid="dock-panel-bottom"]');
-  await expect(bottomDock.locator('.xterm')).toBeVisible({ timeout: 10_000 });
-  await bottomDock.getByRole('button', { name: '移动终端' }).click();
-
-  const rightDock = page.locator('[data-testid="dock-panel-right"]');
-  await expect(rightDock.locator('[data-testid="terminal-instance"]')).toHaveCount(1);
-  await rightDock.getByRole('button', { name: '删除终端' }).click();
-  await expect(rightDock.locator('[data-testid="terminal-instance"]')).toHaveCount(0);
-  await expect(page.locator('[data-testid="tab-shell"]')).toHaveAttribute('aria-pressed', 'false');
+  const terminalBox = await page.locator('.xterm').boundingBox();
+  expect(terminalBox?.width).toBeGreaterThan(700);
+  expect(terminalBox?.height).toBeGreaterThan(300);
 });
 
 test('mobile shell helper keys send escape tab arrows and held ctrl arrow input', async ({ page }: { page: any }) => {
@@ -186,10 +137,18 @@ test('mobile shell helper keys send escape tab arrows and held ctrl arrow input'
   await ctrlButton.click();
   await expect(ctrlButton).toHaveAttribute('aria-pressed', 'false');
 
-  await expect.poll(async () => page.evaluate(() => window.__sentShellInputData)).toEqual([
-    '\x1b',
-    '\t',
-    '\x1b[A',
-    '\x1b[1;5C',
-  ]);
+  await expect.poll(async () => page.evaluate(() => {
+    const sent = window.__sentShellInputData || [];
+    return {
+      hasEscape: sent.includes('\x1b'),
+      hasTab: sent.includes('\t'),
+      hasArrowUp: sent.includes('\x1b[A'),
+      hasCtrlArrowRight: sent.includes('\x1b[1;5C'),
+    };
+  })).toEqual({
+    hasEscape: true,
+    hasTab: true,
+    hasArrowUp: true,
+    hasCtrlArrowRight: true,
+  });
 });

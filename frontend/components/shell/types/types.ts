@@ -39,11 +39,16 @@ export type ShellPingMessage = {
   timestamp: number;
 };
 
+export type ShellTerminateMessage = {
+  type: 'kill_terminal' | 'terminateTerminal' | 'deleteTerminal';
+};
+
 export type ShellOutgoingMessage =
   | ShellInitMessage
   | ShellResizeMessage
   | ShellInputMessage
-  | ShellPingMessage;
+  | ShellPingMessage
+  | ShellTerminateMessage;
 
 export type ShellIncomingMessage =
   | { type: 'output'; data: string }
@@ -88,6 +93,7 @@ export type UseShellRuntimeResult = {
   authUrlVersion: number;
   setVirtualCtrlActive: (isActive: boolean) => void;
   sendTerminalInput: (data: string) => boolean;
+  terminateShell: () => boolean;
   connectToShell: () => void;
   disconnectFromShell: () => void;
   openAuthUrlInBrowser: (url?: string) => boolean;

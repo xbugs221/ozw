@@ -1,5 +1,5 @@
 /**
- * 文件目的：规格级保护当前会话消息导航书签的索引、响应式入口和分页定位边界。
+ * 文件目的：规格级保护当前会话消息导航书签的索引、渲染页浮动入口和分页定位边界。
  * Sources: 2026-06-29-31-会话消息导航书签
  */
 import assert from 'node:assert/strict';
@@ -32,8 +32,6 @@ const REPO_ROOT = process.cwd();
 const BOOKMARK_MODULE_PATH = 'frontend/components/chat/utils/conversationBookmarks.ts';
 const BOOKMARK_COMPONENT_PATH = 'frontend/components/chat/view/subcomponents/ConversationBookmarks.tsx';
 const CHAT_INTERFACE_PATH = 'frontend/components/chat/view/ChatInterface.tsx';
-const MAIN_CONTENT_PATH = 'frontend/components/main-content/view/MainContent.tsx';
-const MAIN_CONTENT_TAB_SWITCHER_PATH = 'frontend/components/main-content/view/subcomponents/MainContentTabSwitcher.tsx';
 const SESSION_RUNTIME_PATH = 'frontend/components/chat/session/sessionRuntimeController.ts';
 
 /**
@@ -188,12 +186,10 @@ test('bookmark indexing scales to long sessions without requiring rendered DOM',
   assert.equal(bookmarks.at(-1)?.userMessageKey, 'long-user-1050');
 });
 
-test('bookmark UI keeps responsive entry points and paginated messageKey navigation', async () => {
+test('bookmark UI floats inside rendered transcript and keeps paginated messageKey navigation', async () => {
   /** 书签 UI 必须接入当前定位链路，不能以全量加载替代逐页查找。 */
   const componentSource = await readRequiredSource(BOOKMARK_COMPONENT_PATH, '当前会话消息书签组件');
   const chatInterfaceSource = await readRequiredSource(CHAT_INTERFACE_PATH, '聊天界面接入点');
-  const mainContentSource = await readRequiredSource(MAIN_CONTENT_PATH, '主内容顶部栏接入点');
-  const tabSwitcherSource = await readRequiredSource(MAIN_CONTENT_TAB_SWITCHER_PATH, '顶部标签按钮组');
   const sessionRuntimeSource = await readRequiredSource(SESSION_RUNTIME_PATH, '会话分页定位控制器');
 
   assert.match(componentSource, /data-testid=["']chat-message-bookmarks["']/);
@@ -204,18 +200,17 @@ test('bookmark UI keeps responsive entry points and paginated messageKey navigat
   assert.match(componentSource, /isPanelOpen/);
   assert.match(componentSource, /setIsPanelOpen/);
   assert.match(componentSource, /aria-label=\{isPanelOpen \? ['"]隐藏消息书签['"] : ['"]显示消息书签['"]\}/);
-  assert.match(componentSource, /top-11/);
-  assert.doesNotMatch(componentSource, /\bbottom-24\b/);
+  assert.match(componentSource, /placement\s*=\s*['"]inline['"]/);
+  assert.match(componentSource, /placement === ['"]floating['"]/);
+  assert.match(componentSource, /rounded-full/);
+  assert.match(componentSource, /right-3/);
   assert.doesNotMatch(componentSource, /\bh-full w-10\b/);
   assert.doesNotMatch(componentSource, /\bborder-r\b/);
   assert.doesNotMatch(componentSource, /loadAllMessages\s*\(/);
   assert.match(componentSource, /userMessageKey|messageKey/);
-  assert.match(chatInterfaceSource, /onBookmarkControlsChange/);
-  assert.doesNotMatch(chatInterfaceSource, /<ConversationBookmarks/);
-  assert.match(mainContentSource, /<ConversationBookmarks/);
-  assert.match(mainContentSource, /bookmarkControlsNode/);
-  assert.match(tabSwitcherSource, /leadingControl/);
-  assert.match(tabSwitcherSource, /\{leadingControl\}[\s\S]{0,240}tabs\.map/);
+  assert.match(chatInterfaceSource, /<ConversationBookmarks/);
+  assert.match(chatInterfaceSource, /placement=["']floating["']/);
+  assert.doesNotMatch(chatInterfaceSource, /onBookmarkControlsChange/);
   assert.match(chatInterfaceSource, /loadMessagesUntilTarget|revealLoadedMessage/);
   assert.match(sessionRuntimeSource, /loadMessagesUntilTarget/);
 });

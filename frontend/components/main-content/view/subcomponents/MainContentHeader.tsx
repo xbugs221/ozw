@@ -13,7 +13,6 @@ export default function MainContentHeader({
   isSidebarOpen,
   onMenuClick,
   leadingContent,
-  bookmarkControls,
   dockLayout,
   onRefresh,
 }: MainContentHeaderProps) {
@@ -46,7 +45,6 @@ export default function MainContentHeader({
             setActiveTab={setActiveTab}
             compact={isMobile}
             dockLayout={dockLayout}
-            leadingControl={bookmarkControls}
           />
         </div>
       </div>

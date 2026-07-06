@@ -71,6 +71,7 @@ export default function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
+  const [renderSnapshotRequestId, setRenderSnapshotRequestId] = useState(0);
   const { isMobile } = useDeviceSettings({ trackPWA: false });
   const { preferences, setPreference } = useUiPreferences();
   const { sidebarVisible } = preferences;
@@ -367,12 +368,15 @@ export default function AppContent() {
       onSessionInactive={markSessionAsInactive}
       onReplaceTemporarySession={replaceTemporarySession}
       onNavigateToSession={handleNavigateToSession}
+      onSelectProjectOverview={sidebarSharedProps.onProjectSelect}
       onSelectSession={handleSessionSelect}
       onSelectWorkflow={handleWorkflowSelect}
       onNewSession={handleNewSession}
       onShowSettings={() => setShowSettings(true)}
       onRefresh={handleSidebarRefresh}
       externalMessageUpdate={externalMessageUpdate}
+      renderSnapshotRequestId={renderSnapshotRequestId}
+      onRenderSnapshotRequest={() => setRenderSnapshotRequestId((previous) => previous + 1)}
     />
   );
 

@@ -4,7 +4,7 @@
  */
 export type SessionProvider = 'codex' | 'pi';
 
-export type AppTab = 'chat' | 'files' | 'shell' | 'preview';
+export type AppTab = 'overview' | 'chat' | 'files' | 'shell' | 'preview';
 
 export interface WorkflowStageStatus {
   key: string;

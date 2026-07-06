@@ -18,8 +18,9 @@
     "browse": "浏览"
   },
   "tabs": {
+    "overview": "主页",
     "workflows": "工作流",
-    "chat": "消息",
+    "chat": "渲染",
     "shell": "终端",
     "files": "文件"
   },

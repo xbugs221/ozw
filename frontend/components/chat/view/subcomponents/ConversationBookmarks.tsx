@@ -8,6 +8,7 @@ import type { ConversationBookmark } from '../../utils/conversationBookmarks';
 interface ConversationBookmarksProps {
   bookmarks: ConversationBookmark[];
   onBookmarkSelect: (messageKey: string) => void;
+  placement?: 'inline' | 'floating';
 }
 
 interface IconProps {
@@ -93,6 +94,7 @@ function BookmarkItem({
 export default function ConversationBookmarks({
   bookmarks,
   onBookmarkSelect,
+  placement = 'inline',
 }: ConversationBookmarksProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
 
@@ -118,17 +120,19 @@ export default function ConversationBookmarks({
   return (
     <div
       data-testid="chat-message-bookmarks"
-      className="relative"
+      className={placement === 'floating'
+        ? 'pointer-events-auto absolute right-3 top-1/2 z-40 -translate-y-1/2'
+        : 'relative'}
     >
       <button
         type="button"
         data-testid="chat-bookmark-trigger"
         onClick={() => setIsPanelOpen((current) => !current)}
-        className={`relative flex h-9 w-9 flex-none touch-manipulation items-center justify-center rounded-md p-0 transition-all duration-150 ${
+        className={`relative flex h-9 w-9 flex-none touch-manipulation items-center justify-center p-0 transition-all duration-150 ${
           isPanelOpen
             ? 'bg-background text-foreground shadow-sm'
             : 'text-muted-foreground hover:text-foreground'
-        }`}
+        } ${placement === 'floating' ? 'rounded-full border border-border bg-background/95 shadow-lg backdrop-blur hover:bg-background' : 'rounded-md'}`}
         aria-label={isPanelOpen ? '隐藏消息书签' : '显示消息书签'}
         aria-expanded={isPanelOpen}
         aria-controls="chat-bookmark-panel"
@@ -141,7 +145,9 @@ export default function ConversationBookmarks({
         <div
           id="chat-bookmark-panel"
           data-testid="chat-bookmark-panel"
-          className="absolute right-0 top-11 z-50 max-h-[min(60vh,28rem)] w-[min(18rem,calc(100vw-1rem))] overflow-y-auto rounded-md border border-border bg-background/95 p-3 shadow-xl backdrop-blur"
+          className={placement === 'floating'
+            ? 'absolute right-12 top-1/2 z-50 max-h-[min(60vh,28rem)] w-[min(18rem,calc(100vw-4rem))] -translate-y-1/2 overflow-y-auto rounded-md border border-border bg-background/95 p-3 shadow-xl backdrop-blur'
+            : 'absolute right-0 top-11 z-50 max-h-[min(60vh,28rem)] w-[min(18rem,calc(100vw-1rem))] overflow-y-auto rounded-md border border-border bg-background/95 p-3 shadow-xl backdrop-blur'}
           aria-label="当前会话消息书签"
         >
           <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">

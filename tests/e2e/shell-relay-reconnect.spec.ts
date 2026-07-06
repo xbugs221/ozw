@@ -173,17 +173,10 @@ async function closeLatestShellSocket(page) {
 test('shell relay reconnects and flushes queued input after an unexpected websocket drop', async ({ page }) => {
   test.setTimeout(60_000);
 
-  const entryPath = SESSION_ID ? `/session/${SESSION_ID}` : '/workspace/fixture-project';
+  const entryPath = SESSION_ID ? `/session/${SESSION_ID}?tab=shell` : '/workspace/fixture-project?tab=shell';
   await page.goto(entryPath, { waitUntil: 'networkidle' });
 
-  if (!SESSION_ID) {
-    // Wait for the project button to appear and click it to ensure
-    // the workspace has fully loaded.
-    await expect(page.getByRole('button', { name: /^fixture-project\b/i }).first()).toBeVisible({ timeout: 10_000 });
-    await page.getByRole('button', { name: /^fixture-project\b/i }).first().click();
-  }
-
-  // Explicitly open the shell dock panel to trigger shell websocket creation.
+  // Explicitly select the shell main view to trigger shell websocket creation.
   const shellButton = page.getByRole('button', { name: /^Shell$|^终端$/ });
   await expect(shellButton).toBeVisible({ timeout: 10_000 });
   await shellButton.click();

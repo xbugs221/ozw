@@ -18,8 +18,9 @@
     "browse": "Browse"
   },
   "tabs": {
+    "overview": "Home",
     "workflows": "Workflows",
-    "chat": "Messages",
+    "chat": "Render",
     "shell": "Shell",
     "files": "Files"
   },

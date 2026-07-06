@@ -1,3 +1,12 @@
+allowBuilds:
+  '@google/genai': true
+  bcrypt: true
+  better-sqlite3: true
+  esbuild: true
+  node-pty: true
+  protobufjs: true
+  sharp: true
+  sqlite3: true
 onlyBuiltDependencies:
   - '@google/genai'
   - bcrypt

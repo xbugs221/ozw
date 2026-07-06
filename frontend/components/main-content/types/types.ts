@@ -41,20 +41,23 @@ export type MainContentProps = {
       routeSearch?: Record<string, string>;
     },
   ) => void;
+  onSelectProjectOverview: (project: Project) => void;
   onSelectSession: (session: ProjectSession) => void;
   onSelectWorkflow: (project: Project, workflow: ProjectWorkflow) => void;
   onNewSession: NewSessionHandler;
   onShowSettings: () => void;
   onRefresh: () => Promise<void> | void;
+  onRenderSnapshotRequest?: () => void;
   externalMessageUpdate: number;
+  renderSnapshotRequestId?: number;
   headerLeadingContent?: ReactNode;
 };
 
 export type DockLayoutControl = {
   rightDockActive: 'files' | null;
   rightDockCollapsed: boolean;
-  bottomDockActive: 'terminal' | null;
-  bottomDockCollapsed: boolean;
+  lowerPanelActive: 'terminal' | null;
+  lowerPanelCollapsed: boolean;
   rightDockSplitBottom?: 'terminal' | null;
 };
 
@@ -68,7 +71,6 @@ export type MainContentHeaderProps = {
   isSidebarOpen: boolean;
   onMenuClick: () => void;
   leadingContent?: ReactNode;
-  bookmarkControls?: ReactNode;
   dockLayout?: DockLayoutControl;
   onRefresh?: () => Promise<void> | void;
 };

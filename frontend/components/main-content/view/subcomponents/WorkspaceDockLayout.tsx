@@ -13,18 +13,18 @@ export type WorkspaceDockLayoutProps = {
   isMobile: boolean;
   centerContent: React.ReactNode;
   rightDockContent: React.ReactNode;
-  bottomDockContent: React.ReactNode;
+  lowerPanelContent: React.ReactNode;
   onRightDockWidthChange: (width: number) => void;
-  onBottomDockHeightChange: (height: number) => void;
+  onLowerPanelHeightChange: (height: number) => void;
   onRightDockCollapseToggle: () => void;
-  onBottomDockCollapseToggle: () => void;
+  onLowerPanelCollapseToggle: () => void;
   onRightDockFullscreenToggle: () => void;
-  onBottomDockFullscreenToggle: () => void;
+  onLowerPanelFullscreenToggle: () => void;
   onMoveTerminalToRightSplit?: () => void;
-  onMoveTerminalToBottom?: () => void;
+  onMoveTerminalToLower?: () => void;
   onRightDockSplitRatioChange?: (ratio: number) => void;
   rightDockTitleActions?: React.ReactNode;
-  bottomDockActions?: React.ReactNode;
+  lowerPanelActions?: React.ReactNode;
 };
 
 export default function WorkspaceDockLayout({
@@ -32,20 +32,20 @@ export default function WorkspaceDockLayout({
   isMobile,
   centerContent,
   rightDockContent,
-  bottomDockContent,
+  lowerPanelContent,
   onRightDockWidthChange,
-  onBottomDockHeightChange,
+  onLowerPanelHeightChange,
   onRightDockCollapseToggle,
-  onBottomDockCollapseToggle,
+  onLowerPanelCollapseToggle,
   onRightDockFullscreenToggle,
-  onBottomDockFullscreenToggle,
+  onLowerPanelFullscreenToggle,
   onMoveTerminalToRightSplit,
-  onMoveTerminalToBottom,
+  onMoveTerminalToLower,
   onRightDockSplitRatioChange,
   rightDockTitleActions,
-  bottomDockActions,
+  lowerPanelActions,
 }: WorkspaceDockLayoutProps) {
-  const { rightDock, bottomDock } = layout;
+  const { rightDock, lowerPanel } = layout;
 
   // Mobile layout: no docks, just center
   if (isMobile) {
@@ -53,13 +53,13 @@ export default function WorkspaceDockLayout({
   }
 
   const rightDockFullscreen = Boolean(rightDock.fullscreen && rightDock.activePanel);
-  const bottomDockFullscreen = Boolean(bottomDock.fullscreen && bottomDock.activePanel);
-  const anyFullscreen = rightDockFullscreen || bottomDockFullscreen;
+  const lowerPanelFullscreen = Boolean(lowerPanel.fullscreen && lowerPanel.activePanel);
+  const anyFullscreen = rightDockFullscreen || lowerPanelFullscreen;
   const showRightDock = Boolean(rightDock.activePanel && (!rightDock.collapsed || rightDockFullscreen));
-  const showBottomDock = Boolean(bottomDock.activePanel && (!bottomDock.collapsed || bottomDockFullscreen));
+  const showLowerPanel = Boolean(lowerPanel.activePanel && (!lowerPanel.collapsed || lowerPanelFullscreen));
   const showRightSplit = rightDock.split !== null;
-  // When terminal is in right split, bottom dock is not shown
-  const effectiveShowBottomDock = showBottomDock && !showRightSplit;
+  // When terminal is in right split, lower panel is not shown
+  const effectiveShowLowerPanel = showLowerPanel && !showRightSplit;
 
   return (
     <div className="relative flex h-full w-full min-w-0 flex-1 overflow-hidden" data-testid="workspace-dock-layout">
@@ -70,24 +70,24 @@ export default function WorkspaceDockLayout({
         </div>
 
         {/* Bottom dock */}
-        {effectiveShowBottomDock && (
+        {effectiveShowLowerPanel && (
           <>
-            {!bottomDockFullscreen && (
+            {!lowerPanelFullscreen && (
               <DockResizeHandle
                 direction="horizontal"
-                onResize={(delta) => onBottomDockHeightChange(layout.bottomDock.height + delta)}
+                onResize={(delta) => onLowerPanelHeightChange(layout.lowerPanel.height + delta)}
               />
             )}
             <DockPanelFrame
               direction="bottom"
-              size={layout.bottomDock.height}
+              size={layout.lowerPanel.height}
               title="终端"
-              onFullscreenToggle={onBottomDockFullscreenToggle}
-              onMoveTerminal={bottomDockFullscreen ? undefined : onMoveTerminalToRightSplit}
-              isFullscreen={bottomDockFullscreen}
-              actions={bottomDockActions}
+              onFullscreenToggle={onLowerPanelFullscreenToggle}
+              onMoveTerminal={lowerPanelFullscreen ? undefined : onMoveTerminalToRightSplit}
+              isFullscreen={lowerPanelFullscreen}
+              actions={lowerPanelActions}
             >
-              {bottomDockContent}
+              {lowerPanelContent}
             </DockPanelFrame>
           </>
         )}
@@ -107,16 +107,16 @@ export default function WorkspaceDockLayout({
             size={layout.rightDock.width}
             title={showRightSplit ? '文件 / 终端' : '文件'}
             onFullscreenToggle={onRightDockFullscreenToggle}
-            onMoveTerminal={rightDockFullscreen ? undefined : onMoveTerminalToBottom}
+            onMoveTerminal={rightDockFullscreen ? undefined : onMoveTerminalToLower}
             isFullscreen={rightDockFullscreen}
             titleActions={rightDockTitleActions}
-            actions={showRightSplit ? bottomDockActions : undefined}
+            actions={showRightSplit ? lowerPanelActions : undefined}
           >
             {showRightSplit ? (
               <RightSplitPanel
                 split={rightDock.split!}
                 topContent={rightDockContent}
-                bottomContent={bottomDockContent}
+                bottomContent={lowerPanelContent}
                 onRatioChange={onRightDockSplitRatioChange}
               />
             ) : (

@@ -45,6 +45,10 @@ type MainContentTitleProps = {
 };
 
 function getTabTitle(activeTab: AppTab, t: (key: string) => string) {
+  if (activeTab === 'overview') {
+    return t('tabs.overview');
+  }
+
   if (activeTab === 'files') {
     return t('mainContent.projectFiles');
   }

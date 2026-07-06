@@ -9,7 +9,7 @@ import { getMessageHistoryTailSequence } from '../../shared/socket-message-utils
 import { api } from '../utils/api';
 import { createWindowRefreshCoordinator } from '../utils/windowRefreshCoordinator';
 import type { SessionProvider } from '../types/app';
-import { buildProjectRoute, buildProjectSessionRoute, buildProjectWorkflowRoute, buildWorkflowChildSessionRoute } from '../utils/projectRoute';
+import { buildProjectRoute, buildProjectSessionRoute, buildProjectWorkflowRoute, buildWorkflowChildSessionRoute, getProjectRoutePath } from '../utils/projectRoute';
 import type { NewSessionOptions } from '../utils/workflowAutoStart';
 import { findWorkflowById, shouldPollWorkflowPlanningSession } from './projects/projectRouteSelection';
 import { getNextManualSessionLabel, getOptimisticManualSessionRouteIndex, getProjectSessions, insertSessionIntoProject, withSessionProjectMetadata } from './projects/projectSessionCollections';
@@ -25,7 +25,7 @@ type UseProjectsStateArgs = {
   isMobile: boolean;
   activeSessions: Set<string>;
 };
-const VALID_TABS: Set<string> = new Set(['chat', 'files', 'shell', 'preview']);
+const VALID_TABS: Set<string> = new Set(['overview', 'chat', 'files', 'shell', 'preview']);
 const readPersistedTab = (): AppTab => {
   try {
     const stored = localStorage.getItem('activeTab');
@@ -98,6 +98,35 @@ export function useProjectsState({
   const [selectedSession, setSelectedSession] = useState<ProjectSession | null>(null);
   const [selectedWorkflow, setSelectedWorkflow] = useState<ProjectWorkflow | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>(readPersistedTab);
+  useEffect(() => {
+    /**
+     * 显式入口的 URL tab 优先于本地持久化，确保会话卡片能直接打开终端。
+     */
+    const tab = new URLSearchParams(locationSearch).get('tab');
+    if (tab && VALID_TABS.has(tab)) {
+      setActiveTab(tab as AppTab);
+    }
+  }, [locationSearch]);
+  useEffect(() => {
+    /**
+     * 让项目主页和会话消息成为两个独立入口，避免项目路由继续高亮消息 Tab。
+     */
+    if (selectedProject && !selectedSession && !selectedWorkflow) {
+      const normalizedPathname = locationPathname.replace(/\/+$/g, '') || '/';
+      if (normalizedPathname === getProjectRoutePath(selectedProject)) {
+        setActiveTab('overview');
+      }
+    }
+  }, [locationPathname, selectedProject, selectedSession, selectedWorkflow]);
+
+  useEffect(() => {
+    /**
+     * 从主页进入具体会话时，顶部入口回到消息态。
+     */
+    if ((selectedSession || selectedWorkflow) && activeTab === 'overview') {
+      setActiveTab('chat');
+    }
+  }, [activeTab, locationPathname, selectedProject, selectedSession, selectedWorkflow]);
   useEffect(() => {
     try {
       localStorage.setItem('activeTab', activeTab);
@@ -333,7 +362,7 @@ export function useProjectsState({
       setSelectedProject(project);
       setSelectedSession(null);
       setSelectedWorkflow(null);
-      setActiveTab('chat');
+      setActiveTab('overview');
       navigate(buildProjectRoute(project));
       void fetchProjectOverview(project);
     },

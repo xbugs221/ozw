@@ -139,6 +139,15 @@ export function useShellRuntime({
     });
   }, [sendShellMessage]);
 
+  /**
+   * Ask the shell relay to end the persistent tmux session for this terminal.
+   *
+   * @returns {boolean}
+   */
+  const terminateShell = useCallback(() => {
+    return sendShellMessage({ type: 'kill_terminal' });
+  }, [sendShellMessage]);
+
   const { isInitialized, clearTerminalScreen, disposeTerminal } = useShellTerminal({
     terminalContainerRef,
     terminalRef,
@@ -211,6 +220,7 @@ export function useShellRuntime({
     authUrlVersion,
     setVirtualCtrlActive,
     sendTerminalInput,
+    terminateShell,
     connectToShell,
     disconnectFromShell,
     openAuthUrlInBrowser,

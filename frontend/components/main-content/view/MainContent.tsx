@@ -2,8 +2,6 @@ import React, { useEffect } from 'react';
 const Plus = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
 const Trash2 = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>;
 import ChatInterface from '../../chat/view/ChatInterface';
-import ConversationBookmarks from '../../chat/view/subcomponents/ConversationBookmarks';
-import type { ConversationBookmark } from '../../chat/utils/conversationBookmarks';
 import FileTree from '../../file-tree/view/FileTree';
 import { FileTreeDockViewModeControls } from '../../file-tree/view/FileTreeViewModeControls';
 import StandaloneShell from '../../standalone-shell/view/StandaloneShell';
@@ -26,11 +24,6 @@ import { getAllSessions } from '../../sidebar/utils/utils';
 type TerminalInstance = {
   id: string;
   title: string;
-};
-
-type ChatBookmarkControls = {
-  bookmarks: ConversationBookmark[];
-  onBookmarkSelect: (messageKey: string) => void;
 };
 
 const createTerminalInstance = (index: number): TerminalInstance => {
@@ -63,21 +56,33 @@ function MainContent({
   onSessionInactive,
   onReplaceTemporarySession,
   onNavigateToSession,
+  onSelectProjectOverview,
   onSelectSession,
   onSelectWorkflow,
   onNewSession,
   onShowSettings,
   onRefresh,
   externalMessageUpdate,
+  renderSnapshotRequestId,
+  onRenderSnapshotRequest,
   headerLeadingContent,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom } = preferences;
+  const terminalLaunchCommand = React.useMemo(() => {
+    /**
+     * 会话入口通过 URL 传入一次性启动命令，终端本身仍保持普通 shell。
+     */
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    return new URLSearchParams(window.location.search).get('terminalLaunchCommand');
+  }, [activeTab, selectedProject?.name, selectedSession?.id]);
 
   const projectSessions = selectedProject ? getAllSessions(selectedProject, {}, true) : [];
   const [revealDirectoryRequest, setRevealDirectoryRequest] = React.useState<{ path: string; requestId: number } | null>(null);
-  const [chatBookmarkControls, setChatBookmarkControls] = React.useState<ChatBookmarkControls | null>(null);
   const terminalCounterRef = React.useRef(1);
+  const terminalTerminateHandlersRef = React.useRef(new Map<string, () => boolean>());
   const [terminalInstances, setTerminalInstances] = React.useState<TerminalInstance[]>(() => [createTerminalInstance(1)]);
   const [activeTerminalId, setActiveTerminalId] = React.useState<string>(() => terminalInstances[0]?.id || '');
   const workflowSessionWorkflow = React.useMemo(() => {
@@ -109,32 +114,17 @@ function MainContent({
   const {
     layout,
     setRightDock,
-    setBottomDock,
+    setLowerPanel,
     toggleRightDockCollapse,
-    toggleBottomDockCollapse,
+    toggleLowerPanelCollapse,
     setRightDockWidth,
-    setBottomDockHeight,
+    setLowerPanelHeight,
     toggleRightDockFullscreen,
-    toggleBottomDockFullscreen,
+    toggleLowerPanelFullscreen,
     moveTerminalToRightSplit,
-    moveTerminalToBottom,
+    moveTerminalToLower,
     setRightDockSplitRatio,
   } = useWorkspaceLayoutState(isMobile);
-
-  useEffect(() => {
-    /**
-     * The header lives outside the chat component, so clear exported controls
-     * immediately when the active route-backed session changes.
-     */
-    setChatBookmarkControls(null);
-  }, [selectedProject?.name, selectedSession?.id]);
-
-  const bookmarkControlsNode = chatBookmarkControls ? (
-    <ConversationBookmarks
-      bookmarks={chatBookmarkControls.bookmarks}
-      onBookmarkSelect={chatBookmarkControls.onBookmarkSelect}
-    />
-  ) : undefined;
 
   useEffect(() => {
     /**
@@ -154,14 +144,15 @@ function MainContent({
     const nextTerminal = createTerminalInstance(terminalCounterRef.current);
     setTerminalInstances((prev) => [...prev, nextTerminal]);
     setActiveTerminalId(nextTerminal.id);
-    setBottomDock({ activePanel: 'terminal', collapsed: false });
-  }, [setBottomDock]);
+    setLowerPanel({ activePanel: 'terminal', collapsed: false });
+  }, [setLowerPanel]);
 
   const handleDeleteActiveTerminal = React.useCallback(() => {
     /**
-     * Removing the mounted shell component closes its runtime connection. The
-     * last terminal also closes the terminal dock, matching the toolbar toggle.
+     * 删除终端是显式终止动作，先通知后端结束对应 tmux session，再卸载本地视图。
      */
+    terminalTerminateHandlersRef.current.get(activeTerminalId)?.();
+    terminalTerminateHandlersRef.current.delete(activeTerminalId);
     setTerminalInstances((prev) => {
       const activeIndex = prev.findIndex((terminal) => terminal.id === activeTerminalId);
       if (activeIndex === -1) {
@@ -172,12 +163,12 @@ function MainContent({
       const nextActive = next[Math.max(0, activeIndex - 1)] || next[0] || null;
       setActiveTerminalId(nextActive?.id || '');
       if (next.length === 0) {
-        setBottomDock({ collapsed: true, fullscreen: false });
+        setLowerPanel({ collapsed: true, fullscreen: false });
         setRightDock({ split: null });
       }
       return next;
     });
-  }, [activeTerminalId, setBottomDock, setRightDock]);
+  }, [activeTerminalId, setLowerPanel, setRightDock]);
 
   const terminalDockActions = (
     <>
@@ -258,6 +249,14 @@ function MainContent({
                 isPlainShell
                 showHeader={false}
                 minimal
+                onTerminalTerminateReady={(terminate) => {
+                  if (terminate) {
+                    terminalTerminateHandlersRef.current.set(terminal.id, terminate);
+                    return;
+                  }
+
+                  terminalTerminateHandlersRef.current.delete(terminal.id);
+                }}
               />
             </div>
           ))}
@@ -270,6 +269,31 @@ function MainContent({
   const handleSetActiveTab = React.useCallback(
     (value: React.SetStateAction<AppTab>) => {
       const nextTab = typeof value === 'function' ? value(activeTab) : value;
+
+      if (nextTab === 'overview') {
+        if (selectedProject && (selectedSession || selectedWorkflow)) {
+          onSelectProjectOverview(selectedProject);
+        } else {
+          setActiveTab('overview');
+        }
+        return;
+      }
+
+      if (nextTab === 'chat' && selectedProject && !selectedSession && !selectedWorkflow) {
+        const targetSession = projectSessions[0] || null;
+        if (targetSession) {
+          onSelectSession(targetSession);
+        } else {
+          setActiveTab('chat');
+        }
+        return;
+      }
+
+      if (nextTab === 'chat' && selectedSession) {
+        setActiveTab('chat');
+        onRenderSnapshotRequest?.();
+        return;
+      }
 
       if (isMobile) {
         setActiveTab(nextTab);
@@ -285,18 +309,13 @@ function MainContent({
         setActiveTab('chat');
         return;
       } else if (nextTab === 'shell') {
-        if (layout.bottomDock.activePanel === 'terminal' && !layout.bottomDock.collapsed) {
-          setBottomDock({ collapsed: true, fullscreen: false });
-        } else {
-          setBottomDock({ activePanel: 'terminal', collapsed: false, fullscreen: false });
-        }
-        setActiveTab('chat');
+        setActiveTab('shell');
         return;
       }
 
       setActiveTab(nextTab);
     },
-    [activeTab, isMobile, layout.rightDock.activePanel, layout.rightDock.collapsed, layout.bottomDock.activePanel, layout.bottomDock.collapsed, setRightDock, setBottomDock, setActiveTab],
+    [activeTab, isMobile, layout.rightDock.activePanel, layout.rightDock.collapsed, layout.lowerPanel.activePanel, layout.lowerPanel.collapsed, onRenderSnapshotRequest, onSelectProjectOverview, onSelectSession, projectSessions, selectedProject, selectedSession, selectedWorkflow, setRightDock, setLowerPanel, setActiveTab],
   );
 
   const openFilesDock = React.useCallback((directoryPath?: string) => {
@@ -327,13 +346,12 @@ function MainContent({
       isSidebarOpen={isSidebarOpen}
       onMenuClick={onMenuClick}
       leadingContent={headerLeadingContent}
-      bookmarkControls={headerActiveTab === 'chat' ? bookmarkControlsNode : undefined}
       onRefresh={onRefresh}
       dockLayout={isMobile ? undefined : {
         rightDockActive: layout.rightDock.activePanel,
         rightDockCollapsed: layout.rightDock.collapsed,
-        bottomDockActive: layout.bottomDock.activePanel,
-        bottomDockCollapsed: layout.bottomDock.collapsed,
+        lowerPanelActive: layout.lowerPanel.activePanel,
+        lowerPanelCollapsed: layout.lowerPanel.collapsed,
         rightDockSplitBottom: layout.rightDock.split?.bottomPanel ?? null,
       }}
     />
@@ -397,6 +415,25 @@ function MainContent({
     </div>
   );
 
+  const renderTerminalMainView = () => {
+    /**
+     * 桌面终端是主工作区平行视图，不再依赖下方停靠面板。
+     */
+    if (!selectedProject) {
+      return null;
+    }
+    return (
+      <StandaloneShell
+        key={`terminalMainView-${selectedProject.fullPath || selectedProject.path || selectedProject.name}-${terminalLaunchCommand || 'plain'}`}
+        project={selectedProject}
+        command={terminalLaunchCommand}
+        isPlainShell
+        showHeader={false}
+        minimal
+      />
+    );
+  };
+
   if (isLoading) {
     return <MainContentStateView mode="loading" isMobile={isMobile} isSidebarOpen={isSidebarOpen} onMenuClick={onMenuClick} />;
   }
@@ -418,13 +455,12 @@ function MainContent({
           isSidebarOpen={isSidebarOpen}
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
-          bookmarkControls={bookmarkControlsNode}
           onRefresh={onRefresh}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
-            bottomDockActive: layout.bottomDock.activePanel,
-            bottomDockCollapsed: layout.bottomDock.collapsed,
+            lowerPanelActive: layout.lowerPanel.activePanel,
+            lowerPanelCollapsed: layout.lowerPanel.collapsed,
             rightDockSplitBottom: layout.rightDock.split?.bottomPanel ?? null,
           }}
         />
@@ -451,7 +487,7 @@ function MainContent({
               showThinking={showThinking}
               autoScrollToBottom={autoScrollToBottom}
               externalMessageUpdate={externalMessageUpdate}
-              onBookmarkControlsChange={setChatBookmarkControls}
+              renderSnapshotRequestId={renderSnapshotRequestId}
             />
           </ErrorBoundary>
         </div>
@@ -461,7 +497,7 @@ function MainContent({
 
   if (selectedWorkflow && !selectedSession) {
     // Workflow detail page with dock layout
-    const workflowCenterContent = (
+    const workflowCenterContent = activeTab === 'shell' ? renderTerminalMainView() : (
       <>
         <div className={`flex flex-col min-h-0 min-w-0 overflow-hidden flex-1 ${editorExpanded ? 'hidden' : ''}`}>
           <WorkflowDetailView
@@ -500,7 +536,7 @@ function MainContent({
       />
     ) : null;
 
-    const workflowBottomDockContent = layout.bottomDock.activePanel === 'terminal' || layout.rightDock.split?.bottomPanel === 'terminal' ? (
+    const workflowLowerPanelContent = layout.lowerPanel.activePanel === 'terminal' || layout.rightDock.split?.bottomPanel === 'terminal' ? (
       renderTerminalDockContent()
     ) : null;
 
@@ -516,13 +552,12 @@ function MainContent({
           isSidebarOpen={isSidebarOpen}
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
-          bookmarkControls={bookmarkControlsNode}
           onRefresh={onRefresh}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
-            bottomDockActive: layout.bottomDock.activePanel,
-            bottomDockCollapsed: layout.bottomDock.collapsed,
+            lowerPanelActive: layout.lowerPanel.activePanel,
+            lowerPanelCollapsed: layout.lowerPanel.collapsed,
             rightDockSplitBottom: layout.rightDock.split?.bottomPanel ?? null,
           }}
         />
@@ -532,18 +567,18 @@ function MainContent({
             isMobile={isMobile}
             centerContent={workflowCenterContent}
             rightDockContent={workflowRightDockContent}
-            bottomDockContent={workflowBottomDockContent}
+            lowerPanelContent={workflowLowerPanelContent}
             onRightDockWidthChange={setRightDockWidth}
-            onBottomDockHeightChange={setBottomDockHeight}
+            onLowerPanelHeightChange={setLowerPanelHeight}
             onRightDockCollapseToggle={toggleRightDockCollapse}
-            onBottomDockCollapseToggle={toggleBottomDockCollapse}
+            onLowerPanelCollapseToggle={toggleLowerPanelCollapse}
             onRightDockFullscreenToggle={toggleRightDockFullscreen}
-            onBottomDockFullscreenToggle={toggleBottomDockFullscreen}
+            onLowerPanelFullscreenToggle={toggleLowerPanelFullscreen}
             onMoveTerminalToRightSplit={moveTerminalToRightSplit}
-            onMoveTerminalToBottom={moveTerminalToBottom}
+            onMoveTerminalToLower={moveTerminalToLower}
             onRightDockSplitRatioChange={setRightDockSplitRatio}
             rightDockTitleActions={fileDockTitleActions}
-            bottomDockActions={terminalDockActions}
+            lowerPanelActions={terminalDockActions}
           />
         </div>
       </div>
@@ -554,9 +589,10 @@ function MainContent({
     selectedProject
     && !selectedSession
     && !selectedWorkflow
+    && activeTab !== 'chat'
   ) {
     // Project overview page with dock layout for files/shell access
-    const overviewCenterContent = (
+    const overviewCenterContent = activeTab === 'shell' ? renderTerminalMainView() : (
       <>
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <ProjectOverviewPanel
@@ -598,7 +634,7 @@ function MainContent({
       />
     ) : null;
 
-    const overviewBottomDockContent = layout.bottomDock.activePanel === 'terminal' || layout.rightDock.split?.bottomPanel === 'terminal' ? (
+    const overviewLowerPanelContent = layout.lowerPanel.activePanel === 'terminal' || layout.rightDock.split?.bottomPanel === 'terminal' ? (
       renderTerminalDockContent()
     ) : null;
 
@@ -614,13 +650,12 @@ function MainContent({
           isSidebarOpen={isSidebarOpen}
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
-          bookmarkControls={bookmarkControlsNode}
           onRefresh={onRefresh}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
-            bottomDockActive: layout.bottomDock.activePanel,
-            bottomDockCollapsed: layout.bottomDock.collapsed,
+            lowerPanelActive: layout.lowerPanel.activePanel,
+            lowerPanelCollapsed: layout.lowerPanel.collapsed,
             rightDockSplitBottom: layout.rightDock.split?.bottomPanel ?? null,
           }}
         />
@@ -630,18 +665,18 @@ function MainContent({
             isMobile={isMobile}
             centerContent={overviewCenterContent}
             rightDockContent={overviewRightDockContent}
-            bottomDockContent={overviewBottomDockContent}
+            lowerPanelContent={overviewLowerPanelContent}
             onRightDockWidthChange={setRightDockWidth}
-            onBottomDockHeightChange={setBottomDockHeight}
+            onLowerPanelHeightChange={setLowerPanelHeight}
             onRightDockCollapseToggle={toggleRightDockCollapse}
-            onBottomDockCollapseToggle={toggleBottomDockCollapse}
+            onLowerPanelCollapseToggle={toggleLowerPanelCollapse}
             onRightDockFullscreenToggle={toggleRightDockFullscreen}
-            onBottomDockFullscreenToggle={toggleBottomDockFullscreen}
+            onLowerPanelFullscreenToggle={toggleLowerPanelFullscreen}
             onMoveTerminalToRightSplit={moveTerminalToRightSplit}
-            onMoveTerminalToBottom={moveTerminalToBottom}
+            onMoveTerminalToLower={moveTerminalToLower}
             onRightDockSplitRatioChange={setRightDockSplitRatio}
             rightDockTitleActions={fileDockTitleActions}
-            bottomDockActions={terminalDockActions}
+            lowerPanelActions={terminalDockActions}
           />
 
         </div>
@@ -653,32 +688,36 @@ function MainContent({
   const centerContent = (
     <>
       <div className={`flex flex-col min-h-0 min-w-0 overflow-hidden ${editorExpanded ? 'hidden' : ''} flex-1`}>
-        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-          <ErrorBoundary showDetails>
-            <ChatInterface
-              selectedProject={selectedProject}
-              selectedSession={selectedSession}
-              ws={ws}
-              sendMessage={sendMessage}
-              latestMessage={latestMessage}
-              messageHistory={messageHistory}
-              onFileOpen={handleFileOpen}
-              onInputFocusChange={onInputFocusChange}
-              onSessionActive={onSessionActive}
-              onSessionInactive={onSessionInactive}
-              onReplaceTemporarySession={onReplaceTemporarySession}
-              onNavigateToSession={onNavigateToSession}
-              onNewSession={onNewSession}
-              onShowSettings={onShowSettings}
-              autoExpandTools={autoExpandTools}
-              showRawParameters={showRawParameters}
-              showThinking={showThinking}
-              autoScrollToBottom={autoScrollToBottom}
-              externalMessageUpdate={externalMessageUpdate}
-              onBookmarkControlsChange={setChatBookmarkControls}
-            />
-          </ErrorBoundary>
-        </div>
+        {activeTab === 'shell' ? (
+          renderTerminalMainView()
+        ) : (
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+            <ErrorBoundary showDetails>
+              <ChatInterface
+                selectedProject={selectedProject}
+                selectedSession={selectedSession}
+                ws={ws}
+                sendMessage={sendMessage}
+                latestMessage={latestMessage}
+                messageHistory={messageHistory}
+                onFileOpen={handleFileOpen}
+                onInputFocusChange={onInputFocusChange}
+                onSessionActive={onSessionActive}
+                onSessionInactive={onSessionInactive}
+                onReplaceTemporarySession={onReplaceTemporarySession}
+                onNavigateToSession={onNavigateToSession}
+                onNewSession={onNewSession}
+                onShowSettings={onShowSettings}
+                autoExpandTools={autoExpandTools}
+                showRawParameters={showRawParameters}
+                showThinking={showThinking}
+                autoScrollToBottom={autoScrollToBottom}
+                externalMessageUpdate={externalMessageUpdate}
+                renderSnapshotRequestId={renderSnapshotRequestId}
+              />
+            </ErrorBoundary>
+          </div>
+        )}
 
         <div className={`h-full overflow-hidden ${activeTab === 'preview' ? 'block' : 'hidden'}`} />
       </div>
@@ -708,7 +747,7 @@ function MainContent({
     />
   ) : null;
 
-  const bottomDockContent = layout.bottomDock.activePanel === 'terminal' ? (
+  const lowerPanelContent = layout.lowerPanel.activePanel === 'terminal' ? (
     renderTerminalDockContent()
   ) : layout.rightDock.split?.bottomPanel === 'terminal' ? (
     renderTerminalDockContent()
@@ -730,13 +769,12 @@ function MainContent({
         isSidebarOpen={isSidebarOpen}
         onMenuClick={onMenuClick}
         leadingContent={headerLeadingContent}
-        bookmarkControls={bookmarkControlsNode}
         onRefresh={onRefresh}
         dockLayout={{
           rightDockActive: layout.rightDock.activePanel,
           rightDockCollapsed: layout.rightDock.collapsed,
-          bottomDockActive: layout.bottomDock.activePanel,
-          bottomDockCollapsed: layout.bottomDock.collapsed,
+          lowerPanelActive: layout.lowerPanel.activePanel,
+          lowerPanelCollapsed: layout.lowerPanel.collapsed,
           rightDockSplitBottom: layout.rightDock.split?.bottomPanel ?? null,
         }}
       />
@@ -747,18 +785,18 @@ function MainContent({
           isMobile={isMobile}
           centerContent={centerContent}
           rightDockContent={rightDockContent}
-          bottomDockContent={bottomDockContent}
+          lowerPanelContent={lowerPanelContent}
           onRightDockWidthChange={setRightDockWidth}
-          onBottomDockHeightChange={setBottomDockHeight}
+          onLowerPanelHeightChange={setLowerPanelHeight}
           onRightDockCollapseToggle={toggleRightDockCollapse}
-          onBottomDockCollapseToggle={toggleBottomDockCollapse}
+          onLowerPanelCollapseToggle={toggleLowerPanelCollapse}
           onRightDockFullscreenToggle={toggleRightDockFullscreen}
-          onBottomDockFullscreenToggle={toggleBottomDockFullscreen}
+          onLowerPanelFullscreenToggle={toggleLowerPanelFullscreen}
           onMoveTerminalToRightSplit={moveTerminalToRightSplit}
-          onMoveTerminalToBottom={moveTerminalToBottom}
+          onMoveTerminalToLower={moveTerminalToLower}
           onRightDockSplitRatioChange={setRightDockSplitRatio}
           rightDockTitleActions={fileDockTitleActions}
-          bottomDockActions={terminalDockActions}
+          lowerPanelActions={terminalDockActions}
         />
 
       </div>

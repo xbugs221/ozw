@@ -16,6 +16,7 @@ type StandaloneShellProps = {
   className?: string;
   showHeader?: boolean;
   minimal?: boolean;
+  onTerminalTerminateReady?: (terminate: (() => boolean) | null) => void;
 };
 
 export default function StandaloneShell({
@@ -30,6 +31,7 @@ export default function StandaloneShell({
   className = '',
   showHeader = true,
   minimal = false,
+  onTerminalTerminateReady,
 }: StandaloneShellProps) {
   const [isCompleted, setIsCompleted] = useState(false);
 
@@ -62,6 +64,7 @@ export default function StandaloneShell({
           onProcessComplete={handleProcessComplete}
           minimal={minimal}
           autoConnect={minimal ? true : autoConnect}
+          onTerminalTerminateReady={onTerminalTerminateReady}
         />
       </div>
     </div>

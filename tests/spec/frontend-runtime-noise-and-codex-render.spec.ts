@@ -317,7 +317,7 @@ test('Codex WS add/update 文件变更 JSON 字符串不会作为 assistant raw 
 
 test('Codex 渲染快照会分页加载完整长会话历史', async ({ page }) => {
   /**
-   * 业务场景：用户在 Codex TUI 会话中点击“渲染”，期望看到完整历史快照。
+   * 业务场景：用户在 Codex TUI 会话中点击顶部消息 Tab，期望看到完整历史快照。
    * 失败含义：如果这里失败，渲染快照仍只读取首个 100 条分页窗口。
    */
   const sessionId = 'proposal-75-codex-full-render-snapshot';
@@ -328,15 +328,20 @@ test('Codex 渲染快照会分页加载完整长会话历史', async ({ page }) 
     projectPath: PRIMARY_FIXTURE_PROJECT_PATH,
   });
   await page.goto(`/session/${sessionId}?${params.toString()}`, { waitUntil: 'networkidle' });
-  await expect(page.getByTestId('chat-render-snapshot-button')).toBeVisible();
+  await expect(page.getByTestId('tab-chat')).toBeVisible();
 
-  await page.getByTestId('chat-render-snapshot-button').click();
+  await page.getByTestId('tab-chat').click();
 
   const snapshotPane = page.getByTestId('chat-rendered-snapshot-pane');
   const chat = page.getByTestId('chat-scroll-container').last();
   await expect(snapshotPane).toBeVisible();
+  await expect(page.getByTestId('chat-return-tui-button')).toHaveCount(0);
+  await expect(page.getByTestId('chat-rerender-snapshot-button')).toHaveCount(0);
   await expect(chat).toContainText('Codex full render snapshot turn 001');
   await expect(chat).toContainText('Codex full render snapshot turn 130');
+  await expect.poll(async () => chat.evaluate((element) => (
+    element.scrollHeight - element.scrollTop - element.clientHeight
+  ))).toBeLessThan(8);
 
   await fs.mkdir(EVIDENCE_DIR, { recursive: true });
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'codex-full-render-snapshot.png'), fullPage: true });
