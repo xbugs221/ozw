@@ -99,7 +99,7 @@ test('shell relay 支持 Pi TUI，且不能把 Pi 归一成 Codex', () => {
   const source = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket TUI relay');
 
   assert.match(source, /provider[\s\S]{0,120}'pi'|provider[\s\S]{0,120}"pi"/, 'shell init 必须识别 provider=pi');
-  assert.match(source, /provider === 'pi'[\s\S]{0,120}--session\s+"\$\{resumeSessionId\}"/, 'shell command builder 必须用 pi --session 恢复 Pi TUI');
+  assert.match(source, /provider === 'pi'[\s\S]{0,140}--session\s+\$\{quotePosixShell/, 'shell command builder 必须用 pi --session 恢复 Pi TUI');
   assert.doesNotMatch(source, /pi\s+resume\s+["']?\$\{resumeSessionId\}/, 'Pi TUI 不得使用 Codex 风格的 pi resume 子命令');
   assert.doesNotMatch(
     source,
@@ -112,8 +112,18 @@ test('Pi route-backed TUI 使用 providerSessionId 恢复而不是 cN 路由 id'
   const shellSource = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket TUI relay');
 
   assert.match(shellSource, /providerSessionId/, 'shell init 必须接收 providerSessionId');
-  assert.match(shellSource, /routeSessionId/, 'shell init 必须保留 routeSessionId 用于 PTY 隔离');
+  assert.match(shellSource, /routeSessionId/, 'shell init 必须保留 routeSessionId 用于 tmux 会话身份');
   assert.match(shellSource, /resumeSessionId[\s\S]{0,160}providerSessionId/, 'Provider CLI resume 必须使用 providerSessionId');
+  assert.match(
+    shellSource,
+    /ptyIdentity\s*=\s*routeSessionId[\s\S]{0,120}`route:\$\{routeSessionId\}`/,
+    'route-backed TUI 的 tmux 身份必须优先使用稳定 cN 路由',
+  );
+  assert.match(
+    shellSource,
+    /legacyPtyIdentities[\s\S]{0,220}`\$\{routeSessionId\}_no-provider-session`/,
+    'providerSessionId 回填后必须能接回旧的 cN/no-provider tmux 会话',
+  );
   assert.doesNotMatch(
     shellSource,
     /\bresume\s+"\$\{sessionId\}"/,
@@ -124,7 +134,27 @@ test('Pi route-backed TUI 使用 providerSessionId 恢复而不是 cN 路由 id'
 test('非 plain-shell 的 TUI WebSocket 断开后继续保留 PTY 会话', () => {
   const source = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket PTY 保活');
 
-  assert.match(source, /keepSessionAliveOnDisconnect\s*=\s*!isPlainShell/, 'Provider TUI 断开 WebSocket 后必须继续保留 PTY');
-  assert.match(source, /ptySessionKey[\s\S]{0,180}provider/, 'PTY session key 必须包含 provider，避免 Codex/Pi 混用');
+  assert.doesNotMatch(
+    source,
+    /ws\.on\(['"]close['"][\s\S]{0,1800}(?:pty\.kill|shellProcess\.kill)/,
+    'Provider TUI 断开 WebSocket 后不能直接 kill PTY',
+  );
+  assert.match(source, /detach-client/, 'Provider TUI 断开 WebSocket 后只应 detach tmux client');
+  assert.match(source, /primaryPtySessionKey[\s\S]{0,180}provider/, 'PTY session key 必须包含 provider，避免 Codex/Pi 混用');
   assert.match(source, /buffer\.push|ring buffer|buffer:/, '后端必须保留可回放输出 buffer');
+});
+
+test('Provider TUI 退出后 tmux pane 回到普通 shell', () => {
+  const source = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket provider 启动命令');
+
+  assert.match(
+    source,
+    /exec\s+"\\\$\{SHELL:-\/bin\/bash\}"\s+-l/,
+    'Provider 命令退出后必须 exec 登录 shell，避免 Web 终端停在 [exited]',
+  );
+  assert.doesNotMatch(
+    source,
+    /resumeCommand\s*\|\|\s*cliName|resume\s+[^;\n]+;\s*if\s*\(\$LASTEXITCODE\s*-ne\s*0\)\s*\{/,
+    '用户 Ctrl-C 或退出 Provider 后不应自动重启 Provider',
+  );
 });

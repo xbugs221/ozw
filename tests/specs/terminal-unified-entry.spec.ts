@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 const REPO_ROOT = process.cwd();
 const PROJECT_OVERVIEW_PATH = path.join(
@@ -143,6 +144,21 @@ test('tmux 承载所有终端且 close 只 detach', () => {
     mainContentSource,
     /terminalTerminateHandlersRef\.current\.get\(activeTerminalId\)\?\.\(\)/,
     '删除活动终端必须调用当前终端的显式终止函数',
+  );
+});
+
+test('tmux session 名称使用项目短路径和 cN 路由', async () => {
+  const runtimeModule = await import(pathToFileURL(TMUX_RUNTIME_PATH).href);
+
+  assert.equal(
+    runtimeModule.createTmuxSessionName('/home/zzl/projects/ozw_codex_route:c7'),
+    'ozw_projects_ozw_c7',
+    'tmux session 名称应类似 projects/ozw/cN，并统一转成下划线',
+  );
+  assert.match(
+    runtimeModule.createLegacyTmuxSessionName('/home/zzl/projects/ozw_codex_route:c7'),
+    /^ozw_[A-Za-z0-9_-]+$/,
+    '旧 base64 名称必须保留，供已有 tmux 会话兼容复连',
   );
 });
 

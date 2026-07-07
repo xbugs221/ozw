@@ -34,19 +34,17 @@ function buildProviderShellCommand(input: {
     const { os, provider, projectPath, hasSession, resumeSessionId } = input;
     const cliName = provider === 'pi' ? 'pi' : 'codex';
     const resumeCommand = provider === 'pi'
-        ? `${cliName} --session "${resumeSessionId}"`
-        : `${cliName} resume "${resumeSessionId}"`;
+        ? `${cliName} --session ${quotePosixShell(String(resumeSessionId || ''))}`
+        : `${cliName} resume ${quotePosixShell(String(resumeSessionId || ''))}`;
     if (os.platform() === 'win32') {
         if (hasSession && resumeSessionId) {
-            return `Set-Location -Path "${projectPath}"; ${resumeCommand}; if ($LASTEXITCODE -ne 0) { ${cliName} }`;
+            return `Set-Location -Path "${projectPath}"; ${resumeCommand}; powershell.exe -NoExit`;
         }
-        return `Set-Location -Path "${projectPath}"; ${cliName}`;
+        return `Set-Location -Path "${projectPath}"; ${cliName}; powershell.exe -NoExit`;
     }
 
-    if (hasSession && resumeSessionId) {
-        return `cd "${projectPath}" && ${resumeCommand} || ${cliName}`;
-    }
-    return `cd "${projectPath}" && ${cliName}`;
+    const providerCommand = hasSession && resumeSessionId ? resumeCommand : cliName;
+    return `cd ${quotePosixShell(projectPath)} && { ${providerCommand}; }; exec "\${SHELL:-/bin/bash}" -l`;
 }
 
 /**
@@ -72,6 +70,29 @@ function executeTmuxLifecycleCommand(args: string[], actionLabel: string): void 
 }
 
 /**
+ * 检测一个 tmux session 是否仍存在，供旧 key 兼容复连使用。
+ */
+function tmuxSessionExists(sessionName: string): Promise<boolean> {
+    return new Promise((resolve) => {
+        execFile('tmux', ['has-session', '-t', sessionName], (error) => {
+            resolve(!error);
+        });
+    });
+}
+
+/**
+ * 返回当前 runtime 已存在的 tmux 名称，兼容短名称和旧 base64 名称。
+ */
+async function findExistingTmuxSessionName(tmuxRuntime: ReturnType<typeof createTmuxTerminalRuntime>): Promise<string> {
+    for (const sessionName of [tmuxRuntime.sessionName, ...tmuxRuntime.legacySessionNames]) {
+        if (await tmuxSessionExists(sessionName)) {
+            return sessionName;
+        }
+    }
+    return '';
+}
+
+/**
  * 解析 shell init 中用于 resume 和 PTY 隔离的会话身份。
  */
 function resolveShellSessionIdentity(data: LooseRecord): {
@@ -79,6 +100,7 @@ function resolveShellSessionIdentity(data: LooseRecord): {
     providerSessionId: string | null;
     resumeSessionId: string | null;
     ptyIdentity: string;
+    legacyPtyIdentities: string[];
 } {
     const routeSessionId = typeof data.routeSessionId === 'string' && data.routeSessionId.trim()
         ? data.routeSessionId.trim()
@@ -89,12 +111,19 @@ function resolveShellSessionIdentity(data: LooseRecord): {
             ? data.sessionId.trim()
             : null;
     const resumeSessionId = providerSessionId;
-    const ptyIdentity = [
-        routeSessionId || 'no-route-session',
-        providerSessionId || 'no-provider-session'
-    ].join('_');
+    const ptyIdentity = routeSessionId
+        ? `route:${routeSessionId}`
+        : providerSessionId
+            ? `provider:${providerSessionId}`
+            : 'new-session';
+    const legacyPtyIdentities = routeSessionId
+        ? [
+            `${routeSessionId}_no-provider-session`,
+            providerSessionId ? `${routeSessionId}_${providerSessionId}` : '',
+        ].filter(Boolean)
+        : [];
 
-    return { routeSessionId, providerSessionId, resumeSessionId, ptyIdentity };
+    return { routeSessionId, providerSessionId, resumeSessionId, ptyIdentity, legacyPtyIdentities };
 }
 
 /**
@@ -136,7 +165,8 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         routeSessionId,
                         providerSessionId,
                         resumeSessionId,
-                        ptyIdentity
+                        ptyIdentity,
+                        legacyPtyIdentities
                     } = resolveShellSessionIdentity(data);
                     const hasSession = Boolean(data.hasSession && resumeSessionId);
                     const provider = normalizeShellProvider(data.provider);
@@ -155,8 +185,12 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     const commandSuffix = isPlainShell && initialCommand
                         ? `_cmd_${Buffer.from(initialCommand).toString('base64').slice(0, 16)}`
                         : '';
-                    ptySessionKey = `${projectPath}_${provider}_${ptyIdentity}${commandSuffix}`;
-                    const tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
+                    const primaryPtySessionKey = `${projectPath}_${provider}_${ptyIdentity}${commandSuffix}`;
+                    const legacyPtySessionKeys = legacyPtyIdentities.map((identity) => `${projectPath}_${provider}_${identity}${commandSuffix}`);
+                    const candidatePtySessionKeys = [primaryPtySessionKey, ...legacyPtySessionKeys];
+                    ptySessionKey = primaryPtySessionKey;
+                    let tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
+                    let activeTmuxSessionName = tmuxRuntime.sessionName;
 
                     // Kill any existing login session before starting fresh
                     if (isLoginCommand) {
@@ -166,6 +200,32 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             if (oldSession.timeoutId) clearTimeout(oldSession.timeoutId);
                             if (oldSession.pty && oldSession.pty.kill) oldSession.pty.kill();
                             ptySessionsMap.delete(ptySessionKey);
+                        }
+                    }
+
+                    const existingSessionKey = isLoginCommand || isPlainShell
+                        ? ''
+                        : candidatePtySessionKeys.find((sessionKey) => ptySessionsMap.has(sessionKey)) || '';
+                    if (existingSessionKey) {
+                        ptySessionKey = existingSessionKey;
+                        tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
+                        activeTmuxSessionName = tmuxRuntime.sessionName;
+                    } else if (!isLoginCommand && !isPlainShell && os.platform() !== 'win32') {
+                        const existingTmuxSessionName = await findExistingTmuxSessionName(tmuxRuntime);
+                        if (existingTmuxSessionName) {
+                            activeTmuxSessionName = existingTmuxSessionName;
+                        } else {
+                            for (const legacyPtySessionKey of legacyPtySessionKeys) {
+                                const legacyTmuxRuntime = createTmuxTerminalRuntime(legacyPtySessionKey);
+                                const legacyTmuxSessionName = await findExistingTmuxSessionName(legacyTmuxRuntime);
+                                if (!legacyTmuxSessionName) {
+                                    continue;
+                                }
+                                ptySessionKey = legacyPtySessionKey;
+                                tmuxRuntime = legacyTmuxRuntime;
+                                activeTmuxSessionName = legacyTmuxSessionName;
+                                break;
+                            }
                         }
                     }
 
@@ -250,11 +310,12 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         }
 
                         if (os.platform() !== 'win32') {
-                            const sessionName = quotePosixShell(tmuxRuntime.sessionName);
+                            const sessionName = quotePosixShell(activeTmuxSessionName);
+                            const newSessionName = quotePosixShell(tmuxRuntime.sessionName);
                             const tmuxStartCommand = quotePosixShell(shellCommand);
                             shellCommand = [
                                 'command -v tmux >/dev/null 2>&1 || { echo "Error: tmux is required for persistent terminals. Please install tmux."; exit 127; }',
-                                `tmux has-session -t ${sessionName} 2>/dev/null || tmux new-session -d -s ${sessionName} ${tmuxStartCommand}`,
+                                `tmux has-session -t ${sessionName} 2>/dev/null || tmux new-session -d -s ${newSessionName} ${tmuxStartCommand}`,
                                 `tmux attach-session -t ${sessionName}`,
                             ].join(' && ');
                         }
@@ -262,6 +323,8 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         console.log('🔧 Executing shell command:', shellCommand);
                         console.log('🧩 tmux session runtime:', {
                             sessionName: tmuxRuntime.sessionName,
+                            activeSessionName: activeTmuxSessionName,
+                            legacySessionNames: tmuxRuntime.legacySessionNames,
                             hasSession: tmuxRuntime.hasSession().join(' '),
                             newSession: tmuxRuntime.createSession(shellCommand).join(' '),
                             attachSession: tmuxRuntime.attachSession().join(' '),
@@ -302,7 +365,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             sessionId: resumeSessionId,
                             routeSessionId,
                             providerSessionId,
-                            tmuxSessionName: tmuxRuntime.sessionName
+                            tmuxSessionName: activeTmuxSessionName
                         });
 
                         // Handle data output
@@ -420,10 +483,11 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                 } else if (data.type === 'kill_terminal' || data.type === 'terminateTerminal' || data.type === 'deleteTerminal') {
                     if (ptySessionKey) {
                         const tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
-                        console.log('🧹 Explicit terminal termination requested:', tmuxRuntime.terminateTerminal().join(' '));
-                        const [, ...killSessionArgs] = tmuxRuntime.terminateTerminal();
-                        executeTmuxLifecycleCommand(killSessionArgs, 'kill-session');
                         const session = ptySessionsMap.get(ptySessionKey);
+                        const targetTmuxSessionName = session?.tmuxSessionName || tmuxRuntime.sessionName;
+                        console.log('🧹 Explicit terminal termination requested:', ['tmux', 'kill-session', '-t', targetTmuxSessionName].join(' '));
+                        const killSessionArgs = ['kill-session', '-t', targetTmuxSessionName];
+                        executeTmuxLifecycleCommand(killSessionArgs, 'kill-session');
                         if (session?.timeoutId) {
                             clearTimeout(session.timeoutId);
                         }
