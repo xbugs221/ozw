@@ -149,6 +149,11 @@ test('Provider TUI 退出后 tmux pane 回到普通 shell', () => {
 
   assert.match(
     source,
+    /exec\s+"\\\$\{SHELL:-\/bin\/bash\}"\s+-lic/,
+    'Provider 命令必须通过用户默认 shell 的登录交互环境启动',
+  );
+  assert.match(
+    source,
     /exec\s+"\\\$\{SHELL:-\/bin\/bash\}"\s+-l/,
     'Provider 命令退出后必须 exec 登录 shell，避免 Web 终端停在 [exited]',
   );
@@ -157,4 +162,12 @@ test('Provider TUI 退出后 tmux pane 回到普通 shell', () => {
     /resumeCommand\s*\|\|\s*cliName|resume\s+[^;\n]+;\s*if\s*\(\$LASTEXITCODE\s*-ne\s*0\)\s*\{/,
     '用户 Ctrl-C 或退出 Provider 后不应自动重启 Provider',
   );
+});
+
+test('Provider TUI 启动命令优先使用用户默认 shell 环境', () => {
+  const source = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket provider PATH');
+
+  assert.match(source, /\$\{SHELL:-\/bin\/bash\}"\s+-lic/, 'Provider 启动必须先进入用户默认 shell 的登录交互环境');
+  assert.match(source, /buildPortableUserBinPathExport/, 'Provider 启动命令只能保留可迁移的用户级 PATH 兜底');
+  assert.doesNotMatch(source, /\/home\/zzl|\/Users\/[^'"]+/, 'Provider PATH 兜底不能写入特定用户路径');
 });

@@ -44,7 +44,7 @@ function buildProviderShellCommand(input: {
     }
 
     const providerCommand = hasSession && resumeSessionId ? resumeCommand : cliName;
-    return `cd ${quotePosixShell(projectPath)} && { ${providerCommand}; }; exec "\${SHELL:-/bin/bash}" -l`;
+    return `cd ${quotePosixShell(projectPath)} && exec "\${SHELL:-/bin/bash}" -lic ${quotePosixShell(`${buildPortableUserBinPathExport()}; { ${providerCommand}; }; exec "\${SHELL:-/bin/bash}" -l`)}`;
 }
 
 /**
@@ -52,6 +52,24 @@ function buildProviderShellCommand(input: {
  */
 function quotePosixShell(value: string): string {
     return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * 补齐跨平台 CLI 管理器常用的用户级 bin 路径，作为默认 shell 配置之外的兜底。
+ */
+function buildPortableUserBinPathExport(): string {
+    return [
+        'export PATH="',
+        '${PNPM_HOME:+$PNPM_HOME:}',
+        '${PNPM_HOME:+$PNPM_HOME/bin:}',
+        '$HOME/.local/share/pnpm:',
+        '$HOME/.local/share/pnpm/bin:',
+        '$HOME/.local/bin:',
+        '$HOME/bin:',
+        '$HOME/.bun/bin:',
+        '$HOME/.cargo/bin:',
+        '$PATH"',
+    ].join('');
 }
 
 /**
