@@ -6,7 +6,10 @@
 import { defineConfig } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ensurePlaywrightFixture } from './tests/e2e/helpers/playwright-fixture.ts';
+import {
+  PLAYWRIGHT_FIXTURE_AUTH_DB,
+  PLAYWRIGHT_FIXTURE_HOME,
+} from './tests/e2e/helpers/playwright-fixture.ts';
 
 /**
  * Merge local `.env` values into process.env so Playwright derives ports from the
@@ -38,17 +41,17 @@ function loadOptionalEnvFile() {
 loadOptionalEnvFile();
 
 const ORIGINAL_HOME = process.env.HOME || process.env.USERPROFILE || process.cwd();
-const fixture = ensurePlaywrightFixture();
 const PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH
   || path.join(ORIGINAL_HOME, '.cache', 'ms-playwright');
 
-process.env.HOME = fixture.homeDir;
-process.env.USERPROFILE = fixture.homeDir;
-process.env.DATABASE_PATH = fixture.authDbPath;
+process.env.HOME = PLAYWRIGHT_FIXTURE_HOME;
+process.env.USERPROFILE = PLAYWRIGHT_FIXTURE_HOME;
+process.env.DATABASE_PATH = PLAYWRIGHT_FIXTURE_AUTH_DB;
+process.env.XDG_STATE_HOME = path.join(process.cwd(), '.tmp', 'playwright-state-home');
 process.env.PLAYWRIGHT_BROWSERS_PATH = PLAYWRIGHT_BROWSERS_PATH;
 process.env.SHELL = '/bin/bash';
 
-const AUTH_DB_PATH = fixture.authDbPath;
+const AUTH_DB_PATH = PLAYWRIGHT_FIXTURE_AUTH_DB;
 const SERVER_PORT = process.env.PLAYWRIGHT_SERVER_PORT || '4101';
 const VITE_PORT = process.env.PLAYWRIGHT_VITE_PORT || '6174';
 const HOST = process.env.PLAYWRIGHT_HOST || '127.0.0.1';

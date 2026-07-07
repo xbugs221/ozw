@@ -17,6 +17,7 @@ type MainContentTabSwitcherProps = {
   setActiveTab: Dispatch<SetStateAction<AppTab>>;
   compact?: boolean;
   dockLayout?: DockLayoutControl;
+  isRenderingSnapshot?: boolean;
 };
 
 type TabDefinition = {
@@ -37,6 +38,7 @@ export default function MainContentTabSwitcher({
   setActiveTab,
   compact = false,
   dockLayout,
+  isRenderingSnapshot = false,
 }: MainContentTabSwitcherProps) {
   const { t } = useTranslation();
 
@@ -90,7 +92,8 @@ export default function MainContentTabSwitcher({
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = isTabActive(tab.id);
-        const label = t(tab.labelKey);
+        const isBusyRenderTab = tab.id === 'chat' && isRenderingSnapshot;
+        const label = isBusyRenderTab ? t('tabs.rendering') : t(tab.labelKey);
 
         return (
           <Tooltip key={tab.id} content={label} position="bottom">
@@ -103,10 +106,16 @@ export default function MainContentTabSwitcher({
               }`}
               aria-label={label}
               aria-pressed={isActive}
+              aria-busy={isBusyRenderTab}
               title={label}
               data-testid={`tab-${tab.id}`}
+              disabled={isBusyRenderTab}
             >
-              <Icon className="h-4 w-4 flex-shrink-0" strokeWidth={isActive ? 2.2 : 1.8} aria-hidden="true" />
+              {isBusyRenderTab ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" aria-hidden="true" />
+              ) : (
+                <Icon className="h-4 w-4 flex-shrink-0" strokeWidth={isActive ? 2.2 : 1.8} aria-hidden="true" />
+              )}
             </button>
           </Tooltip>
         );

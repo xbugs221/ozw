@@ -15,6 +15,7 @@ export default function MainContentHeader({
   leadingContent,
   dockLayout,
   onRefresh,
+  isRenderingSnapshot,
 }: MainContentHeaderProps) {
   const showMenuButton = !isSidebarOpen;
 
@@ -45,6 +46,7 @@ export default function MainContentHeader({
             setActiveTab={setActiveTab}
             compact={isMobile}
             dockLayout={dockLayout}
+            isRenderingSnapshot={isRenderingSnapshot}
           />
         </div>
       </div>

@@ -81,27 +81,31 @@ function readDesktopLayoutSources(): string {
   ].join('\n');
 }
 
-test('会话卡片和新建会话默认进入普通终端', () => {
+test('会话卡片用 cN 短路由打开终端', () => {
   const { overviewSource, combinedSource } = readSessionEntrySources();
 
-  assert.doesNotMatch(
+  assert.match(
     overviewSource,
-    /handleSessionCardClick[\s\S]{0,1000}onSelectSession\(session\)/,
-    '会话卡片点击不得直接选择会话并进入 JSONL 渲染页',
+    /handleSessionCardClick[\s\S]{0,1000}onOpenSessionTerminal\(session\)/,
+    '会话卡片点击必须通过终端入口选择会话',
   );
   assert.match(
     combinedSource,
-    /openSessionTerminal|openTerminalForSession|sessionLaunchCommand|terminalLaunchCommand|injectShellCommand/,
-    '前端必须有会话入口到终端启动命令的显式桥接',
+    /handleOpenSessionTerminal[\s\S]{0,260}setActiveTab\(['"]shell['"]\)[\s\S]{0,260}onSelectSession\(session\)/,
+    '终端入口必须先切到终端视图，再复用现有会话短路由导航',
   );
-  assert.match(combinedSource, /codex\s+(?:resume|--resume)|pi\s+--session/, '恢复命令必须覆盖 Codex 和 Pi');
+  assert.match(
+    combinedSource,
+    /<StandaloneShell[\s\S]{0,260}session=\{selectedSession\}[\s\S]{0,260}isPlainShell=\{!selectedSession\}/,
+    '终端恢复必须从当前 selectedSession 传递会话身份',
+  );
+  assert.doesNotMatch(
+    combinedSource,
+    /terminalLaunchCommand|terminalSessionId|terminalProviderSessionId|terminalRouteIndex|terminalSessionProvider/,
+    '会话卡片入口不得把启动命令或会话身份写入 URL 查询参数',
+  );
   assert.match(combinedSource, /project-new-session-provider-codex/, '新建会话必须保留 Codex provider 入口');
   assert.match(combinedSource, /project-new-session-provider-pi/, '新建会话必须保留 Pi provider 入口');
-  assert.match(
-    combinedSource,
-    /newSessionLaunchCommand|createSessionLaunchCommand|openTerminalForNewSession|terminalLaunchCommand/,
-    '选择 provider 后必须生成启动命令并打开终端',
-  );
   assert.doesNotMatch(
     combinedSource,
     /会话终端|managedSessionTerminal|sessionTerminalOnly|isSessionTerminal/,

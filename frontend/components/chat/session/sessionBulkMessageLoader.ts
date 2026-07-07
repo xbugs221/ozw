@@ -61,7 +61,7 @@ export async function loadSessionMessagesInPages({
 
     const data = await response.json();
     const pageMessages = Array.isArray(data?.messages) ? data.messages : (Array.isArray(data) ? data : []);
-    messages.push(...pageMessages);
+    messages.unshift(...pageMessages);
     total = Number.isFinite(Number(data?.total)) ? Number(data.total) : messages.length;
 
     if (!data?.hasMore || pageMessages.length === 0 || messages.length >= total) {

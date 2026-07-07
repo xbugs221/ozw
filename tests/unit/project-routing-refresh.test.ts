@@ -17,6 +17,7 @@ import {
 import {
   findRefreshedSelectedSession,
   mergeProjectSummaries,
+  projectMatchesOverview,
 } from '../../frontend/hooks/projects/projectRefreshReducer';
 
 type LooseProject = Record<string, any>;
@@ -166,4 +167,27 @@ test('project refresh preserves loaded details and replaces temporary cN selecti
     { id: 'pi-13', title: 'Pi 13' } as any,
   );
   assert.equal(additive, false);
+});
+
+test('project refresh does not merge same-name projects with different paths', () => {
+  /**
+   * 项目列表存在同名或相近名称时，带路径的概览必须只归属同一路径，不能按名称兜底覆盖。
+   */
+  const detailedProject = {
+    name: 'fixture-project',
+    displayName: 'fixture-project',
+    fullPath: '/workspace/fixture-project',
+    codexSessions: [{ id: 'manual-session', routeIndex: 1 }],
+  };
+  const unrelatedSummary = {
+    name: 'fixture-project',
+    displayName: 'fixture-project',
+    fullPath: '/workspace/other/fixture-project',
+    sessionMeta: { total: 0 },
+  };
+
+  assert.equal(projectMatchesOverview(detailedProject as any, unrelatedSummary as any), false);
+  const [merged] = mergeProjectSummaries([detailedProject as any], [unrelatedSummary as any]);
+  assert.equal(merged.fullPath, '/workspace/other/fixture-project');
+  assert.equal(merged.codexSessions, undefined);
 });

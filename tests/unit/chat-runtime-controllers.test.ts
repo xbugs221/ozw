@@ -33,8 +33,8 @@ it('sessionBulkMessageLoader follows backend raw-line offsets', async () => {
       offsets.push(offset);
       projectPaths.push(projectPath || '');
       const page = offset === 0
-        ? { messages: ['rendered-1'], total: 2, hasMore: true, nextRawLineOffset: 3 }
-        : { messages: ['rendered-2'], total: 2, hasMore: false, nextRawLineOffset: 6 };
+        ? { messages: ['newer-line-835', 'newer-line-932'], total: 6, hasMore: true, nextRawLineOffset: 3 }
+        : { messages: ['older-line-735', 'older-line-829'], total: 6, hasMore: false, nextRawLineOffset: 6 };
       return new Response(JSON.stringify(page), { status: 200 });
     },
     projectName: 'fixture-project',
@@ -46,7 +46,7 @@ it('sessionBulkMessageLoader follows backend raw-line offsets', async () => {
 
   expect(offsets).toEqual([0, 3]);
   expect(projectPaths).toEqual(['/tmp/fixture-project', '/tmp/fixture-project']);
-  expect(result.messages).toEqual(['rendered-1', 'rendered-2']);
+  expect(result.messages).toEqual(['older-line-735', 'older-line-829', 'newer-line-835', 'newer-line-932']);
 });
 
 it('composerSubmitRuntime blocks empty sends and builds pending messages', () => {

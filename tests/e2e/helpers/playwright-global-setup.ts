@@ -7,6 +7,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { ensurePlaywrightFixture } from './playwright-fixture.ts';
 
 /**
  * Create a fake oz binary for the isolated Playwright server process.
@@ -396,6 +397,11 @@ export default async function globalSetup() {
 
   stopPortListeners(serverPort);
   stopPortListeners(vitePort);
+  const fixture = ensurePlaywrightFixture();
+  childEnv.HOME = fixture.homeDir;
+  childEnv.USERPROFILE = fixture.homeDir;
+  childEnv.DATABASE_PATH = fixture.authDbPath;
+  childEnv.XDG_STATE_HOME = process.env.XDG_STATE_HOME || path.join(cwd, '.tmp', 'playwright-state-home');
   fs.rmSync(childEnv.CCFLOW_CO_HOME, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   fakeCoProcess = startFakeCoDaemon(cwd, childEnv);
 

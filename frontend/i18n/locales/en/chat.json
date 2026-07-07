@@ -159,7 +159,9 @@
     },
     "loading": {
       "olderMessages": "Loading older messages...",
-      "sessionMessages": "Loading session messages..."
+      "sessionMessages": "Loading session messages...",
+      "renderSnapshot": "Rendering session history...",
+      "renderSnapshotHint": "Large sessions can take a few seconds. Please wait."
     },
     "messages": {
       "showingOf": "Showing {{shown}} of {{total}} messages",

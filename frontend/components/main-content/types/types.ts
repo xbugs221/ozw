@@ -73,6 +73,7 @@ export type MainContentHeaderProps = {
   leadingContent?: ReactNode;
   dockLayout?: DockLayoutControl;
   onRefresh?: () => Promise<void> | void;
+  isRenderingSnapshot?: boolean;
 };
 
 export type MainContentStateViewProps = {
@@ -95,5 +96,6 @@ export type ProjectOverviewPanelProps = {
   displayMode?: 'all' | 'workflows' | 'sessions';
   onNewSession: NewSessionHandler;
   onSelectSession: (session: ProjectSession) => void;
+  onOpenSessionTerminal?: (session: ProjectSession) => void;
   onSelectWorkflow: (project: Project, workflow: ProjectWorkflow) => void;
 };

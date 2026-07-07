@@ -125,5 +125,6 @@ export interface ChatInterfaceProps {
   autoScrollToBottom?: boolean;
   externalMessageUpdate?: number;
   renderSnapshotRequestId?: number;
+  onRenderSnapshotLoadingChange?: (isLoading: boolean) => void;
   onTaskClick?: (...args: unknown[]) => void;
 }

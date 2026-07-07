@@ -17,7 +17,7 @@ import { useWorkspaceLayoutState } from '../hooks/useWorkspaceLayoutState';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useEditorSidebar } from '../../code-editor/hooks/useEditorSidebar';
 import EditorSidebar from '../../code-editor/view/EditorSidebar';
-import type { AppTab, Project } from '../../../types/app';
+import type { AppTab, Project, ProjectSession } from '../../../types/app';
 import WorkflowDetailView from './subcomponents/WorkflowDetailView';
 import { getAllSessions } from '../../sidebar/utils/utils';
 
@@ -69,16 +69,7 @@ function MainContent({
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom } = preferences;
-  const terminalLaunchCommand = React.useMemo(() => {
-    /**
-     * 会话入口通过 URL 传入一次性启动命令，终端本身仍保持普通 shell。
-     */
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    return new URLSearchParams(window.location.search).get('terminalLaunchCommand');
-  }, [activeTab, selectedProject?.name, selectedSession?.id]);
-
+  const [isRenderingSnapshot, setIsRenderingSnapshot] = React.useState(false);
   const projectSessions = selectedProject ? getAllSessions(selectedProject, {}, true) : [];
   const [revealDirectoryRequest, setRevealDirectoryRequest] = React.useState<{ path: string; requestId: number } | null>(null);
   const terminalCounterRef = React.useRef(1);
@@ -135,6 +126,22 @@ function MainContent({
     setTerminalInstances([initialTerminal]);
     setActiveTerminalId(initialTerminal.id);
   }, [selectedProject?.fullPath, selectedProject?.path, selectedProject?.name]);
+
+  useEffect(() => {
+    /**
+     * Reset render progress when moving to a different session.
+     */
+    setIsRenderingSnapshot(false);
+  }, [selectedSession?.id]);
+
+  useEffect(() => {
+    /**
+     * Reset render progress when leaving the rendered transcript view.
+     */
+    if (activeTab !== 'chat') {
+      setIsRenderingSnapshot(false);
+    }
+  }, [activeTab]);
 
   const handleCreateTerminal = React.useCallback(() => {
     /**
@@ -282,7 +289,9 @@ function MainContent({
       if (nextTab === 'chat' && selectedProject && !selectedSession && !selectedWorkflow) {
         const targetSession = projectSessions[0] || null;
         if (targetSession) {
+          setActiveTab('chat');
           onSelectSession(targetSession);
+          onRenderSnapshotRequest?.();
         } else {
           setActiveTab('chat');
         }
@@ -335,6 +344,15 @@ function MainContent({
     }
   }, [isMobile, setActiveTab, setRightDock]);
 
+  const handleOpenSessionTerminal = React.useCallback((session: ProjectSession) => {
+    /**
+     * Keep the browser route on the stable cN session URL while the UI opens
+     * the terminal view for that selected session.
+     */
+    setActiveTab('shell');
+    onSelectSession(session);
+  }, [onSelectSession, setActiveTab]);
+
   const renderHeader = (headerActiveTab: AppTab = activeTab) => (
     <MainContentHeader
       activeTab={headerActiveTab}
@@ -347,6 +365,7 @@ function MainContent({
       onMenuClick={onMenuClick}
       leadingContent={headerLeadingContent}
       onRefresh={onRefresh}
+      isRenderingSnapshot={isRenderingSnapshot}
       dockLayout={isMobile ? undefined : {
         rightDockActive: layout.rightDock.activePanel,
         rightDockCollapsed: layout.rightDock.collapsed,
@@ -424,10 +443,11 @@ function MainContent({
     }
     return (
       <StandaloneShell
-        key={`terminalMainView-${selectedProject.fullPath || selectedProject.path || selectedProject.name}-${terminalLaunchCommand || 'plain'}`}
+        key={`terminalMainView-${selectedProject.fullPath || selectedProject.path || selectedProject.name}-${selectedSession?.__provider || 'plain'}-${selectedSession?.id || 'plain'}`}
         project={selectedProject}
-        command={terminalLaunchCommand}
-        isPlainShell
+        session={selectedSession}
+        command={null}
+        isPlainShell={!selectedSession}
         showHeader={false}
         minimal
       />
@@ -456,6 +476,7 @@ function MainContent({
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
           onRefresh={onRefresh}
+          isRenderingSnapshot={isRenderingSnapshot}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
@@ -488,6 +509,7 @@ function MainContent({
               autoScrollToBottom={autoScrollToBottom}
               externalMessageUpdate={externalMessageUpdate}
               renderSnapshotRequestId={renderSnapshotRequestId}
+              onRenderSnapshotLoadingChange={setIsRenderingSnapshot}
             />
           </ErrorBoundary>
         </div>
@@ -553,6 +575,7 @@ function MainContent({
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
           onRefresh={onRefresh}
+          isRenderingSnapshot={isRenderingSnapshot}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
@@ -602,6 +625,7 @@ function MainContent({
             sessions={getAllSessions(selectedProject, {}, true)}
             onNewSession={onNewSession}
             onSelectSession={onSelectSession}
+            onOpenSessionTerminal={handleOpenSessionTerminal}
             onSelectWorkflow={onSelectWorkflow}
           />
         </div>
@@ -651,6 +675,7 @@ function MainContent({
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
           onRefresh={onRefresh}
+          isRenderingSnapshot={isRenderingSnapshot}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
@@ -714,6 +739,7 @@ function MainContent({
                 autoScrollToBottom={autoScrollToBottom}
                 externalMessageUpdate={externalMessageUpdate}
                 renderSnapshotRequestId={renderSnapshotRequestId}
+                onRenderSnapshotLoadingChange={setIsRenderingSnapshot}
               />
             </ErrorBoundary>
           </div>
@@ -770,6 +796,7 @@ function MainContent({
         onMenuClick={onMenuClick}
         leadingContent={headerLeadingContent}
         onRefresh={onRefresh}
+        isRenderingSnapshot={isRenderingSnapshot}
         dockLayout={{
           rightDockActive: layout.rightDock.activePanel,
           rightDockCollapsed: layout.rightDock.collapsed,

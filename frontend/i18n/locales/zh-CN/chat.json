@@ -159,7 +159,9 @@
     },
     "loading": {
       "olderMessages": "正在加载更早的消息...",
-      "sessionMessages": "正在加载会话消息..."
+      "sessionMessages": "正在加载会话消息...",
+      "renderSnapshot": "正在渲染会话历史...",
+      "renderSnapshotHint": "消息较多时可能需要几秒，请稍候。"
     },
     "messages": {
       "showingOf": "显示 {{shown}} / {{total}} 条消息",

@@ -64,10 +64,10 @@ export function mergeProjectSummary(project: Project, summary: Project): Project
 export function projectMatchesOverview(project: Project, overview: Project): boolean {
   const projectPath = normalizeComparablePath(project.fullPath || project.path);
   const overviewPath = normalizeComparablePath(overview.fullPath || overview.path);
-  return Boolean(
-    (projectPath && overviewPath && projectPath === overviewPath) ||
-      (project.name && overview.name && project.name === overview.name),
-  );
+  if (projectPath || overviewPath) {
+    return Boolean(projectPath && overviewPath && projectPath === overviewPath);
+  }
+  return Boolean(project.name && overview.name && project.name === overview.name);
 }
 
 /**

@@ -119,6 +119,7 @@ function ChatInterface({
   autoScrollToBottom,
   externalMessageUpdate,
   renderSnapshotRequestId = 0,
+  onRenderSnapshotLoadingChange,
 }: ChatInterfaceProps) {
   const { t } = useTranslation('chat');
   const location = useLocation();
@@ -315,6 +316,7 @@ function ChatInterface({
   ]);
   const handleRenderSnapshot = useCallback(async () => {
     setIsRenderingSnapshot(true);
+    onRenderSnapshotLoadingChange?.(true);
     try {
       const projectName = selectedSession?.__projectName || selectedProject?.name || '';
       const sessionId = getSessionLoadId(selectedSession) || currentSessionId || '';
@@ -345,15 +347,27 @@ function ChatInterface({
       );
     } finally {
       setIsRenderingSnapshot(false);
+      onRenderSnapshotLoadingChange?.(false);
     }
   }, [
     currentSessionId,
     effectiveProvider,
+    onRenderSnapshotLoadingChange,
     selectedProject?.fullPath,
     selectedProject?.name,
     selectedProject?.path,
     selectedSession,
   ]);
+
+  useEffect(() => {
+    /**
+     * PURPOSE: Clear the header render indicator if this session view unmounts
+     * during a long snapshot load or route transition.
+     */
+    return () => {
+      onRenderSnapshotLoadingChange?.(false);
+    };
+  }, [onRenderSnapshotLoadingChange]);
 
   useEffect(() => {
     /**
@@ -1052,6 +1066,27 @@ function ChatInterface({
             selectedProject={selectedProject}
             scrollTargetMessageKey={bookmarkScrollTargetKey}
           />
+            </div>
+          )}
+
+          {isRenderingSnapshot && (
+            <div
+              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/70 backdrop-blur-sm"
+              data-testid="chat-render-snapshot-loading"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex max-w-sm items-center gap-3 rounded-md border border-border bg-background px-4 py-3 text-sm text-foreground shadow-lg">
+                <div className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" />
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {t('session.loading.renderSnapshot')}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('session.loading.renderSnapshotHint')}
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 

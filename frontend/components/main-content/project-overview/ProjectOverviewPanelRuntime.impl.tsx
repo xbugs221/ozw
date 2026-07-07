@@ -26,7 +26,6 @@ import { formatTimeAgo } from '../../../utils/dateUtils';
 import { getSessionActivityTime } from '../../../utils/sessionActivityTime';
 import { api } from '../../../utils/api';
 import { getSessionRouteNumber } from '../../../utils/sessionCardDisplay';
-import { buildProjectRoute } from '../../../utils/projectRoute';
 import {
   buildWorkflowOverviewGroups,
   getWorkflowUpdatedAt,
@@ -138,39 +137,6 @@ function getResolvedSessionSelectionKey(
 function getManualSessionCardTitle(sessionName: string): string {
   const normalizedName = sessionName.trim();
   return Array.from(normalizedName).slice(0, 20).join('') || sessionName;
-}
-
-/**
- * 构造会话恢复命令，卡片点击只负责把命令注入普通终端。
- */
-function sessionLaunchCommand(session: ProjectSession & { __provider?: SessionProvider }): string {
-  const provider = normalizeActionSessionProvider(session.__provider);
-  const providerSessionId = String(session.providerSessionId || session.id || '').trim();
-  return provider === 'pi'
-    ? `pi --session "${providerSessionId}"`
-    : `codex resume "${providerSessionId}"`;
-}
-
-/**
- * 构造新建会话命令，provider picker 和已有会话复用同一个终端入口。
- */
-function newSessionLaunchCommand(provider: SessionProvider): string {
-  return provider === 'pi' ? 'pi' : 'codex';
-}
-
-/**
- * 打开项目普通终端并把启动命令交给 shell 初始化流程。
- */
-function openTerminalForSession(
-  navigate: ReturnType<typeof useNavigate>,
-  project: Project,
-  terminalLaunchCommand: string,
-): void {
-  const params = new URLSearchParams({
-    tab: 'shell',
-    terminalLaunchCommand,
-  });
-  navigate(`${buildProjectRoute(project)}?${params.toString()}`);
 }
 
 /**
@@ -397,6 +363,7 @@ export default function ProjectOverviewPanel({
   displayMode = 'all',
   onNewSession,
   onSelectSession,
+  onOpenSessionTerminal,
   onSelectWorkflow,
 }: ProjectOverviewPanelProps) {
   const navigate = useNavigate();
@@ -684,7 +651,11 @@ export default function ProjectOverviewPanel({
         ...current,
         [sessionKey]: activitySignature,
       }));
-      openTerminalForSession(navigate, project, sessionLaunchCommand(session));
+      if (onOpenSessionTerminal) {
+        onOpenSessionTerminal(session);
+      } else {
+        onSelectSession(session);
+      }
     });
   };
 
@@ -695,7 +666,6 @@ export default function ProjectOverviewPanel({
      */
     setSessionCreateError('');
     setProviderPickerOpen(false);
-    openTerminalForSession(navigate, project, newSessionLaunchCommand(provider));
     const result = await Promise.resolve(onNewSession(project, provider, { promptForLabel: false }));
     if (result && result.ok === false) {
       setSessionCreateError(result.error);

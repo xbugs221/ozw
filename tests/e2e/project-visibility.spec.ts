@@ -6,18 +6,18 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import jwt from 'jsonwebtoken';
 import {
-  PLAYWRIGHT_FIXTURE_AUTH_DB,
   PLAYWRIGHT_FIXTURE_HOME,
   PLAYWRIGHT_FIXTURE_PROJECT_PATHS,
   PLAYWRIGHT_FIXTURE_SESSION_IDS,
 } from './helpers/playwright-fixture.ts';
 
-process.env.DATABASE_PATH = PLAYWRIGHT_FIXTURE_AUTH_DB;
-
 const PROJECT_INDEX_EVIDENCE_DIR = path.join(process.cwd(), 'test-results', 'project-index-db-backed');
 const DEBUG_SCREENSHOT_DIR = path.join(process.cwd(), 'docs', 'debug', '20260618-0924-cli-session-title', 'screenshots');
 const WEBUI_TITLE_SCREENSHOT_DIR = path.join(process.cwd(), 'docs', 'debug', '20260618-1002-manual-first-request-title', 'screenshots');
+const TERMINAL_RENDER_DEBUG_SCREENSHOT_DIR = path.join(process.cwd(), 'docs', 'debug', '20260707-1012-render-session-jsonl', 'screenshots');
+const CLEAN_SESSION_ROUTE_SCREENSHOT_DIR = path.join(process.cwd(), 'docs', 'debug', '20260707-1014-clean-session-card-route', 'screenshots');
 
 /**
  * Persist browser-side evidence required by the project index acceptance gate.
@@ -32,27 +32,40 @@ function writeProjectIndexEvidence(relativePath, content) {
   fs.writeFileSync(evidencePath, content);
 }
 
-const [{ generateToken }, { userDb }] = await Promise.all([
-  import('../../backend/middleware/auth.ts'),
-  import('../../backend/database/db.ts'),
-]);
-
 /**
- * Build a valid local auth token for the first active user.
- * This keeps smoke tests independent of hard-coded credentials.
+ * Build a valid local auth token for the deterministic Playwright user.
  *
  * @returns {string}
  */
 function createLocalAuthToken() {
-  const user = userDb.getFirstUser();
-  if (!user) {
-    throw new Error('No active user found for Playwright authentication');
-  }
-
-  return generateToken(user);
+  /**
+   * PURPOSE: Avoid importing backend database modules in the browser test
+   * process; the isolated server owns the SQLite connection during e2e runs.
+   */
+  const secret = process.env.JWT_SECRET || 'playwright-jwt-secret';
+  return jwt.sign(
+    {
+      userId: 1,
+      username: 'playwright-user',
+    },
+    secret,
+    { expiresIn: '24h' },
+  );
 }
 
 const AUTH_TOKEN = createLocalAuthToken();
+
+/**
+ * Open the fixture project that owns the manual Codex session routes.
+ */
+async function openFixtureProjectOverview(page) {
+  /**
+   * PURPOSE: Select by stable project identity instead of visible text because
+   * the fixture list also contains ".fixture-project".
+   */
+  await page.getByTestId('project-list-item-fixture-project-desktop-surface').click();
+  await expect(page.getByTestId('project-workspace-overview')).toBeVisible();
+}
 
 /**
  * Fetch the overview read model that owns provider session details.
@@ -128,13 +141,40 @@ test('sidebar text shows both fixture labels', async ({ page }) => {
   });
 });
 
-test('project overview session link loads Codex history instead of empty state', async ({ page }) => {
+test('project overview terminal session renders the clicked session history instead of the newest session', async ({ page }) => {
   await page.goto('/', { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: /^fixture-project\b/i }).first().click();
-  await expect(page.locator('[data-testid="project-overview-manual-sessions"]')).toBeVisible();
-  await page.getByRole('button', { name: /fixture-project manu/ }).first().click();
+  const overview = await fetchFixtureProjectOverview(page);
+  expect(overview.ok).toBe(true);
+  expect((overview.overview?.codexSessions || []).map((session) => session.id)).toContain('fixture-project-manual-session');
+
+  await openFixtureProjectOverview(page);
+
+  const manualSessionsPanel = page.getByTestId('project-overview-manual-sessions');
+  await expect(manualSessionsPanel).toBeVisible();
+  await manualSessionsPanel.getByRole('button', { name: /fixture-project manu/ }).first().click();
+  await expect(page).toHaveURL(/\/c1$/);
+  await expect(page).not.toHaveURL(/terminalLaunchCommand|terminalSessionId/);
+  await expect(page.getByTestId('tab-shell')).toHaveAttribute('aria-pressed', 'true');
+  fs.mkdirSync(CLEAN_SESSION_ROUTE_SCREENSHOT_DIR, { recursive: true });
+  await page.screenshot({
+    path: path.join(CLEAN_SESSION_ROUTE_SCREENSHOT_DIR, 'session-card-clean-c-route.png'),
+    fullPage: true,
+  });
+
+  const messagesResponse = page.waitForResponse(
+    (response) => response.url().includes('/sessions/c1/messages') && response.status() === 200,
+    { timeout: 10_000 },
+  );
+  await page.getByTestId('tab-chat').click();
+  await messagesResponse;
+
   await expect(page.locator('body')).toContainText('fixture-project manual-only session');
   await expect(page.locator('body')).not.toContainText('继续您的对话');
+  fs.mkdirSync(TERMINAL_RENDER_DEBUG_SCREENSHOT_DIR, { recursive: true });
+  await page.screenshot({
+    path: path.join(TERMINAL_RENDER_DEBUG_SCREENSHOT_DIR, 'terminal-session-rendered-history.png'),
+    fullPage: true,
+  });
 });
 
 test('project overview manual session card shows CLI first request title', async ({ page }) => {
