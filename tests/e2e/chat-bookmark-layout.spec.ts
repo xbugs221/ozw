@@ -39,7 +39,7 @@ async function openBookmarkFixture(page) {
   await expect(page.getByTestId('tab-chat')).toBeVisible();
   await page.getByTestId('tab-chat').click();
   await expect(page.getByTestId('chat-rendered-snapshot-pane')).toBeVisible();
-  await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 30');
+  await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 80');
 }
 
 /**

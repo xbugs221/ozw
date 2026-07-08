@@ -30,8 +30,9 @@ import { buildChatTuiSessionKey } from '../tui/chatTuiSessionKey';
 import {
   applyUserRenderSnapshot,
   createInitialRenderSnapshotState,
+  type RenderSnapshotMessage,
 } from '../session/renderSnapshotController';
-import { loadSessionMessagesInPages } from '../session/sessionBulkMessageLoader';
+import { SESSION_BULK_MESSAGE_PAGE_SIZE } from '../session/sessionBulkMessageLoader';
 import { useChatSearchNavigation } from './chatInterfaceSearchNavigation';
 import { useChatStatusReconcile } from './chatInterfaceStatusReconcile';
 
@@ -133,6 +134,7 @@ function ChatInterface({
   const tuiTerminalInputRef = useRef<TuiTerminalInputSender | null>(null);
   const tuiUploadInputRef = useRef<HTMLInputElement>(null);
   const renderedSnapshotTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const renderedSnapshotScrollContainerRef = useRef<HTMLDivElement>(null);
   const [workflowTurnOutcomes, setWorkflowTurnOutcomes] = useState<Record<string, 'completed' | 'failed'>>({});
   const [isFollowingLatest, setIsFollowingLatest] = useState(false);
   const [searchHighlightRetry, setSearchHighlightRetry] = useState(0);
@@ -149,6 +151,14 @@ function ChatInterface({
       streamTimerRef.current = null;
     }
     streamBufferRef.current = '';
+  }, []);
+
+  const ignoreRenderedSnapshotHistoryScroll = useCallback(() => {
+    /**
+     * PURPOSE: Rendered snapshots have their own fixed message window; binding
+     * main-session scroll prefetch here would turn first paint into background
+     * history scanning again.
+     */
   }, []);
 
   const {
@@ -321,6 +331,7 @@ function ChatInterface({
       const projectName = selectedSession?.__projectName || selectedProject?.name || '';
       const sessionId = getSessionLoadId(selectedSession) || currentSessionId || '';
       const projectPath = selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '';
+      const snapshotProvider = effectiveProvider === 'pi' ? 'pi' : 'codex';
       if (!projectName || !sessionId) {
         setRenderSnapshotState((previous) =>
           applyUserRenderSnapshot(previous, {
@@ -331,17 +342,39 @@ function ChatInterface({
         return;
       }
 
-      const { messages } = await loadSessionMessagesInPages({
-        sessionMessages: api.sessionMessages,
+      const loadedWindow = visibleMessages.length > 0
+        ? visibleMessages
+        : chatMessages.slice(-SESSION_BULK_MESSAGE_PAGE_SIZE);
+      if (loadedWindow.length > 0) {
+        setRenderSnapshotState((previous) =>
+          applyUserRenderSnapshot(previous, {
+            messages: loadedWindow as RenderSnapshotMessage[],
+            loadedAt: new Date().toISOString(),
+          }),
+        );
+        return;
+      }
+
+      const response = await api.sessionMessages(
         projectName,
         sessionId,
-        provider: effectiveProvider === 'pi' ? 'pi' : 'codex',
+        SESSION_BULK_MESSAGE_PAGE_SIZE,
+        0,
+        snapshotProvider,
+        null,
+        null,
         projectPath,
-      });
-      const snapshotMessages = convertSessionMessages(Array.isArray(messages) ? messages : []);
+      );
+      if (!response.ok) {
+        throw new Error('Failed to load render snapshot bootstrap messages');
+      }
+
+      const data = await response.json();
+      const messages = Array.isArray(data?.messages) ? data.messages : (Array.isArray(data) ? data : []);
+      const snapshotMessages = convertSessionMessages(messages) as RenderSnapshotMessage[];
       setRenderSnapshotState((previous) =>
         applyUserRenderSnapshot(previous, {
-          messages: snapshotMessages as any[],
+          messages: snapshotMessages,
           loadedAt: new Date().toISOString(),
         }),
       );
@@ -352,11 +385,13 @@ function ChatInterface({
   }, [
     currentSessionId,
     effectiveProvider,
+    chatMessages,
     onRenderSnapshotLoadingChange,
     selectedProject?.fullPath,
     selectedProject?.name,
     selectedProject?.path,
     selectedSession,
+    visibleMessages,
   ]);
 
   useEffect(() => {
@@ -393,8 +428,12 @@ function ChatInterface({
 
     let secondFrameId: number | null = null;
     const focusTail = () => {
-      scrollToBottom();
-      scrollContainerRef.current?.focus({ preventScroll: true });
+      const container = renderedSnapshotScrollContainerRef.current;
+      if (!container) {
+        return;
+      }
+      container.scrollTop = container.scrollHeight;
+      container.focus({ preventScroll: true });
     };
     const firstFrameId = window.requestAnimationFrame(() => {
       focusTail();
@@ -411,8 +450,6 @@ function ChatInterface({
     renderSnapshotState.mode,
     renderSnapshotState.snapshotMessages.length,
     renderSnapshotState.snapshotVersion,
-    scrollContainerRef,
-    scrollToBottom,
   ]);
 
   const handleTuiTerminalInputReady = useCallback((sendInput: TuiTerminalInputSender | null) => {
@@ -1025,11 +1062,11 @@ function ChatInterface({
                 placement="floating"
               />
               <ChatMessagesPane
-            scrollContainerRef={scrollContainerRef}
-            onWheel={handleWheel}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onKeyDown={handleTranscriptKeyDown}
+            scrollContainerRef={renderedSnapshotScrollContainerRef}
+            onWheel={ignoreRenderedSnapshotHistoryScroll}
+            onTouchStart={ignoreRenderedSnapshotHistoryScroll}
+            onTouchMove={ignoreRenderedSnapshotHistoryScroll}
+            onKeyDown={ignoreRenderedSnapshotHistoryScroll}
             isLoadingSessionMessages={isLoadingSessionMessages}
             sessionMessagesError={sessionMessagesError}
             chatMessages={renderSnapshotState.snapshotMessages as any[]}

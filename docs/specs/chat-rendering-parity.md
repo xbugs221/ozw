@@ -11,6 +11,7 @@
 | 回复正文开始后折叠非正文内容 | 工具调用及其间的过程说明进入 turn 级折叠组，纯工具调用合并为工具次数折叠组 | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `ChatMessage` 字段组合和 turn display block 构建入口 | `buildTurnDisplayBlocks`、`ChatMessagesPane`、`TurnNonBodyGroup` | 正文出现后非正文组默认折叠，正文直接可见；工具调用前后夹杂的过程说明也折叠；仅 live 执行默认展开，历史或非 live 执行默认折叠；纯工具块只显示“工具调用N次”汇总按钮，展开后平铺工具卡且不重复 Codex/时间戳；子任务步骤不显示具体工具类型 | 浏览器截图证据保留在对应归档提案中，长期规格测试固定核心状态合同 |
 | Codex/Pi 聊天默认 TUI-first | 打开会话先显示终端 TUI，渲染视图由用户主动触发 | `tests/specs/chat-tui-session-boundary.spec.ts` | 真实聊天入口源码和 TUI session key 模块 | `ChatInterface`、`chatTuiSessionKey`、`shell-websocket` | 默认可进入 TUI 面板；提供渲染快照和返回 TUI 入口；TUI 会话键区分 Provider 与 route/provider session 身份 | 真实浏览器截图证据保留在对应归档提案中 |
 | JSONL 渲染视图是冻结快照 | 点击渲染读取一次，自动刷新事件不改写快照 | `tests/specs/chat-render-snapshot-controller.spec.ts` | 生产 `renderSnapshotController` 纯逻辑 | `renderSnapshotController`、`sessionRuntimeController` | 默认模式为 TUI；点击渲染生成 snapshot version；`projects_updated`、`codex-complete`、`pi-complete`、`externalMessageUpdate` 不自动刷新；重新渲染才替换快照 | Provider JSONL flush 延迟只影响用户点击当刻可读内容 |
+| JSONL Render 快照首屏 tail-first | 长会话渲染快照先展示最新可见 transcript | `tests/specs/chat-performance-boundary.spec.ts` | 真实聊天入口源码和渲染快照状态 | `ChatInterface`、`renderSnapshotController` | Render 只复用已加载可见窗口或请求 offset 0 的首屏一页；不默认启动后台旧历史 hydration；快照滚动容器不绑定主会话历史预取 | 真实 c8 浏览器截图和网络证据保留在归档提案中 |
 
 ### 需求：Codex live assistant 不显示冗余元信息
 
@@ -94,6 +95,16 @@
 - 并且只有用户再次点击“重新渲染”才允许重新读取 JSONL 并替换 snapshot
 - 并且返回 TUI 不得清空已有 snapshot，也不得改变终端会话键
 
+#### 场景：长会话 Render 快照先显示最新可见内容
+
+- 给定用户正在查看一个长会话并点击“渲染”
+- 当当前会话已经有可见消息窗口
+- 那么 rendered snapshot 必须复用这个可见窗口作为首屏内容
+- 当当前页面没有已加载消息窗口但存在持久会话
+- 那么 rendered snapshot 只能请求最新首屏页并从 offset 0 启动
+- 并且不得默认调度旧历史后台 hydration 循环
+- 并且 rendered snapshot 的滚动容器不得触发主会话历史预取逻辑
+
 ## 契约测试
 
 ### `tests/specs/chat-rendering-parity.spec.tsx`
@@ -114,3 +125,9 @@
 - 覆盖核心业务契约：默认 TUI 模式、用户渲染生成冻结 snapshot、自动刷新事件不改写 snapshot、重新渲染才增加版本、返回 TUI 保留会话键。
 - 真实数据来源：生产 `renderSnapshotController` 纯逻辑。
 - 入口路径：`pnpm exec tsx --test tests/specs/chat-render-snapshot-controller.spec.ts`
+
+### `tests/specs/chat-performance-boundary.spec.ts`
+
+- 覆盖核心业务契约：Render 快照首屏复用可见窗口或最新一页，不默认后台分页旧历史，且快照滚动容器不触发主会话历史预取。
+- 真实数据来源：生产 `ChatInterface` 源码和长会话性能边界。
+- 入口路径：`pnpm exec tsx --test tests/specs/chat-performance-boundary.spec.ts`

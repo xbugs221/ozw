@@ -72,7 +72,7 @@ test('chat transcript implementation uses measured continuous virtual ranges', (
   assert.match(source, /data-virtualized="true"/);
   assert.match(source, /data-render-window-size=\{maxRenderedTranscriptMessages\}/);
   assert.match(layoutController, /calculateTranscriptVirtualRange/);
-  assert.match(layoutController, /buildTurnDisplayBlocks\(visibleMessages\)/);
+  assert.match(layoutController, /buildTurnDisplayBlocks\(visibleMessages(?:,\s*\{[^)]*\})?\)/);
   assert.match(layoutController, /displayBlockKeys/);
   assert.doesNotMatch(layoutController, /buildTurnDisplayBlocks\(virtualMessages\)/);
   assert.doesNotMatch(source, /visibleMessages\.slice\(-MAX_RENDERED_TRANSCRIPT_MESSAGES\)/);

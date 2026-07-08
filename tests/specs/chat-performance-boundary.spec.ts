@@ -1,6 +1,6 @@
 /**
  * 文件目的：规格级保护长会话加载、项目刷新和 UI 性能边界。
- * Sources: 2026-06-18-29-收敛核心架构债和性能边界, 2026-06-29-35-提前预取更早会话历史
+ * Sources: 2026-06-18-29-收敛核心架构债和性能边界, 2026-06-29-35-提前预取更早会话历史, 2026-07-09-38-优化-render-长会话首屏
  */
 import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
@@ -142,4 +142,17 @@ test('frozen transcript tail survives prepending fallback-key messages', () => {
   ];
 
   assert.deepEqual(buildVisibleMessageWindow(messages, 3, frozenTailKey), messages.slice(0, 3));
+});
+
+test('render snapshot bootstrap stays tail-first and does not start default history hydration', async () => {
+  /** Render 快照首屏只能取已加载窗口或首屏一页，不能默认后台扫描完整旧历史。 */
+  const chatInterface = await readRepoFile('frontend/components/chat/view/ChatInterface.tsx');
+  const renderSnapshotBlock = extractFunctionBody(chatInterface, 'const handleRenderSnapshot');
+
+  assert.match(renderSnapshotBlock, /visibleMessages\.length > 0/);
+  assert.match(renderSnapshotBlock, /chatMessages\.slice\(-SESSION_BULK_MESSAGE_PAGE_SIZE\)/);
+  assert.match(renderSnapshotBlock, /api\.sessionMessages\([\s\S]*SESSION_BULK_MESSAGE_PAGE_SIZE,[\s\S]*0,/);
+  assert.equal(/loadSessionMessagesInPages|hydrateRenderSnapshot|scheduleRenderSnapshotHydration/.test(chatInterface), false);
+  assert.match(chatInterface, /ignoreRenderedSnapshotHistoryScroll/);
+  assert.match(chatInterface, /scrollContainerRef=\{renderedSnapshotScrollContainerRef\}/);
 });
