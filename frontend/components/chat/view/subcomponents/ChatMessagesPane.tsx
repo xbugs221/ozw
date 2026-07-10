@@ -58,10 +58,10 @@ function isActiveWorkflowChildSession(project: Project, session: ProjectSession 
 
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
-  onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
-  onTouchStart: (event: ReactTouchEvent<HTMLDivElement>) => void;
-  onTouchMove: (event: ReactTouchEvent<HTMLDivElement>) => void;
-  onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  onWheel?: (event: ReactWheelEvent<HTMLDivElement>) => void;
+  onTouchStart?: (event: ReactTouchEvent<HTMLDivElement>) => void;
+  onTouchMove?: (event: ReactTouchEvent<HTMLDivElement>) => void;
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   isLoadingSessionMessages: boolean;
   sessionMessagesError: string | null;
   chatMessages: ChatMessage[];
@@ -97,6 +97,7 @@ interface ChatMessagesPaneProps {
   isFollowingLatest: boolean;
   selectedProject: Project;
   scrollTargetMessageKey?: string | null;
+  onTranscriptScroll?: (container: HTMLDivElement) => void;
 }
 
 export default function ChatMessagesPane({
@@ -140,6 +141,7 @@ export default function ChatMessagesPane({
   isFollowingLatest,
   selectedProject,
   scrollTargetMessageKey,
+  onTranscriptScroll,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
   const renderedMessageCount = chatMessages.length;
@@ -171,7 +173,11 @@ export default function ChatMessagesPane({
       data-testid="chat-scroll-container"
       data-virtualized="true"
       data-render-window-size={maxRenderedTranscriptMessages}
-      onScroll={handleScroll}
+      onScroll={(event) => {
+        /** Keep virtual layout measurement and the owning history controller in sync. */
+        handleScroll(event);
+        onTranscriptScroll?.(event.currentTarget);
+      }}
       onWheel={onWheel}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}

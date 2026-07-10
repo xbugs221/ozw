@@ -1412,14 +1412,15 @@ export function useChatSessionState({
         }
 
         const loadedCount = result.messages.length;
-        if (loadedCount === 0) {
+        const nextOffset = result.nextRawLineOffset ?? (currentOffset + loadedCount);
+        if (nextOffset <= currentOffset) {
           setHasMoreMessages(false);
           allMessagesLoadedRef.current = true;
           setAllMessagesLoaded(true);
           return false;
         }
 
-        messagesOffsetRef.current = result.nextRawLineOffset ?? (currentOffset + loadedCount);
+        messagesOffsetRef.current = nextOffset;
         setTotalMessages(result.total > 0 ? result.total : messagesOffsetRef.current);
         const moreAvailable = result.total > 0
           ? result.total > messagesOffsetRef.current

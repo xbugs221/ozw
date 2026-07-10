@@ -315,10 +315,10 @@ test('Codex WS add/update 文件变更 JSON 字符串不会作为 assistant raw 
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'codex-after-ws-json.png'), fullPage: true });
 });
 
-test('Codex 渲染快照会分页加载完整长会话历史', async ({ page }) => {
+test('Codex 渲染快照按视口展示尾页且不自动扫描完整历史', async ({ page }) => {
   /**
-   * 业务场景：用户在 Codex TUI 会话中点击顶部消息 Tab，期望看到完整历史快照。
-   * 失败含义：如果这里失败，渲染快照仍只读取首个 100 条分页窗口。
+   * 业务场景：用户点击顶部消息 Tab 后先看到最新页，旧历史只随上翻读取。
+   * 失败含义：Render 又在首屏后台扫描完整历史，或丢失最新消息。
    */
   const sessionId = 'proposal-75-codex-full-render-snapshot';
   await writeLongCodexRenderSession(sessionId, 130);
@@ -329,6 +329,11 @@ test('Codex 渲染快照会分页加载完整长会话历史', async ({ page }) 
   });
   await page.goto(`/session/${sessionId}?${params.toString()}`, { waitUntil: 'networkidle' });
   await expect(page.getByTestId('tab-chat')).toBeVisible();
+  const messageRequests: string[] = [];
+  page.on('request', (request) => {
+    /** Record real message requests without replacing backend responses. */
+    if (new URL(request.url()).pathname.includes('/messages')) messageRequests.push(request.url());
+  });
 
   await page.getByTestId('tab-chat').click();
 
@@ -337,8 +342,12 @@ test('Codex 渲染快照会分页加载完整长会话历史', async ({ page }) 
   await expect(snapshotPane).toBeVisible();
   await expect(page.getByTestId('chat-return-tui-button')).toHaveCount(0);
   await expect(page.getByTestId('chat-rerender-snapshot-button')).toHaveCount(0);
-  await expect(chat).toContainText('Codex full render snapshot turn 001');
   await expect(chat).toContainText('Codex full render snapshot turn 130');
+  await expect(chat).not.toContainText('Codex full render snapshot turn 001');
+  const settledRequestCount = messageRequests.length;
+  await page.waitForTimeout(500);
+  expect(messageRequests.length).toBe(settledRequestCount);
+  expect(messageRequests.every((url) => Number(new URL(url).searchParams.get('limit')) <= 50)).toBe(true);
   await expect.poll(async () => chat.evaluate((element) => (
     element.scrollHeight - element.scrollTop - element.clientHeight
   ))).toBeLessThan(8);

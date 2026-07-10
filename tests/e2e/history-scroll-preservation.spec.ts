@@ -140,7 +140,7 @@ test('opening a long history session does not silently load the full transcript'
   });
 
   expect(unboundedRequests).toEqual([]);
-  expect(messageRequests.some((url) => new URL(url).searchParams.get('limit') === '100')).toBe(true);
+  expect(messageRequests.some((url) => new URL(url).searchParams.get('limit') === '50')).toBe(true);
 });
 
 test('scrolling into the history prefetch zone loads older messages before the top', async ({ page }) => {
@@ -151,14 +151,15 @@ test('scrolling into the history prefetch zone loads older messages before the t
   });
 
   await page.goto(`/session/${HISTORY_SCROLL_SESSION_ID}`, { waitUntil: 'networkidle' });
+  await page.getByTestId('tab-chat').click();
   await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 80');
 
   const scrollContainer = page.getByTestId('chat-scroll-container');
   const olderPageRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname.includes('/messages')
-      && url.searchParams.get('limit') === '100'
-      && Number(url.searchParams.get('offset')) >= 100;
+      && url.searchParams.get('limit') === '50'
+      && Number(url.searchParams.get('offset')) >= 50;
   }, { timeout: 5000 });
   const targetScrollTop = await scrollContainer.evaluate((element) => {
     const scrollableDistance = Math.max(0, element.scrollHeight - element.clientHeight);
@@ -193,8 +194,8 @@ test('scrolling into the history prefetch zone loads older messages before the t
     domMessageCount: document.querySelectorAll('.chat-message').length,
   }));
   const requestedUrl = new URL(request.url());
-  expect(requestedUrl.searchParams.get('limit')).toBe('100');
-  expect(Number(requestedUrl.searchParams.get('offset'))).toBeGreaterThanOrEqual(100);
+  expect(requestedUrl.searchParams.get('limit')).toBe('50');
+  expect(Number(requestedUrl.searchParams.get('offset'))).toBeGreaterThanOrEqual(50);
   expect(messageRequests.every((url) => {
     const parsedUrl = new URL(url);
     return parsedUrl.searchParams.has('limit') || parsedUrl.searchParams.has('afterLine');
@@ -226,6 +227,7 @@ test('1000+ mixed long session keeps DOM bounded and search reveals offscreen ta
   });
 
   await page.goto(`/session/${MIXED_LONG_SESSION_ID}`, { waitUntil: 'networkidle' });
+  await page.getByTestId('tab-chat').click();
   await expect(page.locator('body')).toContainText('mixed long virtual history turn 1050');
 
   const unboundedRequests = messageRequests.filter((url) => {

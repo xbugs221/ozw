@@ -49,6 +49,29 @@ it('sessionBulkMessageLoader follows backend raw-line offsets', async () => {
   expect(result.messages).toEqual(['older-line-735', 'older-line-829', 'newer-line-835', 'newer-line-932']);
 });
 
+it('sessionBulkMessageLoader crosses an empty display page when the raw cursor advances', async () => {
+  /** A fully filtered JSONL window must not hide visible messages on an older page. */
+  const offsets: number[] = [];
+  const result = await loadSessionMessagesInPages({
+    sessionMessages: async (_projectName, _sessionId, _limit, offset) => {
+      offsets.push(offset);
+      const page = offset === 0
+        ? { messages: ['newest-visible'], total: 103, hasMore: true, nextRawLineOffset: 50 }
+        : offset === 50
+          ? { messages: [], total: 103, hasMore: true, nextRawLineOffset: 100 }
+          : { messages: ['oldest-visible'], total: 103, hasMore: false, nextRawLineOffset: 103 };
+      return new Response(JSON.stringify(page), { status: 200 });
+    },
+    projectName: 'history-scroll',
+    sessionId: 'fixture-filtered-window-session',
+    provider: 'codex',
+    pageSize: 50,
+  });
+
+  expect(offsets).toEqual([0, 50, 100]);
+  expect(result.messages).toEqual(['oldest-visible', 'newest-visible']);
+});
+
 it('composerSubmitRuntime blocks empty sends and builds pending messages', () => {
   /** 空消息且无附件时必须阻止提交，有内容时创建 pending 用户消息。 */
   expect(resolveSubmitDisabledReason({ message: '   ', attachmentCount: 0 })).toBe('empty');

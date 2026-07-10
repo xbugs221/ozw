@@ -144,15 +144,21 @@ test('frozen transcript tail survives prepending fallback-key messages', () => {
   assert.deepEqual(buildVisibleMessageWindow(messages, 3, frozenTailKey), messages.slice(0, 3));
 });
 
-test('render snapshot bootstrap stays tail-first and does not start default history hydration', async () => {
-  /** Render 快照首屏只能取已加载窗口或首屏一页，不能默认后台扫描完整旧历史。 */
+test('render snapshot uses viewport budget and only pages inside the reserve zone', async () => {
+  /** Render 快照首屏按视口收敛，用户进入预留区后才读取一页旧历史。 */
   const chatInterface = await readRepoFile('frontend/components/chat/view/ChatInterface.tsx');
   const renderSnapshotBlock = extractFunctionBody(chatInterface, 'const handleRenderSnapshot');
 
   assert.match(renderSnapshotBlock, /visibleMessages\.length > 0/);
-  assert.match(renderSnapshotBlock, /chatMessages\.slice\(-SESSION_BULK_MESSAGE_PAGE_SIZE\)/);
+  assert.match(renderSnapshotBlock, /selectRenderSnapshotFileTail/);
   assert.match(renderSnapshotBlock, /api\.sessionMessages\([\s\S]*SESSION_BULK_MESSAGE_PAGE_SIZE,[\s\S]*0,/);
   assert.equal(/loadSessionMessagesInPages|hydrateRenderSnapshot|scheduleRenderSnapshotHydration/.test(chatInterface), false);
-  assert.match(chatInterface, /ignoreRenderedSnapshotHistoryScroll/);
+  assert.match(chatInterface, /RENDER_SNAPSHOT_TARGET_VIEWPORTS/);
+  assert.match(chatInterface, /loadOlderRenderSnapshotHistory/);
+  assert.match(chatInterface, /container\.scrollTop <= container\.clientHeight/);
+  assert.match(chatInterface, /captureSessionScrollSnapshot/);
+  assert.match(chatInterface, /restoreSessionScrollTop/);
+  assert.match(chatInterface, /onTranscriptScroll=\{handleRenderedSnapshotScroll\}/);
+  assert.doesNotMatch(chatInterface, /ignoreRenderedSnapshotHistoryScroll/);
   assert.match(chatInterface, /scrollContainerRef=\{renderedSnapshotScrollContainerRef\}/);
 });

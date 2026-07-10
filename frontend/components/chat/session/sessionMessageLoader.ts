@@ -2,7 +2,7 @@
  * PURPOSE: Own chat session message loading request shapes without mutating UI state.
  */
 
-export const SESSION_MESSAGES_PER_PAGE = 100;
+export const SESSION_MESSAGES_PER_PAGE = 50;
 
 export interface SessionMessageWindow {
   limit: number | null;

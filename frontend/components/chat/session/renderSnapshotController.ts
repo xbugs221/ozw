@@ -15,6 +15,10 @@ export type RenderSnapshotState = {
   snapshotVersion: number;
   snapshotMessages: RenderSnapshotMessage[];
   loadedAt: string | null;
+  nextHistoryOffset: number;
+  hasMoreHistory: boolean;
+  historyRevision: number;
+  isLoadingHistory: boolean;
 };
 
 const AUTO_REFRESH_EVENTS = new Set([
@@ -37,6 +41,10 @@ export function createInitialRenderSnapshotState(input: { tuiSessionKey: string 
     snapshotVersion: 0,
     snapshotMessages: [],
     loadedAt: null,
+    nextHistoryOffset: 0,
+    hasMoreHistory: false,
+    historyRevision: 0,
+    isLoadingHistory: false,
   };
 }
 
@@ -49,7 +57,12 @@ export function createInitialRenderSnapshotState(input: { tuiSessionKey: string 
  */
 export function applyUserRenderSnapshot(
   state: RenderSnapshotState,
-  input: { messages: RenderSnapshotMessage[]; loadedAt: string },
+  input: {
+    messages: RenderSnapshotMessage[];
+    loadedAt: string;
+    nextHistoryOffset?: number;
+    hasMoreHistory?: boolean;
+  },
 ): RenderSnapshotState {
   return {
     ...state,
@@ -57,6 +70,75 @@ export function applyUserRenderSnapshot(
     snapshotVersion: state.snapshotVersion + 1,
     snapshotMessages: [...input.messages],
     loadedAt: input.loadedAt,
+    nextHistoryOffset: input.nextHistoryOffset ?? input.messages.length,
+    hasMoreHistory: input.hasMoreHistory ?? false,
+    historyRevision: 0,
+    isLoadingHistory: false,
+  };
+}
+
+/**
+ * Replace the prepared viewport window without treating layout calibration as
+ * a new user render.
+ */
+export function replaceRenderSnapshotMessages(
+  state: RenderSnapshotState,
+  messages: RenderSnapshotMessage[],
+): RenderSnapshotState {
+  /** Keep the frozen snapshot version stable while the viewport budget settles. */
+  return { ...state, snapshotMessages: [...messages] };
+}
+
+/**
+ * Replace the measured viewport budget and persist the bounded raw-page cursor.
+ */
+export function replaceRenderSnapshotBudget(
+  state: RenderSnapshotState,
+  input: {
+    messages: RenderSnapshotMessage[];
+    nextHistoryOffset: number;
+    hasMoreHistory: boolean;
+  },
+): RenderSnapshotState {
+  /** Keep calibration metadata aligned with every additional bounded raw page. */
+  return {
+    ...state,
+    snapshotMessages: [...input.messages],
+    nextHistoryOffset: input.nextHistoryOffset,
+    hasMoreHistory: input.hasMoreHistory,
+  };
+}
+
+/**
+ * Mark a bounded older-history request as running or settled.
+ */
+export function setRenderSnapshotHistoryLoading(
+  state: RenderSnapshotState,
+  isLoadingHistory: boolean,
+): RenderSnapshotState {
+  /** Expose Render-owned loading state without borrowing the hidden TUI state. */
+  return { ...state, isLoadingHistory };
+}
+
+/**
+ * Prepend one user-requested logical history page and advance its raw cursor.
+ */
+export function prependRenderSnapshotHistory(
+  state: RenderSnapshotState,
+  input: {
+    messages: RenderSnapshotMessage[];
+    nextHistoryOffset: number;
+    hasMoreHistory: boolean;
+  },
+): RenderSnapshotState {
+  /** User navigation revises history while leaving the frozen tail version intact. */
+  return {
+    ...state,
+    snapshotMessages: [...input.messages, ...state.snapshotMessages],
+    nextHistoryOffset: input.nextHistoryOffset,
+    hasMoreHistory: input.hasMoreHistory,
+    historyRevision: state.historyRevision + 1,
+    isLoadingHistory: false,
   };
 }
 

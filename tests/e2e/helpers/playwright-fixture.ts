@@ -82,6 +82,27 @@ const FIXTURE_PROJECT_EXTRA_SESSIONS = [
     messagePairs: 1050,
     baseTimestamp: '2026-04-17T08:00:00.000Z',
   },
+  {
+    projectLabel: 'history-scroll',
+    sessionId: 'fixture-folded-bootstrap-session',
+    userMessage: 'folded bootstrap fixture',
+    baseTimestamp: '2026-04-16T08:00:00.000Z',
+    foldedLongTurn: true,
+  },
+  {
+    projectLabel: 'history-scroll',
+    sessionId: 'fixture-filtered-window-session',
+    userMessage: 'filtered window fixture',
+    baseTimestamp: '2026-04-15T08:00:00.000Z',
+    filteredWindow: true,
+  },
+  {
+    projectLabel: 'history-scroll',
+    sessionId: 'fixture-filtered-tail-session',
+    userMessage: 'filtered tail fixture',
+    baseTimestamp: '2026-04-14T08:00:00.000Z',
+    filteredTail: true,
+  },
 ];
 
 /**
@@ -328,6 +349,190 @@ function writeCodexSessionFixture(projectPath, sessionId, userMessage, messagePa
   fs.writeFileSync(sessionPath, `${sessionLines.join('\n')}\n`, 'utf8');
 }
 
+/**
+ * Write one turn whose folded tool rows consume more than the newest raw page.
+ * @param {string} projectPath - Absolute project path.
+ * @param {string} sessionId - Synthetic session ID.
+ * @param {string} baseTimestamp - Stable fixture timestamp.
+ */
+function writeFoldedBootstrapSessionFixture(projectPath, sessionId, baseTimestamp) {
+  /** The newest 50 JSONL rows intentionally contain no turn boundary. */
+  const sessionDir = path.join(FIXTURE_ROOT, '.codex', 'sessions', '2026', '04', '19');
+  const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
+  const baseTime = new Date(baseTimestamp).getTime();
+  const sessionLines = [JSON.stringify({
+    type: 'session_meta',
+    timestamp: baseTimestamp,
+    payload: { id: sessionId, cwd: projectPath, model: 'gpt-5-codex' },
+  })];
+
+  for (let index = 0; index < 30; index += 1) {
+    sessionLines.push(JSON.stringify({
+      type: 'event_msg',
+      timestamp: new Date(baseTime - 60000 + index * 1000).toISOString(),
+      payload: { type: 'user_message', message: `folded bootstrap older user ${index + 1}` },
+    }));
+    sessionLines.push(JSON.stringify({
+      type: 'response_item',
+      timestamp: new Date(baseTime - 59500 + index * 1000).toISOString(),
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: `folded bootstrap older assistant ${index + 1}` }],
+      },
+    }));
+  }
+
+  sessionLines.push(JSON.stringify({
+    type: 'event_msg',
+    timestamp: new Date(baseTime + 1000).toISOString(),
+    payload: { type: 'user_message', message: 'folded bootstrap fixture user turn' },
+  }));
+
+  for (let index = 0; index < 60; index += 1) {
+    const callId = `${sessionId}-tool-${index + 1}`;
+    sessionLines.push(JSON.stringify({
+      type: 'response_item',
+      timestamp: new Date(baseTime + 2000 + index * 2000).toISOString(),
+      payload: {
+        type: 'function_call',
+        call_id: callId,
+        name: 'exec_command',
+        arguments: JSON.stringify({ command: `folded bootstrap command ${index + 1}` }),
+      },
+    }));
+    sessionLines.push(JSON.stringify({
+      type: 'response_item',
+      timestamp: new Date(baseTime + 3000 + index * 2000).toISOString(),
+      payload: {
+        type: 'function_call_output',
+        call_id: callId,
+        output: `folded bootstrap output ${index + 1}`,
+      },
+    }));
+  }
+  sessionLines.push(JSON.stringify({
+    type: 'response_item',
+    timestamp: new Date(baseTime + 123000).toISOString(),
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'output_text', text: 'folded bootstrap latest assistant message' }],
+    },
+  }));
+
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(sessionPath, `${sessionLines.join('\n')}\n`, 'utf8');
+}
+
+/**
+ * Write a transcript with one fully filtered raw page between visible history pages.
+ * @param {string} projectPath - Absolute project path.
+ * @param {string} sessionId - Synthetic session ID.
+ * @param {string} baseTimestamp - Stable fixture timestamp.
+ */
+function writeFilteredWindowSessionFixture(projectPath, sessionId, baseTimestamp) {
+  /** Raw lines 4-53 are routine task_complete records and intentionally map to no UI rows. */
+  const sessionDir = path.join(FIXTURE_ROOT, '.codex', 'sessions', '2026', '04', '19');
+  const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
+  const baseTime = new Date(baseTimestamp).getTime();
+  const sessionLines = [JSON.stringify({
+    type: 'session_meta',
+    timestamp: baseTimestamp,
+    payload: { id: sessionId, cwd: projectPath, model: 'gpt-5-codex' },
+  }), JSON.stringify({
+    type: 'event_msg',
+    timestamp: new Date(baseTime + 1000).toISOString(),
+    payload: { type: 'user_message', message: 'filtered window oldest user target' },
+  }), JSON.stringify({
+    type: 'response_item',
+    timestamp: new Date(baseTime + 2000).toISOString(),
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'output_text', text: 'filtered window oldest assistant target' }],
+    },
+  })];
+
+  for (let index = 0; index < 50; index += 1) {
+    sessionLines.push(JSON.stringify({
+      type: 'event_msg',
+      timestamp: new Date(baseTime + 3000 + index * 1000).toISOString(),
+      payload: {
+        type: 'task_complete',
+        turn_id: `routine-filtered-turn-${index + 1}`,
+        last_agent_message: `routine filtered completion ${index + 1}`,
+      },
+    }));
+  }
+
+  for (let index = 0; index < 25; index += 1) {
+    const turn = index + 1;
+    sessionLines.push(JSON.stringify({
+      type: 'event_msg',
+      timestamp: new Date(baseTime + 53000 + index * 2000).toISOString(),
+      payload: { type: 'user_message', message: `filtered window newest user ${turn}` },
+    }));
+    sessionLines.push(JSON.stringify({
+      type: 'response_item',
+      timestamp: new Date(baseTime + 54000 + index * 2000).toISOString(),
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: `filtered window newest assistant ${turn}` }],
+      },
+    }));
+  }
+
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(sessionPath, `${sessionLines.join('\n')}\n`, 'utf8');
+}
+
+/**
+ * Write a transcript whose newest raw page contains no displayable messages.
+ * @param {string} projectPath - Absolute project path.
+ * @param {string} sessionId - Synthetic session ID.
+ * @param {string} baseTimestamp - Stable fixture timestamp.
+ */
+function writeFilteredTailSessionFixture(projectPath, sessionId, baseTimestamp) {
+  /** Offset zero consumes 50 routine task completions before offset 50 reaches visible history. */
+  const sessionDir = path.join(FIXTURE_ROOT, '.codex', 'sessions', '2026', '04', '19');
+  const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
+  const baseTime = new Date(baseTimestamp).getTime();
+  const sessionLines = [JSON.stringify({
+    type: 'session_meta',
+    timestamp: baseTimestamp,
+    payload: { id: sessionId, cwd: projectPath, model: 'gpt-5-codex' },
+  }), JSON.stringify({
+    type: 'event_msg',
+    timestamp: new Date(baseTime + 1000).toISOString(),
+    payload: { type: 'user_message', message: 'filtered tail visible user target' },
+  }), JSON.stringify({
+    type: 'response_item',
+    timestamp: new Date(baseTime + 2000).toISOString(),
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'output_text', text: 'filtered tail visible assistant target' }],
+    },
+  })];
+
+  for (let index = 0; index < 50; index += 1) {
+    sessionLines.push(JSON.stringify({
+      type: 'event_msg',
+      timestamp: new Date(baseTime + 3000 + index * 1000).toISOString(),
+      payload: {
+        type: 'task_complete',
+        turn_id: `routine-tail-turn-${index + 1}`,
+        last_agent_message: `routine tail completion ${index + 1}`,
+      },
+    }));
+  }
+
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(sessionPath, `${sessionLines.join('\n')}\n`, 'utf8');
+}
+
 function writeManualProjectConfigFixture() {
   const legacyConfigPath = path.join(FIXTURE_ROOT, '.ozw', 'conf.json');
   const stateConfigPath = path.join(FIXTURE_STATE_HOME, 'ozw', 'conf.json');
@@ -547,14 +752,22 @@ export function ensurePlaywrightFixture(options = {}) {
     if (!project) {
       continue;
     }
-    writeCodexSessionFixture(
-      project.path,
-      extraSession.sessionId,
-      extraSession.userMessage,
-      extraSession.messagePairs || 1,
-      false,
-      extraSession.baseTimestamp,
-    );
+    if (extraSession.filteredTail) {
+      writeFilteredTailSessionFixture(project.path, extraSession.sessionId, extraSession.baseTimestamp);
+    } else if (extraSession.filteredWindow) {
+      writeFilteredWindowSessionFixture(project.path, extraSession.sessionId, extraSession.baseTimestamp);
+    } else if (extraSession.foldedLongTurn) {
+      writeFoldedBootstrapSessionFixture(project.path, extraSession.sessionId, extraSession.baseTimestamp);
+    } else {
+      writeCodexSessionFixture(
+        project.path,
+        extraSession.sessionId,
+        extraSession.userMessage,
+        extraSession.messagePairs || 1,
+        false,
+        extraSession.baseTimestamp,
+      );
+    }
   }
 
   if (options.preserveAuthDatabase !== true) {

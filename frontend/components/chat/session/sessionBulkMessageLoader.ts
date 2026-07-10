@@ -3,7 +3,8 @@
  * force one unbounded backend response into memory.
  */
 
-export const SESSION_BULK_MESSAGE_PAGE_SIZE = 100;
+export const SESSION_BULK_MESSAGE_PAGE_SIZE = 50;
+const SESSION_BULK_MAX_PAGE_ATTEMPTS = 1000;
 
 export type SessionBulkMessageApi = (
   projectName: string,
@@ -53,7 +54,7 @@ export async function loadSessionMessagesInPages({
   let offset = 0;
   let total = 0;
 
-  while (true) {
+  for (let attempt = 0; attempt < SESSION_BULK_MAX_PAGE_ATTEMPTS; attempt += 1) {
     const response = await sessionMessages(projectName, sessionId, pageSize, offset, provider, null, null, projectPath);
     if (!response.ok) {
       throw new Error('Failed to load all session messages');
@@ -64,9 +65,15 @@ export async function loadSessionMessagesInPages({
     messages.unshift(...pageMessages);
     total = Number.isFinite(Number(data?.total)) ? Number(data.total) : messages.length;
 
-    if (!data?.hasMore || pageMessages.length === 0 || messages.length >= total) {
+    if (!data?.hasMore) {
       return { messages, total: Math.max(total, messages.length) };
     }
-    offset = resolveNextBulkMessageOffset(data, offset, pageMessages.length);
+    const nextOffset = resolveNextBulkMessageOffset(data, offset, pageMessages.length);
+    if (nextOffset <= offset) {
+      return { messages, total: Math.max(total, messages.length) };
+    }
+    offset = nextOffset;
   }
+
+  throw new Error('Exceeded bounded session message page attempts');
 }

@@ -1,0 +1,163 @@
+{
+  "summary": "Render 必须按实际视口准备当前页和一页预留，只在用户进入预留页后读取更早历史，同时保持虚拟 DOM 与逐层折叠延迟挂载。",
+  "coverage": [
+    {
+      "spec": "需求：Render 首屏按设备视口准备窗口 / 场景：桌面和手机只准备当前页与一页预留",
+      "tests": ["contract-render-two-page-budget"],
+      "evidence": ["desktop-first-screen", "mobile-first-screen", "initial-network"],
+      "risk": "极端字体缩放需要补充手工 QA。"
+    },
+    {
+      "spec": "需求：Render 首屏按设备视口准备窗口 / 场景：停留最新页不继续读取旧历史",
+      "tests": ["contract-render-two-page-budget"],
+      "evidence": ["initial-network"],
+      "risk": "Provider 主动追加由冻结快照回归覆盖。"
+    },
+    {
+      "spec": "需求：进入预留页才加载更早历史 / 场景：上翻触发下一逻辑页",
+      "tests": ["contract-render-scroll-demand-page"],
+      "evidence": ["paging-network"],
+      "risk": "一个逻辑页允许由多个有界原始分页组成。"
+    },
+    {
+      "spec": "需求：进入预留页才加载更早历史 / 场景：前插后保持锚点并停止继续扫描",
+      "tests": ["contract-render-scroll-demand-page"],
+      "evidence": ["anchor-after-prepend", "paging-state"],
+      "risk": "用户主动展开内容造成的高度变化不计入前插误差。"
+    },
+    {
+      "spec": "需求：挂载有界且折叠内容延迟创建 / 场景：离屏消息不扩大 DOM",
+      "tests": ["contract-render-lazy-bounded-dom", "regression-main-history-virtualization"],
+      "evidence": ["dom-state"],
+      "risk": "只统计聊天展示行，不统计浏览器扩展节点。"
+    },
+    {
+      "spec": "需求：挂载有界且折叠内容延迟创建 / 场景：重内容只在逐层展开后创建",
+      "tests": ["contract-render-lazy-bounded-dom"],
+      "evidence": ["lazy-before-expand", "lazy-after-expand", "dom-state"],
+      "risk": "摘要仍允许轻量字符串计算。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "contract-render-two-page-budget",
+      "source": "change_contract",
+      "path": "docs/changes/39-让Render按视口渐进加载历史/tests/render-viewport-demand-loading.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts docs/changes/39-让Render按视口渐进加载历史/tests/render-viewport-demand-loading.spec.ts --grep '桌面和手机首屏只准备当前页与一页预留'",
+      "purpose": "证明 Render 首屏使用设备视口预算并在空闲时停止旧历史请求。",
+      "assertions": [
+        "桌面和手机最新消息都立即可见，折叠后滚动高度只覆盖约两页预算",
+        "所有消息请求都有小于等于 50 的 limit，不使用无界请求",
+        "首屏稳定后停留最新页不会继续增加旧历史请求"
+      ],
+      "expected_initial_failure": "当前固定读取/复用 100 条且快照高度远超或不足两页，应失败于视口预算或请求上限断言。"
+    },
+    {
+      "id": "contract-render-scroll-demand-page",
+      "source": "change_contract",
+      "path": "docs/changes/39-让Render按视口渐进加载历史/tests/render-viewport-demand-loading.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts docs/changes/39-让Render按视口渐进加载历史/tests/render-viewport-demand-loading.spec.ts --grep '进入预留页才读取更早历史并保持锚点'",
+      "purpose": "证明用户进入预留页才触发下一逻辑页，并在前插后停止扫描。",
+      "assertions": [
+        "停留最新页时不请求更早 offset，进入预留页后才发出有界分页请求",
+        "前插后同一消息保持近似相同的视口位置",
+        "恢复一页预留后请求数保持稳定，继续上翻才请求下一逻辑页"
+      ],
+      "expected_initial_failure": "当前 Render 使用空历史滚动处理，应失败于等待更早分页请求。"
+    },
+    {
+      "id": "contract-render-lazy-bounded-dom",
+      "source": "change_contract",
+      "path": "docs/changes/39-让Render按视口渐进加载历史/tests/render-viewport-demand-loading.spec.ts",
+      "command": "pnpm exec playwright test --config=playwright.spec.config.ts docs/changes/39-让Render按视口渐进加载历史/tests/render-viewport-demand-loading.spec.ts --grep '离屏与折叠重内容只在需要时挂载'",
+      "purpose": "证明数据分页不会演变成全量 DOM，关闭的重内容也不会提前创建。",
+      "assertions": [
+        "聊天消息和虚拟展示行始终不超过 150",
+        "关闭 turn 工具组时工具卡和重内容节点不存在",
+        "只展开目标工具输出后才创建对应 lazy content，继续点击显示更多后才出现尾部内容"
+      ],
+      "expected_initial_failure": "当前核心折叠与虚拟化路径应通过；若失败说明现有可复用边界已回退，执行阶段不得带病改造分页。"
+    },
+    {
+      "id": "regression-main-history-virtualization",
+      "source": "existing_regression",
+      "path": "tests/e2e/history-scroll-preservation.spec.ts",
+      "command": "pnpm exec playwright test tests/e2e/history-scroll-preservation.spec.ts --grep 'scrolling into the history prefetch zone|1000\\+ mixed long session'",
+      "purpose": "保证复用分页与锚点能力时不破坏普通聊天历史。",
+      "assertions": [
+        "普通聊天进入顶部预取区仍按页加载并保持锚点",
+        "1050 轮混合会话的 DOM 仍不超过 150"
+      ],
+      "expected_initial_failure": "不应失败；若失败说明实现影响了现有普通历史链路。"
+    },
+    {
+      "id": "regression-render-performance-contract",
+      "source": "new_regression",
+      "path": "tests/specs/chat-performance-boundary.spec.ts",
+      "command": "pnpm exec tsx --test tests/specs/chat-performance-boundary.spec.ts",
+      "purpose": "把长期性能合同从禁止 Render 分页改为禁止自动全量扫描并允许一页预取。",
+      "assertions": [
+        "Render 不再使用空滚动处理",
+        "请求保持有界并由视口预留区触发",
+        "不存在默认全量 hydration 循环"
+      ],
+      "expected_initial_failure": "执行阶段更新合同前，旧断言仍要求 ignoreRenderedSnapshotHistoryScroll。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "desktop-first-screen",
+      "kind": "screenshot",
+      "path": "test-results/change-39-render-viewport-demand/desktop-first-screen.png",
+      "purpose": "证明桌面 Render 最新页立即出现且具有上翻空间。"
+    },
+    {
+      "id": "mobile-first-screen",
+      "kind": "screenshot",
+      "path": "test-results/change-39-render-viewport-demand/mobile-first-screen.png",
+      "purpose": "证明手机视口独立计算两页预算。"
+    },
+    {
+      "id": "initial-network",
+      "kind": "network",
+      "path": "test-results/change-39-render-viewport-demand/initial-network.json",
+      "purpose": "记录不同视口首屏请求、limit、offset 和空闲稳定性。"
+    },
+    {
+      "id": "paging-network",
+      "kind": "network",
+      "path": "test-results/change-39-render-viewport-demand/paging-network.json",
+      "purpose": "证明只有进入预留页后才读取更早逻辑页。"
+    },
+    {
+      "id": "anchor-after-prepend",
+      "kind": "screenshot",
+      "path": "test-results/change-39-render-viewport-demand/anchor-after-prepend.png",
+      "purpose": "证明旧历史前插后用户阅读位置没有跳动。"
+    },
+    {
+      "id": "paging-state",
+      "kind": "state_snapshot",
+      "path": "test-results/change-39-render-viewport-demand/paging-state.json",
+      "purpose": "记录前插前后锚点、滚动高度和网络静默状态。"
+    },
+    {
+      "id": "lazy-before-expand",
+      "kind": "screenshot",
+      "path": "test-results/change-39-render-viewport-demand/lazy-before-expand.png",
+      "purpose": "证明折叠状态只显示摘要。"
+    },
+    {
+      "id": "lazy-after-expand",
+      "kind": "screenshot",
+      "path": "test-results/change-39-render-viewport-demand/lazy-after-expand.png",
+      "purpose": "证明只创建用户逐层展开的目标内容。"
+    },
+    {
+      "id": "dom-state",
+      "kind": "state_snapshot",
+      "path": "test-results/change-39-render-viewport-demand/dom-state.json",
+      "purpose": "记录虚拟行、工具卡和 lazy content 节点数量。"
+    }
+  ]
+}
