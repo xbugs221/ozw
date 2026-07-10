@@ -165,7 +165,13 @@ export function useShellRuntime({
     closeSocket,
   });
 
-  const { isConnected, isConnecting, connectToShell, disconnectFromShell } = useShellConnection({
+  const {
+    isConnected,
+    isConnecting,
+    connectToShell,
+    disconnectFromShell,
+    resetShellConnection,
+  } = useShellConnection({
     wsRef,
     terminalRef,
     fitAddonRef,
@@ -188,27 +194,27 @@ export function useShellRuntime({
       return;
     }
 
-    disconnectFromShell();
+    resetShellConnection();
     disposeTerminal();
-  }, [disconnectFromShell, disposeTerminal, isRestarting]);
+  }, [disposeTerminal, isRestarting, resetShellConnection]);
 
   useEffect(() => {
     if (selectedProject) {
       return;
     }
 
-    disconnectFromShell();
+    resetShellConnection();
     disposeTerminal();
-  }, [disconnectFromShell, disposeTerminal, selectedProject]);
+  }, [disposeTerminal, resetShellConnection, selectedProject]);
 
   useEffect(() => {
     const currentSessionId = selectedSession?.id ?? null;
     if (lastSessionIdRef.current !== currentSessionId && isInitialized) {
-      disconnectFromShell();
+      resetShellConnection();
     }
 
     lastSessionIdRef.current = currentSessionId;
-  }, [disconnectFromShell, isInitialized, selectedSession?.id]);
+  }, [isInitialized, resetShellConnection, selectedSession?.id]);
 
   return {
     terminalContainerRef,

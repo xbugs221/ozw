@@ -539,7 +539,8 @@ export function useProjectsState({
       setSelectedProject(projectWithSyntheticSession);
       setSelectedSession(syntheticSession);
       setSelectedWorkflow(null);
-      setActiveTab('chat');
+      // New sessions start in the live terminal; rendered history is opened explicitly.
+      setActiveTab('shell');
       const baseRoute = targetWorkflow
         ? buildWorkflowChildSessionRoute(projectWithSyntheticSession, targetWorkflow, syntheticSession)
         : buildProjectSessionRoute(projectWithSyntheticSession, syntheticSession);

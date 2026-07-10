@@ -203,7 +203,15 @@ test.describe('项目规范路由寻址', () => {
 
     await expect(page).toHaveURL(new RegExp(`${projectRoutePrefix}/c\\d+$`));
     await expect(page.getByTestId('project-workspace-overview')).toHaveCount(0);
+    await expect(page.getByTestId('tab-shell')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('tab-chat')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('.xterm')).toBeVisible();
     await expect(page.locator('textarea')).toBeVisible();
+    await expect(page.getByRole('button', { name: /上传图片\/文件|Upload image\/file/i })).toBeVisible();
+    await page.screenshot({
+      path: 'docs/debug/20260710-0929-session-terminal-state/screenshots/new-session-terminal.png',
+      fullPage: true,
+    });
   });
 
   test('工作流子会话使用嵌套的 runId/stage 路由', async ({ page }) => {

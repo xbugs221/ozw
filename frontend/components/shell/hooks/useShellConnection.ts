@@ -87,6 +87,7 @@ type UseShellConnectionResult = {
   closeSocket: () => void;
   connectToShell: () => void;
   disconnectFromShell: () => void;
+  resetShellConnection: () => void;
 };
 
 export function useShellConnection({
@@ -515,10 +516,12 @@ export function useShellConnection({
   }, [connectWebSocket, isConnected, isConnecting, isInitialized]);
 
   /**
-   * Fully disconnect from the shell relay and clear pending reconnect state.
+   * Close the shell relay and reset transient connection state.
+   *
+   * @param {boolean} isManualDisconnect Whether auto-connect must stay disabled.
    */
-  const disconnectFromShell = useCallback(() => {
-    manualDisconnectRef.current = true;
+  const resetConnectionState = useCallback((isManualDisconnect: boolean) => {
+    manualDisconnectRef.current = isManualDisconnect;
     outboundQueueRef.current = [];
     clearReconnectTimer();
     clearHeartbeatTimers();
@@ -530,6 +533,20 @@ export function useShellConnection({
     setAuthUrl('');
   }, [clearHeartbeatTimers, clearReconnectTimer, clearTerminalScreen, closeSocket, setAuthUrl]);
 
+  /**
+   * Fully disconnect after an explicit user action and suppress auto-reconnect.
+   */
+  const disconnectFromShell = useCallback(() => {
+    resetConnectionState(true);
+  }, [resetConnectionState]);
+
+  /**
+   * Reset the current socket for an internal lifecycle change while preserving auto-connect.
+   */
+  const resetShellConnection = useCallback(() => {
+    resetConnectionState(false);
+  }, [resetConnectionState]);
+
   useEffect(() => {
     outboundSenderRef.current = sendShellMessage;
 
@@ -539,11 +556,10 @@ export function useShellConnection({
   }, [outboundSenderRef, sendShellMessage]);
 
   useEffect(() => {
-    if (!autoConnect || !isInitialized || isConnecting || isConnected) {
+    if (manualDisconnectRef.current || !autoConnect || !isInitialized || isConnecting || isConnected) {
       return;
     }
 
-    manualDisconnectRef.current = false;
     connectToShell();
   }, [autoConnect, connectToShell, isConnected, isConnecting, isInitialized]);
 
@@ -558,5 +574,6 @@ export function useShellConnection({
     closeSocket,
     connectToShell,
     disconnectFromShell,
+    resetShellConnection,
   };
 }

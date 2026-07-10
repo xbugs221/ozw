@@ -115,6 +115,34 @@ test('desktop shell main view keeps one websocket while staying in workspace', a
   expect(terminalBox?.height).toBeGreaterThan(300);
 });
 
+test('session TUI stays disconnected until the user reconnects', async ({ page }: { page: any }) => {
+  await page.goto('/workspace/fixture-project/c3', { waitUntil: 'networkidle' });
+
+  await expect(page.getByTestId('chat-tui-panel')).toBeVisible({ timeout: 10_000 });
+  await waitForOpenShellSocket(page);
+  await page.getByRole('button', { name: /^Disconnect$|^断开连接$/ }).first().click();
+
+  const connectButton = page.getByRole('button', { name: /^(?:Continue in Shell|Connect|继续使用 Shell|连接)$/i }).first();
+  await expect(connectButton).toBeVisible();
+  await page.waitForTimeout(2_000);
+  await expect(connectButton).toBeVisible();
+  await expect.poll(async () => page.evaluate(() => {
+    const sockets = window.__trackedSockets || [];
+    return sockets.filter((socket) => (
+      typeof socket.url === 'string'
+      && socket.url.includes('/shell')
+      && socket.readyState === WebSocket.OPEN
+    )).length;
+  })).toBe(0);
+  await page.screenshot({
+    path: 'docs/debug/20260710-0929-session-terminal-state/screenshots/disconnected-shell.png',
+    fullPage: true,
+  });
+
+  await connectButton.click();
+  await waitForOpenShellSocket(page);
+});
+
 test('mobile shell helper keys send escape tab arrows and held ctrl arrow input', async ({ page }: { page: any }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openShellProject(page);

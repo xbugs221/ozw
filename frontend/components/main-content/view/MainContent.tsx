@@ -713,7 +713,7 @@ function MainContent({
   const centerContent = (
     <>
       <div className={`flex flex-col min-h-0 min-w-0 overflow-hidden ${editorExpanded ? 'hidden' : ''} flex-1`}>
-        {activeTab === 'shell' ? (
+        {activeTab === 'shell' && !selectedSession ? (
           renderTerminalMainView()
         ) : (
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
