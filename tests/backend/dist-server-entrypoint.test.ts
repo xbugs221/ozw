@@ -88,7 +88,8 @@ test('compiled backend entrypoint starts after build', async () => {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  assert.match(build, /tsc -p tsconfig\.build\.json/);
+  // pnpm 11 在非 TTY 下不输出生命周脚本，直接验证编译产物
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'dist-node', 'backend', 'index.js')), true);
   assert.equal(fs.existsSync(DIST_RUNTIME_COMPAT_PATH), false);
 
   const tempHome = await mkdtemp(path.join(os.tmpdir(), 'ozw-dist-start-'));
