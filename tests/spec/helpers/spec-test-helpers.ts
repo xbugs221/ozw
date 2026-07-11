@@ -39,7 +39,14 @@ function createLocalAuthToken() {
   return generateToken(user);
 }
 
-export const AUTH_TOKEN = createLocalAuthToken();
+export let AUTH_TOKEN: string;
+
+try {
+  AUTH_TOKEN = createLocalAuthToken();
+} catch {
+  // Playwright fixture DB not initialized — lazy-resolve in tests that need it
+  AUTH_TOKEN = '';
+}
 
 /**
  * Resolve a path inside the primary workspace fixture.
