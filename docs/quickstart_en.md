@@ -8,7 +8,7 @@ This guide will get **ozw** up and running on your local machine or server.
 
 ### 1. Prerequisites
 
-- **Node.js 22+**.
+- **Node.js 24.17.0**: match `.nvmrc`.
 - **pnpm 11.10.0**: match the `packageManager` field in `package.json`; Corepack is recommended.
 - **oz**: must be available on the service process `PATH`. ozw checks `oz flow contract --json` during startup, uses `oz list` to discover active changes, and uses `oz flow` to run workflows.
 - **Codex/Pi**: not required for the server to start; install and authenticate the selected provider only when you use that chat provider.
@@ -28,6 +28,7 @@ oz flow contract --json
 git clone https://github.com/xbugs221/ozw.git
 cd ozw
 pnpm install
+pnpm run hooks:install
 cp .env.example .env
 ```
 

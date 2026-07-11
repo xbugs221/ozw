@@ -34,7 +34,7 @@
 
 ### 快速开始
 
-1. **准备基础环境：** 需要 Node.js 22+ 与 pnpm 11.10.0（以 `package.json` 的 `packageManager` 为准）。
+1. **准备基础环境：** 需要 Node.js 24.17.0 与 pnpm 11.10.0（分别以 `.nvmrc` 和 `package.json` 为准）。
 
    ```sh
    corepack enable

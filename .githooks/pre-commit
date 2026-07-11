@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PURPOSE: Delegate pre-commit checks to the repository script.
+# PURPOSE: Run the repository CI gate before Git creates a commit.
 set -euo pipefail
 
-pnpm run precommit
+exec ./scripts/pre-commit.sh

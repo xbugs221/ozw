@@ -22,7 +22,7 @@ GitHub 失败 run `28289064798` 的失败步骤为 `Node spec tests`。本地和
 typecheck -> test:vitest -> test:server -> test:spec:node
 ```
 
-`.github/workflows/ci.yml` 的 `node-checks` 必须使用 `.nvmrc`、`pnpm install --frozen-lockfile`，并运行 `pnpm run test:ci` 或等价命令；不得通过 skip、忽略错误或删除 Node spec tests 变绿。
+`.github/workflows/ci.yml` 的 `node-checks` 必须使用 `.nvmrc`、`pnpm install --frozen-lockfile`，并运行 `pnpm run test:ci` 或等价命令；本地 pre-commit 钩子也必须使用同一入口，且不得修改暂存区。不得通过 skip、忽略错误或删除 Node spec tests 变绿。
 
 ## 默认测试
 

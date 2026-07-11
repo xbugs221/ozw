@@ -1,31 +1,38 @@
 #!/usr/bin/env bash
-# PURPOSE: Format staged source files, then run typecheck (same as CI).
+# PURPOSE: Run the exact GitHub Node quality gate before a commit is created.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-collect_staged_files() {
-  # PURPOSE: Return existing staged paths only, so deleted files do not reach Prettier.
-  git diff --cached --name-only --diff-filter=ACMR -z -- |
-    while IFS= read -r -d '' file_path; do
-      if [[ -f "$file_path" ]]; then
-        printf '%s\0' "$file_path"
-      fi
-    done
+use_repository_node() {
+  # PURPOSE: Match local commits to the exact Node.js version used by GitHub CI.
+  local required_node current_node
+  required_node="$(tr -d '[:space:]' < .nvmrc)"
+  current_node="v$(node -p 'process.versions.node')"
+  if [[ "$current_node" == "$required_node" ]]; then
+    return
+  fi
+
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
+    echo "[pre-commit] Node.js $required_node is required; current version is $current_node." >&2
+    echo "[pre-commit] Install nvm and run: nvm install $required_node" >&2
+    exit 1
+  fi
+
+  set +e
+  set +u
+  # shellcheck source=/dev/null
+  source "$NVM_DIR/nvm.sh" || true
+  set -e
+  set -u
+  nvm use --silent "$required_node" >/dev/null
 }
 
-mapfile -d '' staged_files < <(collect_staged_files)
+use_repository_node
 
-if (( ${#staged_files[@]} > 0 )); then
-  echo "[pre-commit] Formatting staged files..."
-  ./scripts/format-code.sh --staged
-  git add -- "${staged_files[@]}"
-else
-  echo "[pre-commit] No staged files to format."
-fi
+echo "[pre-commit] Running the complete GitHub CI gate..."
+pnpm run test:ci
 
-echo "[pre-commit] Running typecheck (same as CI)..."
-pnpm run typecheck
-
-echo "[pre-commit] All checks passed."
+echo "[pre-commit] All CI checks passed."

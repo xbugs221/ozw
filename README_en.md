@@ -30,7 +30,7 @@ ozw turns your coding tasks into persistent, resumable Web sessions. When combin
 
 ### Quick Start
 
-1. **Prepare the base runtime:** Node.js 22+ and pnpm 11.10.0 are required, matching the `packageManager` field in `package.json`.
+1. **Prepare the base runtime:** Node.js 24.17.0 and pnpm 11.10.0 are required, matching `.nvmrc` and the `packageManager` field in `package.json`.
 
    ```sh
    corepack enable

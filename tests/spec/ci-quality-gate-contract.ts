@@ -25,3 +25,18 @@ test('GitHub node-checks runs the shared CI gate without skip semantics', () => 
   assert.match(workflow, /pnpm run test:ci/);
   assert.doesNotMatch(workflow, /--skip|test\.skip|continue-on-error:\s*true/);
 });
+
+test('local pre-commit hook runs the complete CI gate without changing staged files', () => {
+  /** Keep local commit checks equivalent to CI and free of implicit staging mutations. */
+  const packageJson = JSON.parse(read('package.json'));
+  const hook = read('.githooks/pre-commit');
+  const precommit = read('scripts/pre-commit.sh');
+  const nodeVersion = read('.nvmrc').trim();
+
+  assert.equal(packageJson.scripts?.precommit, './scripts/pre-commit.sh');
+  assert.equal(packageJson.engines?.node, nodeVersion.replace(/^v/, ''));
+  assert.match(nodeVersion, /^v\d+\.\d+\.\d+$/);
+  assert.match(hook, /scripts\/pre-commit\.sh/);
+  assert.match(precommit, /pnpm run test:ci/);
+  assert.doesNotMatch(precommit, /git add|format-code\.sh/);
+});
