@@ -67,10 +67,12 @@ test('tool configs preserve fallback, hidden result, and executable output conte
 test('functions.exec exposes the nested shell command instead of transport code', () => {
   /** 用户只应看到真实命令及其输出，不应看到 JavaScript 调用包装或 Parameters。 */
   const config = getToolConfig('functions.exec');
+  // getContentProps 期望 ToolPayload，但测试传入原始代码字符串以验证 extractNestedExecCommand 行为
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props = config.input.getContentProps?.(
-    'const r = await tools.exec_command({cmd:"rtk git status --short",yield_time_ms:5000});text(r.output)',
-    { toolResult: { content: 'clean' } },
-  );
+    'const r = await tools.exec_command({cmd:"rtk git status --short",yield_time_ms:5000});text(r.output)' as any,
+    { toolResult: { content: 'clean' } } as any,
+  ) as any;
 
   assert.equal(config.input.type, 'content');
   assert.equal(props?.payload.code, 'rtk git status --short');

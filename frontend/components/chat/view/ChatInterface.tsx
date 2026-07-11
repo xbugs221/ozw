@@ -765,7 +765,7 @@ function ChatInterface({
     const targetAddedHeight = Math.max(1, container.clientHeight);
     const logicalPageScrollSnapshot = captureSessionScrollSnapshot(container);
     let nextOffset = current.nextHistoryOffset;
-    let hasMoreRawHistory = current.hasMoreHistory;
+    let hasMoreRawHistory: boolean = current.hasMoreHistory;
     let bufferedMessages = [...renderSnapshotBufferedOlderRef.current];
     let requestAttempts = 0;
     let requestedRawPage = false;

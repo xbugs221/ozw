@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PURPOSE: Format staged source files before commit.
+# PURPOSE: Format staged source files, then run typecheck (same as CI).
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -25,4 +25,7 @@ else
   echo "[pre-commit] No staged files to format."
 fi
 
-echo "[pre-commit] Lightweight checks complete. Run pnpm run test:unit before pushing riskier changes."
+echo "[pre-commit] Running typecheck (same as CI)..."
+pnpm run typecheck
+
+echo "[pre-commit] All checks passed."
