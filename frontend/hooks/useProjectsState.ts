@@ -108,6 +108,14 @@ export function useProjectsState({
     }
   }, [locationSearch]);
   useEffect(() => {
+    /** Entering a concrete session defaults to its live TUI unless the URL explicitly selects another tab. */
+    if (!selectedSession?.id) return;
+    const explicitTab = new URLSearchParams(locationSearch).get('tab');
+    if (!explicitTab) {
+      setActiveTab('shell');
+    }
+  }, [locationSearch, selectedSession?.id]);
+  useEffect(() => {
     /**
      * 让项目主页和会话消息成为两个独立入口，避免项目路由继续高亮消息 Tab。
      */
@@ -372,9 +380,7 @@ export function useProjectsState({
     (session: ProjectSession) => {
       setSelectedSession(session);
       setSelectedWorkflow(null);
-      if (activeTab === 'preview') {
-        setActiveTab('chat');
-      }
+      setActiveTab('shell');
       const sessionProjectName = session.__projectName || selectedProject?.name || '';
       const sessionProjectPath = session.projectPath || selectedProject?.fullPath || selectedProject?.path || '';
       const sessionProject = {
@@ -387,7 +393,7 @@ export function useProjectsState({
         buildSessionNavigationUrl(sessionProject, session),
       );
     },
-    [activeTab, navigate, selectedProject?.fullPath, selectedProject?.name, selectedProject?.path, selectedProject?.routePath],
+    [navigate, selectedProject?.fullPath, selectedProject?.name, selectedProject?.path, selectedProject?.routePath],
   );
   const handleNewSession = useCallback(
     async (project: Project, provider: SessionProvider = 'codex', options: NewSessionOptions = {}) => {

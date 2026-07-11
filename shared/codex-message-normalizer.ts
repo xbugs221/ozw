@@ -492,6 +492,7 @@ export function transformCodexEvent(event: unknown): unknown {
         case 'custom_tool_call':
           return { type: 'item', itemType: 'function_call', itemId: item.id || item.call_id || item.callId || null, item };
         case 'function_call_output':
+        case 'custom_tool_call_output':
           return { type: 'item', itemType: 'function_call_output', itemId: item.id || item.call_id || item.callId || null, item };
         case 'web_search':
           return { type: 'item', itemType: 'web_search', query: item.query };

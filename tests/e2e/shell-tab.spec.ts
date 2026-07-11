@@ -180,3 +180,57 @@ test('mobile shell helper keys send escape tab arrows and held ctrl arrow input'
     hasCtrlArrowRight: true,
   });
 });
+
+test('mobile touch scroll is forwarded to TMux while mouse tracking is active', async ({ page }: { page: any }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openShellProject(page);
+  await page.getByRole('button', { name: /^Shell$|^终端$/ }).click();
+
+  await waitForOpenShellSocket(page);
+  const terminal = page.locator('.xterm');
+  await expect(terminal).toBeVisible({ timeout: 10_000 });
+  await terminal.click();
+  await page.keyboard.type("tmux set-option mouse on; clear; for i in $(seq 1 160); do printf 'mobile-touch-line-%03d\\n' \"$i\"; done");
+  await page.keyboard.press('Enter');
+  await expect(terminal).toHaveClass(/enable-mouse-events/, { timeout: 10_000 });
+
+  await page.evaluate(() => {
+    window.__sentShellInputData = [];
+  });
+
+  await terminal.evaluate((element) => {
+    /** Dispatch one real DOM touch event at the supplied terminal coordinate. */
+    const dispatchTouch = (type: string, clientY: number) => {
+      const bounds = element.getBoundingClientRect();
+      const touch = new Touch({
+        identifier: 1,
+        target: element,
+        clientX: bounds.left + bounds.width / 2,
+        clientY,
+        pageX: bounds.left + bounds.width / 2,
+        pageY: clientY,
+      });
+      element.dispatchEvent(new TouchEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        touches: type === 'touchend' ? [] : [touch],
+        changedTouches: [touch],
+      }));
+    };
+
+    const bounds = element.getBoundingClientRect();
+    dispatchTouch('touchstart', bounds.top + bounds.height * 0.35);
+    dispatchTouch('touchmove', bounds.top + bounds.height * 0.55);
+    dispatchTouch('touchmove', bounds.top + bounds.height * 0.75);
+    dispatchTouch('touchend', bounds.top + bounds.height * 0.75);
+  });
+
+  await expect.poll(async () => page.evaluate(() => (
+    (window.__sentShellInputData || []).some((data) => data.includes('\x1b[<64;'))
+  ))).toBe(true);
+
+  await page.screenshot({
+    path: 'docs/debug/20260711-1447-mobile-terminal-touch-scroll/screenshots/mobile-terminal-touch-scroll.png',
+    fullPage: true,
+  });
+});

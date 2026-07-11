@@ -818,7 +818,10 @@ function codexRecordToMessages(
   ) {
     return [codexFunctionPayloadToToolUse(record.payload, sessionId, lineNumber, record.timestamp)];
   }
-  if (record.type === 'response_item' && record.payload?.type === 'function_call_output') {
+  if (
+    record.type === 'response_item'
+    && (record.payload?.type === 'function_call_output' || record.payload?.type === 'custom_tool_call_output')
+  ) {
     const callId = String(record.payload.call_id || record.payload.callId || record.payload.id || '');
     return [{
       type: 'tool_result',

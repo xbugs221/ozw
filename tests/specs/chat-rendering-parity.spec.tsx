@@ -656,10 +656,10 @@ test('completed turns collapse thinking and tool calls while keeping final body 
     true,
     'non-body group must preserve transcript order before the final body',
   );
-  assert.deepEqual(nonBodyGroup?.items?.map((item) => item.kind), ['thinking-group', 'tool-group', 'tool-group']);
+  assert.deepEqual(nonBodyGroup?.items?.map((item) => item.kind), ['thinking-group', 'tool-group']);
 });
 
-test('assistant progress text between tool calls collapses with turn activity', async () => {
+test('agent messages delimit independently counted tool call groups', async () => {
   /**
    * Commentary around tool calls is process narration, not final answer body;
    * only the last assistant body in the turn should stay on the reading path.
@@ -704,23 +704,41 @@ test('assistant progress text between tool calls collapses with turn activity', 
       messageKey: 'turn-progress-final-body',
     }),
   ]);
-  const nonBodyGroup = blocks.find((block) => block.kind === 'turn-non-body-group');
+  const nonBodyGroups = blocks.filter((block) => block.kind === 'turn-non-body-group');
   const assistantBodies = blocks.filter((block) => block.kind === 'assistant-body');
 
-  assert.ok(nonBodyGroup, 'progress narration and tools must enter one non-body group');
-  assert.equal(nonBodyGroup?.defaultOpen, false, 'completed progress details must default to collapsed');
-  assert.deepEqual(
-    nonBodyGroup?.items?.map((item) => item.kind),
-    ['thinking-group', 'tool-group', 'thinking-group', 'tool-group'],
-  );
-  assert.deepEqual(
-    nonBodyGroup?.items
-      ?.filter((item) => item.kind === 'thinking-group')
-      .flatMap((item) => item.messages.map((message) => message.messageKey)),
-    ['turn-progress-note-one', 'turn-progress-note-two'],
-  );
-  assert.equal(assistantBodies.length, 1, 'only final assistant body should stay directly visible');
-  assert.equal(assistantBodies[0]?.message.messageKey, 'turn-progress-final-body');
+  assert.equal(nonBodyGroups.length, 1, 'all pre-body process rows share one outer disclosure');
+  assert.deepEqual(nonBodyGroups[0]?.items.map((item) => item.kind), ['thinking-group', 'tool-group', 'thinking-group', 'tool-group']);
+  assert.equal(assistantBodies.length, 1, 'only the final body remains outside the process disclosure');
+});
+
+test('Codex commentary agent_message remains a hard tool-group boundary', () => {
+  /** History styling may mark commentary as thinking, but its provider phase still denotes agent_message. */
+  const blocks = buildTurnDisplayBlocks([
+    row({ type: 'assistant', content: '先检查', phase: 'commentary', isThinking: true, messageKey: 'agent-commentary-a' }),
+    row({ type: 'assistant', isToolUse: true, toolName: 'Read', toolCallId: 'between-a', messageKey: 'between-a' }),
+    row({ type: 'assistant', content: '再检查', phase: 'commentary', isThinking: true, messageKey: 'agent-commentary-b' }),
+    row({ type: 'assistant', isToolUse: true, toolName: 'Bash', toolCallId: 'between-b', messageKey: 'between-b' }),
+    row({ type: 'assistant', content: '完成', phase: 'final', messageKey: 'agent-final' }),
+  ]);
+  const groups = blocks.filter((block) => block.kind === 'turn-non-body-group');
+
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0]?.items.map((item) => item.kind), ['thinking-group', 'tool-group', 'thinking-group', 'tool-group']);
+});
+
+test('Pi assistant text parts delimit grouped Pi tool calls', () => {
+  /** Pi uses assistant text parts rather than Codex agent_message records, but shares the normalized boundary. */
+  const blocks = buildTurnDisplayBlocks([
+    row({ type: 'assistant', provider: 'pi', content: '开始检查', messageKey: 'pi-agent-a' }),
+    row({ type: 'assistant', provider: 'pi', isToolUse: true, toolName: 'bash', toolCallId: 'pi-tool-a', messageKey: 'pi-tool-a' }),
+    row({ type: 'assistant', provider: 'pi', isToolUse: true, toolName: 'read', toolCallId: 'pi-tool-b', messageKey: 'pi-tool-b' }),
+    row({ type: 'assistant', provider: 'pi', content: '检查完成', messageKey: 'pi-agent-b' }),
+  ]);
+  const groups = blocks.filter((block) => block.kind === 'turn-non-body-group');
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0]?.items.length, 2, 'two Pi calls between assistant text parts form one counted group');
 });
 
 test('assistant body before trailing tool activity stays directly visible', async () => {
@@ -817,11 +835,10 @@ test('Codex commentary phase history collapses before the final answer body', as
   const assistantBodies = blocks.filter((block) => block.kind === 'assistant-body');
 
   assert.equal(converted.find((message) => message.messageKey === 'codex-commentary-note')?.isThinking, true);
-  assert.ok(nonBodyGroup, 'commentary and tool activity must enter one collapsed process group');
+  assert.ok(nonBodyGroup, 'tools after commentary must enter their own collapsed group');
   assert.equal(nonBodyGroup?.defaultOpen, false, 'persisted Codex process detail must default to collapsed');
   assert.deepEqual(nonBodyGroup?.items.map((item) => item.kind), ['thinking-group', 'tool-group']);
-  assert.equal(assistantBodies.length, 1, 'only the final assistant body should stay directly visible');
-  assert.equal(assistantBodies[0]?.message.messageKey, 'codex-commentary-final');
+  assert.equal(assistantBodies.length, 1, 'only final agent_message stays outside the process disclosure');
 });
 
 test('plain assistant body rows without tool activity stay visible', async () => {
@@ -890,7 +907,7 @@ test('live turns keep thinking and tool calls expanded while assistant body stre
   assert.equal(nonBodyGroup?.defaultOpen, true, 'live response details must stay expanded while body streams');
   assert.deepEqual(
     nonBodyGroup?.items.map((item) => item.defaultOpen),
-    [true, true, true],
+    [true, true],
     'nested live thinking/tool groups must inherit the expanded state',
   );
   assert.equal(assistantBody?.message.messageKey, 'turn-collapse-body');
@@ -922,7 +939,7 @@ test('active workflow tail keeps persisted process details expanded', async () =
   assert.equal(nonBodyGroup?.defaultOpen, true, 'active workflow tail details must default to expanded');
   assert.deepEqual(
     nonBodyGroup?.items.map((item) => item.defaultOpen),
-    [true, true, true],
+    [true, true],
     'nested active workflow process groups must inherit expanded state',
   );
 });
@@ -940,13 +957,16 @@ test('tool-only turn activity renders one collapsed tool group without row metad
   assert.match(turnGroupSource, /data-testid=["']turn-tool-list-group["']/);
   assert.match(turnGroupSource, /data-testid=["']turn-tool-list-toggle["']/);
   assert.match(turnGroupSource, /data-testid=["']turn-tool-list["']/);
-  assert.match(turnGroupSource, /工具调用\$\{toolInvocationCount\}次/);
+  assert.match(turnGroupSource, /一次工具调用/);
+  assert.match(turnGroupSource, /\$\{toolInvocationCount\}次工具调用/);
   assert.match(turnGroupSource, /suppressAssistantMetadata:\s*true/);
   assert.match(messageSource, /suppressAssistantMetadata/);
   assert.match(messageSource, /Boolean\(suppressAssistantMetadata\)/);
   assert.doesNotMatch(turnGroupSource, /Tool call/);
   assert.doesNotMatch(turnGroupSource, /data-testid=["']turn-tool-command["']/);
   assert.doesNotMatch(turnGroupSource, /getCommandLabels/);
+  assert.doesNotMatch(turnGroupSource, /group\/tool:/);
+  assert.doesNotMatch(turnGroupSource, /commands` : '工具调用'/);
   assert.doesNotMatch(subagentSource, /\{child\.toolName\}/);
   assert.doesNotMatch(subagentSource, /`\$\{currentTool\.toolName\}…`/);
   assert.doesNotMatch(subagentSource, /getToolIcon\(child\.toolName\)/);
@@ -1020,7 +1040,7 @@ test('batch tool summaries count commands across historical payload shapes', asy
     .find((block) => block.kind === 'turn-non-body-group')
     ?.items?.find((item) => item.groupKey === 'turn-collapse-split-batch');
 
-  assert.equal(stringGroup?.commandCount, 2, 'JSON string toolInput must keep batch command count');
+  assert.equal(stringGroup?.commandCount, 2, 'two adjacent tool payloads count as two invocations');
   assert.equal(splitGroup?.messages?.length, 2, 'split tool_use/tool_result rows must stay in one tool group');
-  assert.equal(splitGroup?.commandCount, 2, 'tool_result rows must not add command count');
+  assert.equal(splitGroup?.commandCount, 1, 'tool_result rows must not add another invocation');
 });

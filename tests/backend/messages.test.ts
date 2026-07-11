@@ -620,17 +620,28 @@ test('getCodexSessionMessages maps Codex custom apply_patch calls to FileChanges
             input: patch,
           },
         }),
+        JSON.stringify({
+          type: 'response_item',
+          timestamp: '2026-05-02T08:00:01.000Z',
+          payload: {
+            type: 'custom_tool_call_output',
+            call_id: 'call-custom-patch',
+            output: 'Done!',
+          },
+        }),
       ].join('\n') + '\n',
       'utf8',
     );
 
     const result = await getCodexSessionMessages(sessionId, null, 0, null);
 
-    assert.equal(result.messages.length, 1);
+    assert.equal(result.messages.length, 2);
     assert.equal(result.messages[0].type, 'tool_use');
     assert.equal(result.messages[0].toolName, 'FileChanges');
     assert.equal(result.messages[0].toolCallId, 'call-custom-patch');
     assert.equal(result.messages[0].toolInput.changes[0].path, 'src/app.ts');
+    assert.equal(result.messages[1].type, 'tool_result');
+    assert.equal(result.messages[1].output, 'Done!');
   });
 });
 

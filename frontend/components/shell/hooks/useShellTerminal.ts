@@ -19,6 +19,7 @@ import {
 import { isCodexLoginCommand } from '../utils/auth';
 import { getVirtualCtrlKeyboardInput } from '../utils/mobileKeyInput';
 import { ensureXtermFocusStyles } from '../utils/terminalStyles';
+import { attachTerminalTouchScroll } from '../utils/terminalTouchScroll';
 import type { ShellOutgoingMessage } from '../types/types';
 
 type UseShellTerminalOptions = {
@@ -137,6 +138,7 @@ export function useShellTerminal({
     }
 
     nextTerminal.open(terminalContainerRef.current);
+    const detachTerminalTouchScroll = attachTerminalTouchScroll(nextTerminal);
 
     nextTerminal.attachCustomKeyEventHandler((event) => {
       const activeAuthUrl = isCodexLoginCommand(initialCommandRef.current)
@@ -274,6 +276,7 @@ export function useShellTerminal({
         resizeTimeoutRef.current = null;
       }
       dataSubscription.dispose();
+      detachTerminalTouchScroll();
       closeSocket();
       disposeTerminal();
     };

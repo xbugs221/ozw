@@ -44,10 +44,22 @@ function getMessageKey(message: ChatMessage, index: number): string {
   return String(message.messageKey || message.toolCallId || message.toolId || `message-${index}`);
 }
 
+/** Treat provider assistant text events as hard boundaries even when commentary was styled like process text. */
+function isAssistantMessageBoundary(message: ChatMessage): boolean {
+  const phase = String(message.phase || '').toLowerCase();
+  return message.type === 'assistant'
+    && !message.isToolUse
+    && !message.isTaskNotification
+    && (!message.isThinking || phase === 'commentary' || phase === 'final');
+}
+
 /**
  * Detect messages that are process detail rather than final assistant body.
  */
 function getNonBodyKind(message: ChatMessage): TurnNonBodyItemKind | null {
+  if (isAssistantMessageBoundary(message)) {
+    return null;
+  }
   if (message.isThinking || message.type === 'thinking' || message.type === 'reasoning') {
     return 'thinking-group';
   }
@@ -81,37 +93,23 @@ function isLiveProcessMessage(message: ChatMessage): boolean {
  * Identify assistant body rows that should make prior process detail collapse.
  */
 function isAssistantBody(message: ChatMessage): boolean {
-  return message.type === 'assistant' && !message.isThinking && !message.isToolUse && !message.isTaskNotification;
+  return isAssistantMessageBoundary(message);
 }
 
-/**
- * Detect later tool or thinking activity in the same turn.
- */
-function hasLaterNonBodyBeforeNextUser(messages: ChatMessage[], index: number): boolean {
+/** Detect whether another assistant message exists before the next user turn. */
+function hasLaterAssistantBodyBeforeNextUser(messages: ChatMessage[], index: number): boolean {
   for (let nextIndex = index + 1; nextIndex < messages.length; nextIndex += 1) {
-    const nextMessage = messages[nextIndex];
-    if (nextMessage.type === 'user') {
-      return false;
-    }
-    if (getNonBodyKind(nextMessage)) {
-      return true;
-    }
+    if (messages[nextIndex].type === 'user') return false;
+    if (isAssistantBody(messages[nextIndex])) return true;
   }
   return false;
 }
 
-/**
- * Detect whether another assistant body appears later in the same turn.
- */
-function hasLaterAssistantBodyBeforeNextUser(messages: ChatMessage[], index: number): boolean {
+/** Detect process activity after this message but before the next user turn. */
+function hasLaterNonBodyBeforeNextUser(messages: ChatMessage[], index: number): boolean {
   for (let nextIndex = index + 1; nextIndex < messages.length; nextIndex += 1) {
-    const nextMessage = messages[nextIndex];
-    if (nextMessage.type === 'user') {
-      return false;
-    }
-    if (isAssistantBody(nextMessage)) {
-      return true;
-    }
+    if (messages[nextIndex].type === 'user') return false;
+    if (getNonBodyKind(messages[nextIndex])) return true;
   }
   return false;
 }
@@ -159,20 +157,6 @@ function getCommandCount(message: ChatMessage): number {
   if (message.type === 'tool_result' && !message.toolInput) {
     return 0;
   }
-  const toolInput = parseToolInput(message.toolInput);
-  if (toolInput && typeof toolInput === 'object') {
-    const commands = (toolInput as { commands?: unknown }).commands;
-    if (Array.isArray(commands)) {
-      return commands.length;
-    }
-    const command = (toolInput as { command?: unknown }).command;
-    if (typeof command === 'string' && command.trim()) {
-      return countCommandLines(command);
-    }
-  }
-  if (typeof toolInput === 'string') {
-    return countCommandsFromToolInputText(toolInput);
-  }
   return 1;
 }
 
@@ -191,7 +175,7 @@ function appendNonBodyItem(
     ? String(message.toolCallId || message.toolId || message.messageKey || `tool-${index}`)
     : String(message.messageKey || `thinking-${index}`);
   const previous = items[items.length - 1];
-  if (previous && previous.kind === kind && previous.groupKey === groupKey) {
+  if (previous && previous.kind === kind && (kind === 'tool-group' || previous.groupKey === groupKey)) {
     previous.messages.push(message);
     previous.commandCount += kind === 'tool-group' ? getCommandCount(message) : 0;
     return;
@@ -247,18 +231,14 @@ export function buildTurnDisplayBlocks(
       return;
     }
 
-    const hasPendingTurnActivity = pendingItems.length > 0;
-    const hasLaterAssistantBody = hasLaterAssistantBodyBeforeNextUser(messages, index);
-    if (
-      isAssistantBody(message) &&
-      hasLaterAssistantBody &&
-      (hasLaterNonBodyBeforeNextUser(messages, index) || hasPendingTurnActivity)
-    ) {
-      appendNonBodyItem(pendingItems, message, 'thinking-group', true, index);
-      return;
-    }
-
     if (isAssistantBody(message)) {
+      if (
+        hasLaterAssistantBodyBeforeNextUser(messages, index)
+        && (pendingItems.length > 0 || hasLaterNonBodyBeforeNextUser(messages, index))
+      ) {
+        appendNonBodyItem(pendingItems, message, 'thinking-group', true, index);
+        return;
+      }
       const isActiveTailBody = options.activeTailDefaultOpen === true && index === messages.length - 1;
       flushPending(
         isLiveProcessMessage(message) || isActiveTailBody,

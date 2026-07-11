@@ -64,6 +64,20 @@ test('tool configs preserve fallback, hidden result, and executable output conte
   assert.equal(content, 'actual command output');
 });
 
+test('functions.exec exposes the nested shell command instead of transport code', () => {
+  /** 用户只应看到真实命令及其输出，不应看到 JavaScript 调用包装或 Parameters。 */
+  const config = getToolConfig('functions.exec');
+  const props = config.input.getContentProps?.(
+    'const r = await tools.exec_command({cmd:"rtk git status --short",yield_time_ms:5000});text(r.output)',
+    { toolResult: { content: 'clean' } },
+  );
+
+  assert.equal(config.input.type, 'content');
+  assert.equal(props?.payload.code, 'rtk git status --short');
+  assert.equal(props?.payload.output, 'clean');
+  assert.equal(getToolConfig('Exec').input.type, 'content');
+});
+
 test('session routing helpers keep workflow and project-scoped messages isolated', () => {
   /**
    * workflow child session 发起后续操作时，必须携带 workflow 路由上下文并按项目隔离 realtime 消息。

@@ -77,10 +77,10 @@ export default function TurnNonBodyGroup({
 }: TurnNonBodyGroupProps) {
   const [isOpen, setIsOpen] = useState(block.defaultOpen);
   const isToolOnlyBlock = block.items.every((item) => item.kind === 'tool-group');
-  const toolInvocationCount = block.items.reduce(
-    (total, item) => total + Math.max(1, item.commandCount),
-    0,
-  );
+  const toolInvocationCount = block.items.filter((item) => item.kind === 'tool-group').length;
+  const toolInvocationLabel = toolInvocationCount === 1
+    ? '一次工具调用'
+    : `${toolInvocationCount}次工具调用`;
 
   useEffect(() => {
     setIsOpen(block.defaultOpen);
@@ -116,13 +116,16 @@ export default function TurnNonBodyGroup({
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
-          <span>{`工具调用${toolInvocationCount}次`}</span>
+          <span>正文前过程</span>
         </summary>
 
         {isOpen && (
-          <div data-testid="turn-tool-list" className="mt-2 space-y-2 pl-[18px]">
-            {block.items.flatMap((item, itemIndex) =>
-              item.messages.map((message, messageIndex) => renderChildMessage(
+          <details data-testid="turn-tool-list" className="mt-2 pl-[18px]">
+            <summary className="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-300">
+              {toolInvocationLabel}
+            </summary>
+            <div className="mt-2 space-y-2 pl-[18px]">
+            {block.items.flatMap((item, itemIndex) => item.messages.map((message, messageIndex) => renderChildMessage(
                 message,
                 blockIndex * 1000 + itemIndex * 100 + messageIndex,
                 {
@@ -137,9 +140,9 @@ export default function TurnNonBodyGroup({
                   selectedProject,
                   provider,
                 },
-              )),
-            )}
-          </div>
+              ))) }
+            </div>
+          </details>
         )}
       </details>
     );
@@ -165,7 +168,7 @@ export default function TurnNonBodyGroup({
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
-        <span>思考与工具调用</span>
+        <span>正文前过程</span>
       </summary>
 
       {isOpen && (
@@ -191,24 +194,9 @@ export default function TurnNonBodyGroup({
             }
 
             return (
-              <details
-                key={item.groupKey}
-                open={item.defaultOpen}
-                className="group/tool rounded border border-gray-200/70 bg-white/70 px-2.5 py-2 dark:border-gray-800 dark:bg-gray-950/20"
-              >
-                <summary
-                  data-testid="turn-tool-group"
-                  className="flex cursor-pointer select-none items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
-                >
-                  <svg
-                    className="h-3 w-3 flex-shrink-0 transition-transform duration-150 group-open/tool:rotate-90"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                  <span>{item.commandCount > 1 ? `${item.commandCount} commands` : '工具调用'}</span>
+              <details key={item.groupKey} data-testid="turn-tool-group" className="rounded border border-gray-200/70 px-2 py-1 dark:border-gray-700/60">
+                <summary className="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-300">
+                  {item.commandCount === 1 ? '一次工具调用' : `${item.commandCount}次工具调用`}
                 </summary>
                 <div className="mt-2 space-y-2 pl-[18px]">
                   {item.messages.map((message, messageIndex) => (

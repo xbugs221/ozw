@@ -276,9 +276,24 @@ export function getExecResultContent(result: unknown): string {
 
 function getShellCommandInput(input: unknown): string {
   const command = typeof input === 'string'
-    ? input
+    ? extractNestedExecCommand(input)
     : getStringField(input, 'command') || getStringField(input, 'cmd');
   return stripLoginShellCommandPrefix(String(command || ''));
+}
+
+/** Extract the actual command from the JavaScript wrapper used by functions.exec. */
+function extractNestedExecCommand(source: string): string {
+  const match = source.match(/\b(?:cmd|command)\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)/s);
+  if (!match) return source;
+  const literal = match[1];
+  if (literal.startsWith('"')) {
+    try {
+      return JSON.parse(literal);
+    } catch {
+      return literal.slice(1, -1);
+    }
+  }
+  return literal.slice(1, -1).replace(/\\(['`\\])/g, '$1');
 }
 
 /**
@@ -450,6 +465,30 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     result: {
       hidden: true
     }
+  },
+
+  'functions.exec': {
+    input: {
+      type: 'content',
+      contentType: 'context-command',
+      getContentProps: (input, helpers) => ({
+        payload: getShellCommandPayload(input, helpers?.toolResult),
+        variant: 'shell-command',
+      })
+    },
+    result: { hidden: true }
+  },
+
+  Exec: {
+    input: {
+      type: 'content',
+      contentType: 'context-command',
+      getContentProps: (input, helpers) => ({
+        payload: getShellCommandPayload(input, helpers?.toolResult),
+        variant: 'shell-command',
+      })
+    },
+    result: { hidden: true }
   },
 
   write_stdin: {
