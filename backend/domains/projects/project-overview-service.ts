@@ -362,7 +362,7 @@ async function mergeProviderSessionsWithRoutes(
 }
 
 /**
- * Persist stable route numbers for discovered Codex sessions by creation time.
+ * Persist stable route numbers for discovered top-level Codex sessions by creation time.
  */
 async function ensureCodexRouteRecords(projectPath: string, providerSessions: LooseRecord[]): Promise<void> {
   const config = await loadProjectConfig(projectPath);
@@ -373,7 +373,17 @@ async function ensureCodexRouteRecords(projectPath: string, providerSessions: Lo
   ]).filter(Boolean));
   let changed = false;
   const sortedSessions = [...providerSessions]
-    .filter((session) => session?.id && !existingSessionIds.has(String(session.id)))
+    .filter((session) => {
+      /**
+       * PURPOSE: Provider subagents are internal execution threads and must not
+       * consume user-visible cN routes even before overview filtering runs.
+       */
+      const sessionId = String(session?.id || '').trim();
+      const sourceSessionId = String(session?.sourceSessionId || session?.source_session_id || '').trim();
+      const isProviderSubagent = session?.origin === 'workflow'
+        || Boolean(sourceSessionId && sourceSessionId !== sessionId);
+      return Boolean(sessionId) && !existingSessionIds.has(sessionId) && !isProviderSubagent;
+    })
     .sort((a, b) => new Date(a.createdAt || a.updated_at || a.lastActivity || 0).getTime()
       - new Date(b.createdAt || b.updated_at || b.lastActivity || 0).getTime());
   for (const session of sortedSessions) {

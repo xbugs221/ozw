@@ -60,6 +60,31 @@ function getSessionActivityTimeMs(session: LooseRecord): number {
 }
 
 /**
+ * Merge one persisted cN route with the authoritative provider header.
+ */
+function mergeRoutedProviderSession(providerSession: LooseRecord, routeSession: LooseRecord): LooseRecord {
+  /**
+   * PURPOSE: Old auto-import routes may have no origin. A repaired JSONL header
+   * that marks the provider thread as workflow-owned must not be overwritten by
+   * that stale empty value.
+   */
+  return {
+    ...providerSession,
+    ...routeSession,
+    origin: providerSession.origin === 'workflow'
+      ? 'workflow'
+      : (routeSession.origin || providerSession.origin),
+    sourceSessionId: providerSession.sourceSessionId
+      || providerSession.source_session_id
+      || routeSession.sourceSessionId
+      || routeSession.source_session_id,
+    lastActivity: providerSession.lastActivity || routeSession.lastActivity,
+    updated_at: providerSession.updated_at || routeSession.updated_at,
+    createdAt: routeSession.createdAt || providerSession.createdAt,
+  };
+}
+
+/**
  * 判断旧版本误记为 manual 的 workflow 角色会话，避免历史内部子任务污染手动列表。
  */
 function isLegacyWorkflowRolePromptSession(session: LooseRecord): boolean {
@@ -126,19 +151,17 @@ export function buildProviderSessionListReadModel(input: ProviderSessionListInpu
     const providerSessionId = getBoundProviderSessionId(session);
     const providerSession = providerSessionId ? providerById.get(providerSessionId) : null;
     return providerSession
-      ? {
-          ...providerSession,
-          ...session,
-          lastActivity: providerSession.lastActivity || session.lastActivity,
-          updated_at: providerSession.updated_at || session.updated_at,
-          createdAt: session.createdAt || providerSession.createdAt,
-        }
+      ? mergeRoutedProviderSession(providerSession, session)
       : session;
   });
 
   const sessions = Array.from(
     new Map([...standaloneProviderSessions, ...routedSessions].map((session) => [session?.id, session])).values(),
   )
+    .filter((session) => !excludeWorkflowChildSessions || (
+      !isLegacyWorkflowRolePromptSession(session)
+      && !isWorkflowOwnedProviderSession(session, workflowOwnedSessionIds)
+    ))
     .filter((session) => includeHidden || !isHiddenArchivedSession(session))
     .sort((sessionA, sessionB) => getSessionActivityTimeMs(sessionB) - getSessionActivityTimeMs(sessionA));
 

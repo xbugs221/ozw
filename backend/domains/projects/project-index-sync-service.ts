@@ -24,6 +24,7 @@ import {
   parsePiSessionHeader,
 } from './provider-transcript-read-model.js';
 import { providerSessionIndexDb } from '../../provider-session-index-store.js';
+import { selectProviderBackfillFiles } from './project-index-backfill-selection.js';
 
 const BACKFILL_FILE_LIMIT = (() => {
   const parsed = Number.parseInt(process.env.PROJECT_INDEX_BACKFILL_FILE_LIMIT || '', 10);
@@ -319,11 +320,12 @@ export async function backfillProjectIndex(): Promise<{ manualCount: number; pro
   const config = await loadProjectConfig();
   const manualCount = await backfillManualProjects(config);
   let providerCount = 0;
-  const providerFiles = [
-    ...(await listCodexSessionFiles()).map((filePath) => ({ provider: 'codex' as const, filePath })),
-    ...(await listPiSessionFiles()).map((filePath) => ({ provider: 'pi' as const, filePath })),
-  ];
-  for (const { provider, filePath } of providerFiles.reverse().slice(0, BACKFILL_FILE_LIMIT)) {
+  const [codexFiles, piFiles] = await Promise.all([
+    listCodexSessionFiles(),
+    listPiSessionFiles(),
+  ]);
+  const providerFiles = selectProviderBackfillFiles(codexFiles, piFiles, BACKFILL_FILE_LIMIT);
+  for (const { provider, filePath } of providerFiles) {
     try {
       const session = provider === 'codex'
         ? await parseCodexSessionHeader(filePath)

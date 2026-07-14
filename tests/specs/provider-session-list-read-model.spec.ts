@@ -179,6 +179,45 @@ test('Provider 会话列表过滤 JSONL 明确标记的内部子代理', () => {
   assert.deepEqual(output.map((session) => session.id), ['manual-session']);
 });
 
+test('Provider 权威来源覆盖旧 cN 路由的空来源并隐藏子代理', () => {
+  /**
+   * PURPOSE: Reproduce a stale auto-import route created before Codex subagent
+   * metadata was indexed; the repaired provider header must remain authoritative.
+   */
+  const output = buildProviderSessionListReadModel({
+    provider: 'codex',
+    providerSessions: [
+      {
+        id: 'stale-routed-subagent',
+        origin: 'workflow',
+        sourceSessionId: 'top-level-parent',
+        title: '与父会话相同的继承请求',
+        lastActivity: '2026-07-14T02:00:00.000Z',
+      },
+      {
+        id: 'top-level-parent',
+        title: '用户创建的顶层会话',
+        lastActivity: '2026-07-14T01:59:00.000Z',
+      },
+    ],
+    manualDrafts: [
+      {
+        id: 'stale-routed-subagent',
+        routeIndex: 415,
+        provider: 'codex',
+        providerSessionId: 'stale-routed-subagent',
+        origin: undefined,
+        title: '与父会话相同的继承请求',
+      },
+    ],
+    workflowOwnedSessionIds: new Set(),
+    excludeWorkflowChildSessions: true,
+    includeHidden: true,
+  });
+
+  assert.deepEqual(output.map((session) => session.id), ['top-level-parent']);
+});
+
 test('projects.ts 调用 Provider 会话列表 read model 而不是内联核心过滤规则', async () => {
   /**
    * 业务场景：后续修复项目首页会话展示时，开发者能先改项目域小模块和小测试，
