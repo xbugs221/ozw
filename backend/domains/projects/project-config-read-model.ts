@@ -162,14 +162,14 @@ export function buildProjectChatRecord(
   if (typeof metadata.providerSessionId === 'string') {
     record.providerSessionId = metadata.providerSessionId;
   }
-  if (typeof metadata.workflowId === 'string') {
-    record.workflowId = metadata.workflowId;
+  if (typeof metadata.workflowId === 'string' && metadata.workflowId.trim()) {
+    record.workflowId = metadata.workflowId.trim();
     record.origin = SESSION_ORIGIN_WORKFLOW;
   } else if (metadata.origin === SESSION_ORIGIN_MANUAL) {
     record.origin = SESSION_ORIGIN_MANUAL;
   }
-  if (typeof metadata.stageKey === 'string') {
-    record.stageKey = metadata.stageKey;
+  if (typeof metadata.stageKey === 'string' && metadata.stageKey.trim()) {
+    record.stageKey = metadata.stageKey.trim();
   }
   const createdAt = readConfigTimestamp(
     metadata.createdAt,

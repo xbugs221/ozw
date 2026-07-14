@@ -52,6 +52,20 @@ test('Scenario: 保存项目配置时写入 v2 分组结构', async () => {
   });
 });
 
+test('Scenario: 空工作流字段不会把前端新会话误标为工作流会话', async () => {
+  await withIsolatedProject(async ({ projectPath }) => {
+    const project = await addProjectManually(projectPath, 'Manual Origin Demo');
+    const session = await createManualSessionDraft(project.name, projectPath, 'codex', '普通会话', {
+      workflowId: '',
+      stageKey: '',
+    });
+    const config = await loadProjectConfig(projectPath);
+    const routeIndex = String(session.routeIndex);
+    assert.equal(config.chat?.[routeIndex]?.origin, 'manual');
+    assert.equal(config.chat?.[routeIndex]?.workflowId, undefined);
+  });
+});
+
 test('Scenario: 重复保存相同项目配置不会刷新 conf.json', async () => {
   await withIsolatedProject(async ({ projectPath }) => {
     await saveProjectConfig({

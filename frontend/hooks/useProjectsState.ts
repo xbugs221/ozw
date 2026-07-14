@@ -59,15 +59,7 @@ function buildSessionNavigationUrl(
   const projectPath = session.projectPath || project.fullPath || project.path || '';
 
   if (hasStableSessionRoute(session)) {
-    const route = buildProjectSessionRoute(project, session);
-    if (provider !== 'pi') {
-      return route;
-    }
-    const params = new URLSearchParams({
-      provider,
-      projectPath,
-    });
-    return `${route}?${params.toString()}`;
+    return buildProjectSessionRoute(project, session);
   }
 
   const params = new URLSearchParams({
@@ -550,10 +542,7 @@ export function useProjectsState({
       const baseRoute = targetWorkflow
         ? buildWorkflowChildSessionRoute(projectWithSyntheticSession, targetWorkflow, syntheticSession)
         : buildProjectSessionRoute(projectWithSyntheticSession, syntheticSession);
-      const routeWithProvider = provider === 'pi'
-        ? `${baseRoute}${baseRoute.includes('?') ? '&' : '?'}provider=pi&projectPath=${encodeURIComponent(syntheticSession.projectPath || projectWithSyntheticSession.fullPath || projectWithSyntheticSession.path || '')}`
-        : baseRoute;
-      navigate(routeWithProvider);
+      navigate(baseRoute);
       return { ok: true as const };
     },
     [navigate, projects],

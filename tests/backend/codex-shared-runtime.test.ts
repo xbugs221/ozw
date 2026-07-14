@@ -69,6 +69,23 @@ test('daemon 存在不等于目标旧式活动线程属于共享运行时', () =
   assert.equal(attach.commandArgs, null);
 });
 
+test('共享 daemon 已认领的线程在刷新状态未知时仍可安全复连', () => {
+  /** 浏览器刷新会丢失瞬态处理状态，daemon 的线程归属才是后端真值。 */
+  const attach = resolveCodexTerminalAttachPlan({
+    providerSessionId: 'shared-idle-thread',
+    managedTmuxExists: false,
+    sharedRuntime: {
+      ready: true,
+      endpoint: 'unix:///tmp/live.sock',
+      threadOwned: true,
+      activeTurnOwned: false,
+    },
+    externalSessionState: 'unknown',
+  });
+  assert.equal(attach.action, 'remote-tui');
+  assert.deepEqual(attach.commandArgs, ['--remote', 'unix:///tmp/live.sock', 'resume', 'shared-idle-thread']);
+});
+
 test('代理凭据参与单向指纹但不会进入诊断', () => {
   /** 同一代理主机的凭据轮换必须触发漂移，同时保持用户可见信息脱敏。 */
   const before = resolveCodexDaemonNetworkPolicy({

@@ -22,8 +22,7 @@ export function resolveCodexTerminalAttachPlan(input: {
   if (input.managedTmuxExists) {
     return { action: 'attach-tmux', commandArgs: null, reason: null, requiresOzwServer: true, mayInterruptActiveTurn: false, sessionFailed: false };
   }
-  const sharedHandoffVerified = input.sharedRuntime.threadOwned === true
-    && (input.externalSessionState === 'idle' || input.sharedRuntime.activeTurnOwned === true);
+  const sharedHandoffVerified = input.sharedRuntime.threadOwned === true;
   if (input.sharedRuntime.ready && input.sharedRuntime.endpoint && input.providerSessionId && sharedHandoffVerified) {
     return {
       action: 'remote-tui',

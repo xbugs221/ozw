@@ -257,6 +257,7 @@ export function useShellConnection({
 
     return {
       type: 'init',
+      projectName: currentSession?.__projectName || currentProject.name || '',
       projectPath: getShellProjectPath(currentProject, currentSession),
       sessionId: isPlainShellRef.current ? null : providerSessionId,
       routeSessionId: isPlainShellRef.current ? null : routeSessionId,

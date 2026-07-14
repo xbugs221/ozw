@@ -763,6 +763,58 @@ test('concurrent session starts do not cross-assign thread/started notifications
   recordProtocolEvidence('concurrent session ownership: thread/started notifications do not cross-assign provider thread ids');
 });
 
+test('concurrent terminal reconnects create only one shared thread for the same cN route', async () => {
+  const {
+    ensureCodexAppServerThread,
+    clearCodexAppServerSessionsForTest,
+  } = await import('../../backend/codex-app-server-runtime.ts');
+  clearCodexAppServerSessionsForTest();
+  let startCount = 0;
+  const transport = {
+    async request(method) {
+      if (method === 'thread/start') {
+        startCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { thread: { id: 'thread_shared_once' } };
+      }
+      return {};
+    },
+    onNotification() {},
+    close() {},
+  };
+
+  /** 同一卡片刷新和重连并发到达时必须共享同一个初始化承诺。 */
+  const results = await Promise.all([
+    ensureCodexAppServerThread({ ozwSessionId: 'c9', projectPath: '/tmp/shared' }, transport),
+    ensureCodexAppServerThread({ ozwSessionId: 'c9', projectPath: '/tmp/shared' }, transport),
+  ]);
+  assert.equal(startCount, 1);
+  assert.deepEqual(results, [
+    { providerSessionId: 'thread_shared_once' },
+    { providerSessionId: 'thread_shared_once' },
+  ]);
+});
+
+test('new remote TUI captures the exact shared thread before binding its cN route', async () => {
+  const {
+    beginCodexRemoteTuiThreadCapture,
+    clearCodexAppServerSessionsForTest,
+  } = await import('../../backend/codex-app-server-runtime.ts');
+  clearCodexAppServerSessionsForTest();
+  const handlers = [];
+  const transport = {
+    async request() { return { data: [] }; },
+    onNotification(handler) { handlers.push(handler); },
+    close() {},
+  };
+  const capture = await beginCodexRemoteTuiThreadCapture({ projectPath: '/tmp/capture' }, transport);
+  handlers.forEach((handler) => handler({
+    method: 'thread/started',
+    params: { thread: { id: 'thread-from-tui', cwd: '/tmp/capture' } },
+  }));
+  assert.deepEqual(await capture.threadStarted, { providerSessionId: 'thread-from-tui' });
+});
+
 test('writes Codex app-server protocol runtime evidence', async () => {
   assert.ok(
     protocolEvidence.length >= 4,

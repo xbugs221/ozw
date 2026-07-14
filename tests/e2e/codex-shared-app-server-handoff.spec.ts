@@ -8,7 +8,11 @@ import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createStdioAppServerTransport, type CodexAppServerTransport } from '../../backend/domains/codex-app-server/stdio-transport.ts';
-import { writeCodexDaemonNetworkState } from '../../backend/domains/codex-app-server/daemon-network-policy.ts';
+import { createTmuxTerminalRuntime } from '../../backend/server/terminal-tmux-runtime.ts';
+import {
+  resolveCodexDaemonNetworkPolicy,
+  writeCodexDaemonNetworkState,
+} from '../../backend/domains/codex-app-server/daemon-network-policy.ts';
 import {
   authHeaders,
   authenticatePage,
@@ -58,6 +62,14 @@ async function prepareRealDaemon(): Promise<Record<string, unknown>> {
   }
   await daemon('enable-remote-control');
   await daemon('start');
+  const networkPolicy = resolveCodexDaemonNetworkPolicy({
+    mode: process.env.OZW_CODEX_PROXY_MODE === 'off' ? 'off' : 'inherit',
+    env: process.env,
+  });
+  writeCodexDaemonNetworkState(CODEX_HOME, {
+    appliedFingerprint: networkPolicy.fingerprint,
+    pendingFingerprint: null,
+  });
   daemonStartedByTest = true;
   return JSON.parse(await daemon('version')) as Record<string, unknown>;
 }
@@ -81,6 +93,14 @@ function stopRemoteTui(child: ChildProcess): void {
 /** 关闭连接并等待 proxy 正常退出。 */
 function closeTransport(transport: CodexAppServerTransport): void {
   transport.close();
+}
+
+/** 清理隔离夹具上一次失败遗留的同名 tmux，避免错误复用旧线程。 */
+async function killFixtureTmux(projectPath: string, routeSessionId: string): Promise<void> {
+  const runtime = createTmuxTerminalRuntime(`${projectPath}_codex_route:${routeSessionId}`);
+  for (const sessionName of [runtime.sessionName, ...runtime.legacySessionNames]) {
+    await execFileAsync('tmux', ['kill-session', '-t', sessionName]).catch(() => undefined);
+  }
 }
 
 /** 读取 Unix Socket 的真实 daemon 进程号，禁止以空值相等冒充生命周期稳定。 */
@@ -144,6 +164,7 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
   const draftPayload = await draftResponse.json() as { session?: { id?: string } };
   const routeSessionId = String(draftPayload.session?.id || '');
   expect(routeSessionId).toMatch(/^c\d+$/);
+  await killFixtureTmux(projectPath, routeSessionId);
   const finalizeResponse = await request.post(
     `/api/projects/${encodeURIComponent(projectName)}/manual-sessions/${routeSessionId}/finalize`,
     { headers: authHeaders(), data: { provider: 'codex', actualSessionId: threadId, projectPath } },
@@ -160,6 +181,36 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
   const ozwSnapshot = await observer.request('thread/read', { threadId, includeTurns: true });
   assertActiveTurnSnapshot(ozwSnapshot, threadId, turnId);
 
+  /**
+   * Create an OZW-only cN route and let the shell backend create and bind its
+   * real shared thread. Reloading the same URL must keep one route and no warning.
+   */
+  const newDraftResponse = await request.post(`/api/projects/${encodeURIComponent(projectName)}/manual-sessions`, {
+    headers: authHeaders(),
+    data: { provider: 'codex', label: '刷新回绑验收', projectPath },
+  });
+  expect(newDraftResponse.ok()).toBeTruthy();
+  const newDraftPayload = await newDraftResponse.json() as { session?: { id?: string; routeIndex?: number } };
+  const newRouteSessionId = String(newDraftPayload.session?.id || '');
+  const newRouteIndex = Number(newDraftPayload.session?.routeIndex);
+  await killFixtureTmux(projectPath, newRouteSessionId);
+  await page.goto(`${routePrefix}/${newRouteSessionId}`, { waitUntil: 'networkidle' });
+  await page.getByTestId('tab-shell').click();
+  await expect(page.getByTestId('unsafe-codex-handoff-warning')).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: /Terminal input|消息输入|Message input/i })).toBeVisible();
+  await waitFor(async () => {
+    const response = await request.get('/api/codex/sessions', {
+      headers: authHeaders(),
+      params: { projectPath },
+    });
+    const payload = await response.json() as { sessions?: Array<{ routeIndex?: number; providerSessionId?: string }> };
+    return payload.sessions?.some((session) => session.routeIndex === newRouteIndex && Boolean(session.providerSessionId)) === true;
+  }, 20_000);
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.getByTestId('unsafe-codex-handoff-warning')).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: /Terminal input|消息输入|Message input/i })).toBeVisible();
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'ozw-new-session-refresh-rebound.png'), fullPage: true });
+
   const diagnosticsResponse = await request.get('/api/diagnostics/codex-shared-runtime', { headers: authHeaders() });
   const diagnostics = await diagnosticsResponse.json() as { network?: { fingerprint?: string } };
   writeCodexDaemonNetworkState(CODEX_HOME, {
@@ -175,6 +226,17 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
   const afterSnapshot = await observer.request('thread/read', { threadId, includeTurns: true });
   expect(JSON.stringify(afterSnapshot)).toContain(threadId);
   expect(JSON.stringify(afterSnapshot)).toContain(turnId);
+
+  /**
+   * Refresh the real cN route after the shared turn becomes idle. The project
+   * overview does not persist transient isProcessing state, so ownership from
+   * the daemon must still be sufficient to reconnect without a false warning.
+   */
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.getByTestId('unsafe-codex-handoff-warning')).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: /Terminal input|消息输入|Message input/i })).toBeVisible();
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'idle-thread-refresh-reconnected.png'), fullPage: true });
+
   stopRemoteTui(tui);
   closeTransport(observer);
   closeTransport(owner);

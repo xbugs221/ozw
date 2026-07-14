@@ -39,7 +39,7 @@ import {
 } from '../session/renderSnapshotController';
 import { SESSION_BULK_MESSAGE_PAGE_SIZE } from '../session/sessionBulkMessageLoader';
 import { getSessionMessageRawLineCursor } from '../session/sessionMessageLoader';
-import { captureSessionScrollSnapshot, restoreSessionScrollTop } from '../session/sessionScrollAnchor';
+import { captureSessionScrollSnapshot } from '../session/sessionScrollAnchor';
 import { useChatSearchNavigation } from './chatInterfaceSearchNavigation';
 import { useChatStatusReconcile } from './chatInterfaceStatusReconcile';
 
@@ -259,6 +259,7 @@ function ChatInterface({
   const renderSnapshotBudgetRequestCountRef = useRef(0);
   const renderSnapshotSearchFailureTargetRef = useRef<string | null>(null);
   const renderSnapshotGenerationRef = useRef(0);
+  const lastHandledRenderSnapshotRequestIdRef = useRef(0);
   const pendingRenderSnapshotScrollRestoreRef = useRef<ReturnType<typeof captureSessionScrollSnapshot>>(null);
   const [workflowTurnOutcomes, setWorkflowTurnOutcomes] = useState<Record<string, 'completed' | 'failed'>>({});
   const [isFollowingLatest, setIsFollowingLatest] = useState(false);
@@ -739,13 +740,13 @@ function ChatInterface({
   ]);
 
   useLayoutEffect(() => {
-    /** Restore the user's reading position after a Render-owned history prepend. */
+    /** Keep the reader's viewport offset after Render prepends older history. */
     const snapshot = pendingRenderSnapshotScrollRestoreRef.current;
     const container = renderedSnapshotScrollContainerRef.current;
     if (!snapshot || !container) {
       return;
     }
-    container.scrollTop = restoreSessionScrollTop(snapshot, container.scrollHeight);
+    container.scrollTop = snapshot.top;
     pendingRenderSnapshotScrollRestoreRef.current = null;
   }, [renderSnapshotState.historyRevision]);
 
@@ -815,7 +816,7 @@ function ChatInterface({
         if (scrollSnapshot) {
           await waitForStableRenderSnapshotHeight(container, scrollSnapshot.height);
           if (generation !== renderSnapshotGenerationRef.current) return;
-          container.scrollTop = restoreSessionScrollTop(scrollSnapshot, container.scrollHeight);
+          container.scrollTop = scrollSnapshot.top;
         }
       }
 
@@ -831,7 +832,7 @@ function ChatInterface({
       if (logicalPageScrollSnapshot) {
         await waitForStableRenderSnapshotHeight(container, logicalPageScrollSnapshot.height);
         if (generation !== renderSnapshotGenerationRef.current) return;
-        container.scrollTop = restoreSessionScrollTop(logicalPageScrollSnapshot, container.scrollHeight);
+        container.scrollTop = logicalPageScrollSnapshot.top;
       }
     } catch (error) {
       console.error('Error loading older render snapshot history:', error);
@@ -1020,10 +1021,15 @@ function ChatInterface({
      * The top-level Messages tab is the single entry for rendering a transcript
      * snapshot, so the TUI toolbar does not need a second Render button.
      */
-    if (renderSnapshotRequestId <= 0 || !selectedSession) {
+    if (
+      renderSnapshotRequestId <= 0
+      || !selectedSession
+      || renderSnapshotRequestId <= lastHandledRenderSnapshotRequestIdRef.current
+    ) {
       return;
     }
 
+    lastHandledRenderSnapshotRequestIdRef.current = renderSnapshotRequestId;
     void handleRenderSnapshot();
   }, [handleRenderSnapshot, renderSnapshotRequestId, selectedSession]);
 

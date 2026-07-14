@@ -47,10 +47,9 @@ function buildSessionNavigationUrl(
 
   if (hasStableSessionRoute(session)) {
     const route = buildProjectSessionRoute(project, session);
-    if (provider === 'pi') {
-      nextParams.set('provider', provider);
-      nextParams.set('projectPath', projectPath);
-    }
+    nextParams.delete('provider');
+    nextParams.delete('projectPath');
+    nextParams.delete('sessionSummary');
     return `${route}${nextParams.toString() ? `?${nextParams.toString()}` : ''}`;
   }
 

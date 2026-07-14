@@ -7,6 +7,12 @@ import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { probeSharedCodexThread } from '../domains/codex-app-server/shared-thread-probe.js';
+import { beginCodexRemoteTuiThreadCapture } from '../domains/codex-app-server/runtime-facade.js';
+import {
+    readProviderSessionBinding,
+    writeProviderSessionBinding,
+} from '../domains/provider-runtime/provider-session-binding.js';
+import { finalizeManualSessionRoute } from '../projects.js';
 import { resolveCodexTerminalAttachPlan } from './codex-terminal-attach-plan.js';
 import { createTmuxTerminalRuntime } from './terminal-tmux-runtime.js';
 
@@ -51,7 +57,7 @@ function buildProviderShellCommand(input: {
         return `Set-Location -Path "${projectPath}"; ${cliName}; powershell.exe -NoExit`;
     }
 
-    const providerCommand = hasSession && resumeSessionId ? resumeCommand : cliName;
+    const providerCommand = plannedCodexCommand || (hasSession && resumeSessionId ? resumeCommand : cliName);
     return `cd ${quotePosixShell(projectPath)} && exec "\${SHELL:-/bin/bash}" -lic ${quotePosixShell(`${buildPortableUserBinPathExport()}; { ${providerCommand}; }; exec "\${SHELL:-/bin/bash}" -l`)}`;
 }
 
@@ -187,15 +193,24 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
 
                 if (data.type === 'init') {
                     const projectPath = data.projectPath || process.cwd();
+                    const identity = resolveShellSessionIdentity(data);
                     const {
                         routeSessionId,
-                        providerSessionId,
-                        resumeSessionId,
                         ptyIdentity,
                         legacyPtyIdentities
-                    } = resolveShellSessionIdentity(data);
-                    const hasSession = Boolean(data.hasSession && resumeSessionId);
+                    } = identity;
+                    let providerSessionId = identity.providerSessionId;
+                    let resumeSessionId = identity.resumeSessionId;
                     const provider = normalizeShellProvider(data.provider);
+                    const projectName = typeof data.projectName === 'string' ? data.projectName : '';
+                    if (routeSessionId && provider !== 'plain-shell') {
+                        const persistedBinding = await readProviderSessionBinding(projectName, projectPath, routeSessionId);
+                        if (persistedBinding?.provider === provider) {
+                            providerSessionId = persistedBinding.providerSessionId;
+                            resumeSessionId = persistedBinding.providerSessionId;
+                        }
+                    }
+                    let hasSession = Boolean(data.hasSession && resumeSessionId) || Boolean(providerSessionId);
                     const initialCommand = data.initialCommand;
                     const isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell';
                     urlDetectionBuffer = '';
@@ -317,12 +332,30 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         let shellCommand;
                         let codexCommandArgs: string[] | null = null;
                         if (!isPlainShell && provider === 'codex') {
+                            if (!providerSessionId && routeSessionId && !managedTmuxExists) {
+                                const capture = await beginCodexRemoteTuiThreadCapture({
+                                    projectPath,
+                                });
+                                codexCommandArgs = ['--remote', capture.endpoint, '-C', projectPath];
+                                void capture.threadStarted.then(async ({ providerSessionId: capturedSessionId }) => {
+                                    await writeProviderSessionBinding({
+                                        projectName,
+                                        projectPath,
+                                        routeSessionId,
+                                        provider: 'codex',
+                                        providerSessionId: capturedSessionId,
+                                    });
+                                    await finalizeManualSessionRoute(projectName, routeSessionId, capturedSessionId, 'codex', projectPath);
+                                }).catch((error) => {
+                                    console.warn('[Shell] Failed to bind new Codex remote TUI thread:', error instanceof Error ? error.message : String(error));
+                                });
+                            }
                             const codexHome = process.env.CODEX_HOME || path.join(homedir(), '.codex');
                             const socketPath = path.join(codexHome, 'app-server-control', 'app-server-control.sock');
                             const sharedRuntimeProbe = providerSessionId
                                 ? await probeSharedCodexThread(socketPath, providerSessionId)
                                 : { ready: false, threadOwned: false, activeTurnOwned: false };
-                            const attachPlan = resolveCodexTerminalAttachPlan({
+                            const attachPlan = codexCommandArgs ? null : resolveCodexTerminalAttachPlan({
                                 providerSessionId,
                                 managedTmuxExists,
                                 sharedRuntime: {
@@ -335,7 +368,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                         ? 'idle'
                                         : 'unknown',
                             });
-                            if (attachPlan.action === 'blocked') {
+                            if (attachPlan?.action === 'blocked') {
                                 ws.send(JSON.stringify({
                                     type: 'handoff-blocked',
                                     reason: attachPlan.reason,
@@ -347,7 +380,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                 }));
                                 return;
                             }
-                            codexCommandArgs = attachPlan.commandArgs;
+                            codexCommandArgs = codexCommandArgs || attachPlan?.commandArgs || null;
                         }
                         if (isPlainShell) {
                             // Plain shell mode - open an interactive shell by default, or run the provided command.

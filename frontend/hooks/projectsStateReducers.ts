@@ -208,7 +208,7 @@ export function useProjectRouteSelectionSync({
       }
       return;
     }
-    const resolvedSelection = resolveRouteSelection(projects, locationPathname);
+    const resolvedSelection = resolveRouteSelection(projects, locationPathname, locationSearch);
     const resolvedProject = resolvedSelection.project;
     if (!resolvedProject) {
       if (normalizePathname(locationPathname) === '/') {

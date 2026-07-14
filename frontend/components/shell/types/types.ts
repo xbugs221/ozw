@@ -11,6 +11,7 @@ export type AuthCopyStatus = 'idle' | 'copied' | 'failed';
 
 export type ShellInitMessage = {
   type: 'init';
+  projectName: string;
   projectPath: string;
   sessionId: string | null;
   routeSessionId?: string | null;
