@@ -6,12 +6,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import { resolveFlowBatchesRoot, resolveFlowRunsRoot } from '../../backend/domains/workflows/flow-runtime-paths.ts';
+import { indexProviderSessionFile } from '../../backend/domains/projects/project-overview-service.ts';
 import {
   authenticatePage,
   openFixtureProject,
   PRIMARY_FIXTURE_PROJECT_PATH,
 } from './helpers/spec-test-helpers.ts';
-import { ensurePlaywrightFixture } from '../e2e/helpers/playwright-fixture.ts';
+import { ensurePlaywrightFixture, PLAYWRIGHT_FIXTURE_HOME } from '../e2e/helpers/playwright-fixture.ts';
 
 type MultiItemBatchChange = {
   runId?: string;
@@ -163,6 +164,48 @@ async function writeSessionsOnlyWorkflowState() {
   }, null, 2)}\n`, 'utf8');
 }
 
+async function writeCodexSubagentSession() {
+  /**
+   * PURPOSE: Seed the real Provider index with the Codex source structure that
+   * previously escaped oz state-based workflow ownership filtering.
+   */
+  ensurePlaywrightFixture({ preserveAuthDatabase: true });
+  const sessionId = 'codex-workflow-subagent-regression';
+  const sessionDir = path.join(PLAYWRIGHT_FIXTURE_HOME, '.codex', 'sessions', '2026', '07', '14');
+  const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(sessionPath, `${[
+    {
+      type: 'session_meta',
+      timestamp: '2031-07-14T02:00:00.000Z',
+      payload: {
+        id: sessionId,
+        parent_thread_id: 'oz-flow-root-session',
+        cwd: PRIMARY_FIXTURE_PROJECT_PATH,
+        source: {
+          subagent: {
+            thread_spawn: {
+              parent_thread_id: 'oz-flow-root-session',
+              depth: 1,
+              agent_path: '/root/regression',
+            },
+          },
+        },
+        thread_source: 'subagent',
+      },
+    },
+    {
+      type: 'event_msg',
+      timestamp: '2031-07-14T02:00:01.000Z',
+      payload: {
+        type: 'user_message',
+        message: '不应显示的工作流派生子代理',
+      },
+    },
+  ].map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+  await indexProviderSessionFile('codex', sessionPath);
+}
+
 test.describe('oz flow batch readonly workflows', () => {
   test.beforeEach(async ({ page }) => {
     await authenticatePage(page);
@@ -300,5 +343,24 @@ test.describe('oz flow batch readonly workflows', () => {
     await expect(page.getByTestId('project-overview-manual-sessions')).not.toContainText(
       'fixture-project manual-only session',
     );
+  });
+
+  test('Codex JSONL subagents stay out of the manual session panel', async ({ page }) => {
+    /**
+     * PURPOSE: Verify the user-visible project overview consumes Provider
+     * source classification even when oz flow state has no child session id.
+     */
+    await writeCodexSubagentSession();
+    await openFixtureProject(page, { reset: false });
+
+    const manualSessions = page.getByTestId('project-overview-manual-sessions');
+    await expect(manualSessions).toBeVisible();
+    await expect(manualSessions).not.toContainText('不应显示的工作流派生子代理');
+    const screenshotPath = path.join(
+      process.cwd(),
+      'docs/debug/20260714-1032-flow-subagent-manual-session/screenshots/manual-sessions-filtered.png',
+    );
+    await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
+    await manualSessions.screenshot({ path: screenshotPath });
   });
 });

@@ -112,6 +112,53 @@ test('Codex project discovery uses session_meta header and ignores malformed lat
   });
 });
 
+test('Codex subagent metadata classifies internal sessions as workflow-owned', async () => {
+  /**
+   * PURPOSE: Reproduce Codex child threads that oz flow state does not list,
+   * using the same source structure found in real provider transcripts.
+   */
+  await withTemporaryHome(async (homeDir) => {
+    const projectPath = path.join(homeDir, 'work', 'codex-subagent-project');
+    const sessionPath = path.join(
+      homeDir,
+      '.codex',
+      'sessions',
+      '2026',
+      '07',
+      '14',
+      'rollout-2026-07-14T02-00-00-codex-subagent.jsonl',
+    );
+
+    await fs.mkdir(projectPath, { recursive: true });
+    await writeJsonl(sessionPath, [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-07-14T02:00:00.000Z',
+        payload: {
+          id: 'codex-subagent',
+          parent_thread_id: 'workflow-root-session',
+          cwd: projectPath,
+          source: {
+            subagent: {
+              thread_spawn: {
+                parent_thread_id: 'workflow-root-session',
+                depth: 1,
+                agent_path: '/root/regression',
+              },
+            },
+          },
+          thread_source: 'subagent',
+        },
+      }),
+    ]);
+
+    const header = await parseCodexSessionHeader(sessionPath);
+    assert.equal(header.id, 'codex-subagent');
+    assert.equal(header.sourceSessionId, 'workflow-root-session');
+    assert.equal(header.origin, 'workflow');
+  });
+});
+
 test('Codex old-format fixture falls back to deep parse for cwd discovery', async () => {
   await withTemporaryHome(async (homeDir) => {
     const projectPath = path.join(homeDir, 'work', 'codex-old');

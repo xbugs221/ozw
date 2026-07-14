@@ -65,6 +65,7 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
   let messageCount = 0;
   let firstUserMessage = '';
   let sourceSessionId = '';
+  let origin = '';
   let hasSessionMeta = false;
   for await (const record of readJsonlRecords(filePath)) {
     if (typeof record.timestamp === 'string') {
@@ -75,7 +76,11 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
       hasSessionMeta = true;
       cwd = String(record.payload.cwd || cwd || '');
       model = String(record.payload.model || record.payload.model_provider || model || '');
-      sourceSessionId ||= String(record.payload.id || '');
+      const subagentParentThreadId = getCodexSubagentParentThreadId(record.payload);
+      sourceSessionId ||= subagentParentThreadId || String(record.payload.id || '');
+      if (subagentParentThreadId) {
+        origin = 'workflow';
+      }
     }
     if (!cwd && typeof record.cwd === 'string') {
       cwd = record.cwd;
@@ -115,8 +120,31 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     filePath,
     sessionFileName,
     sourceSessionId,
+    origin: origin || undefined,
     thread,
   };
+}
+
+/**
+ * Read the authoritative parent id from a Codex subagent session source.
+ */
+function getCodexSubagentParentThreadId(payload: LooseRecord): string {
+  /**
+   * PURPOSE: Provider child threads are internal sessions even when oz flow
+   * state has not enumerated them, so classification must not depend on titles.
+   */
+  const threadSpawn = payload?.source?.subagent?.thread_spawn;
+  const isSubagent = payload?.thread_source === 'subagent'
+    || (threadSpawn && typeof threadSpawn === 'object');
+  if (!isSubagent) {
+    return '';
+  }
+  return String(
+    threadSpawn?.parent_thread_id
+    || payload?.parent_thread_id
+    || payload?.forked_from_id
+    || '',
+  ).trim();
 }
 
 /**
