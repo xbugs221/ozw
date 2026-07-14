@@ -43,6 +43,8 @@ type RuntimeDependencies = {
 
 const productionSessionManager = new CodexAppServerSessionManager();
 let sharedTransport: CodexAppServerTransport | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempt = 0;
 
 const productionDependencies: RuntimeDependencies = {
   sessionManager: productionSessionManager,
@@ -59,12 +61,35 @@ function getOrCreateAppServerClient(): CodexAppServerTransport {
   if (!sharedTransport) {
     sharedTransport = createStdioAppServerTransport({
       onFailure: (message) => {
-        productionSessionManager.markRunningSessionsFailed(message);
+        productionSessionManager.markTransportDisconnected(message);
         sharedTransport = null;
+        scheduleSharedTransportReconnect();
       },
     });
   }
   return sharedTransport;
+}
+
+/** proxy 断开后渐进重连 daemon，并恢复所有现存 thread 的通知订阅。 */
+function scheduleSharedTransportReconnect(): void {
+  if (reconnectTimer) return;
+  const delayMs = Math.min(1000 * (2 ** reconnectAttempt), 15000);
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    try {
+      const transport = getOrCreateAppServerClient();
+      for (const session of productionSessionManager.getSessions()) {
+        subscribeSessionNotifications(session, transport);
+      }
+      await transport.request('thread/list', { limit: 1 });
+      reconnectAttempt = 0;
+    } catch (err) {
+      reconnectAttempt += 1;
+      console.warn('[codex-app-server] proxy reconnect failed', err instanceof Error ? err.message : String(err));
+      scheduleSharedTransportReconnect();
+    }
+  }, delayMs);
+  reconnectTimer.unref?.();
 }
 
 /**
@@ -270,6 +295,9 @@ export function getCodexAppServerSessionStatus(ozwSessionId: string, projectPath
  * 清理测试会话和共享 transport。
  */
 export function clearCodexAppServerSessionsForTest(): void {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  reconnectAttempt = 0;
   productionSessionManager.clear();
   productionDependencies.resetTransport();
 }

@@ -171,6 +171,7 @@ export function useShellRuntime({
     connectToShell,
     disconnectFromShell,
     resetShellConnection,
+    handoffBlockedReason,
   } = useShellConnection({
     wsRef,
     terminalRef,
@@ -224,6 +225,7 @@ export function useShellRuntime({
     isVirtualCtrlActive,
     authUrl,
     authUrlVersion,
+    handoffBlockedReason,
     setVirtualCtrlActive,
     sendTerminalInput,
     terminateShell,

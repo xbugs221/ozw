@@ -21,6 +21,7 @@ export type ShellInitMessage = {
   rows: number;
   initialCommand: string | null | undefined;
   isPlainShell: boolean;
+  externalSessionState?: 'running' | 'idle' | 'unknown';
 };
 
 export type ShellResizeMessage = {
@@ -91,6 +92,7 @@ export type UseShellRuntimeResult = {
   isVirtualCtrlActive: boolean;
   authUrl: string;
   authUrlVersion: number;
+  handoffBlockedReason: string;
   setVirtualCtrlActive: (isActive: boolean) => void;
   sendTerminalInput: (data: string) => boolean;
   terminateShell: () => boolean;

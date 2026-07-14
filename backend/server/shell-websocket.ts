@@ -4,6 +4,10 @@
  */
 import type { WebSocket } from 'ws';
 import { execFile } from 'node:child_process';
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { probeSharedCodexThread } from '../domains/codex-app-server/shared-thread-probe.js';
+import { resolveCodexTerminalAttachPlan } from './codex-terminal-attach-plan.js';
 import { createTmuxTerminalRuntime } from './terminal-tmux-runtime.js';
 
 type LooseRecord = Record<string, any>;
@@ -30,12 +34,16 @@ function buildProviderShellCommand(input: {
     projectPath: string;
     hasSession: boolean;
     resumeSessionId?: string | null;
+    codexCommandArgs?: string[] | null;
 }): string {
-    const { os, provider, projectPath, hasSession, resumeSessionId } = input;
+    const { os, provider, projectPath, hasSession, resumeSessionId, codexCommandArgs } = input;
     const cliName = provider === 'pi' ? 'pi' : 'codex';
-    const resumeCommand = provider === 'pi'
+    const plannedCodexCommand = provider === 'codex' && codexCommandArgs
+        ? `codex${codexCommandArgs.length ? ` ${codexCommandArgs.map(quotePosixShell).join(' ')}` : ''}`
+        : '';
+    const resumeCommand = plannedCodexCommand || (provider === 'pi'
         ? `${cliName} --session ${quotePosixShell(String(resumeSessionId || ''))}`
-        : `${cliName} resume ${quotePosixShell(String(resumeSessionId || ''))}`;
+        : `${cliName} resume ${quotePosixShell(String(resumeSessionId || ''))}`);
     if (os.platform() === 'win32') {
         if (hasSession && resumeSessionId) {
             return `Set-Location -Path "${projectPath}"; ${resumeCommand}; powershell.exe -NoExit`;
@@ -209,6 +217,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     ptySessionKey = primaryPtySessionKey;
                     let tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
                     let activeTmuxSessionName = tmuxRuntime.sessionName;
+                    let managedTmuxExists = false;
 
                     // Kill any existing login session before starting fresh
                     if (isLoginCommand) {
@@ -232,6 +241,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         const existingTmuxSessionName = await findExistingTmuxSessionName(tmuxRuntime);
                         if (existingTmuxSessionName) {
                             activeTmuxSessionName = existingTmuxSessionName;
+                            managedTmuxExists = true;
                         } else {
                             for (const legacyPtySessionKey of legacyPtySessionKeys) {
                                 const legacyTmuxRuntime = createTmuxTerminalRuntime(legacyPtySessionKey);
@@ -242,6 +252,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                 ptySessionKey = legacyPtySessionKey;
                                 tmuxRuntime = legacyTmuxRuntime;
                                 activeTmuxSessionName = legacyTmuxSessionName;
+                                managedTmuxExists = true;
                                 break;
                             }
                         }
@@ -304,6 +315,40 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     try {
                         // Prepare the shell command adapted to the platform and provider
                         let shellCommand;
+                        let codexCommandArgs: string[] | null = null;
+                        if (!isPlainShell && provider === 'codex') {
+                            const codexHome = process.env.CODEX_HOME || path.join(homedir(), '.codex');
+                            const socketPath = path.join(codexHome, 'app-server-control', 'app-server-control.sock');
+                            const sharedRuntimeProbe = providerSessionId
+                                ? await probeSharedCodexThread(socketPath, providerSessionId)
+                                : { ready: false, threadOwned: false, activeTurnOwned: false };
+                            const attachPlan = resolveCodexTerminalAttachPlan({
+                                providerSessionId,
+                                managedTmuxExists,
+                                sharedRuntime: {
+                                    ...sharedRuntimeProbe,
+                                    endpoint: `unix://${socketPath}`,
+                                },
+                                externalSessionState: data.externalSessionState === 'running' || data.isProcessing === true
+                                    ? 'running'
+                                    : data.externalSessionState === 'idle' || data.isProcessing === false
+                                        ? 'idle'
+                                        : 'unknown',
+                            });
+                            if (attachPlan.action === 'blocked') {
+                                ws.send(JSON.stringify({
+                                    type: 'handoff-blocked',
+                                    reason: attachPlan.reason,
+                                    sessionFailed: attachPlan.sessionFailed,
+                                }));
+                                ws.send(JSON.stringify({
+                                    type: 'output',
+                                    data: '\x1b[33m安全阻止：该外部 Codex 会话仍在运行且未接入共享 daemon。请返回原终端、等待完成或迁移到共享运行时。\x1b[0m\r\n',
+                                }));
+                                return;
+                            }
+                            codexCommandArgs = attachPlan.commandArgs;
+                        }
                         if (isPlainShell) {
                             // Plain shell mode - open an interactive shell by default, or run the provided command.
                             if (os.platform() === 'win32') {
@@ -322,6 +367,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                 projectPath,
                                 hasSession,
                                 resumeSessionId,
+                                codexCommandArgs,
                             });
                         } else {
                             throw new Error(`Unsupported shell provider: ${provider}`);

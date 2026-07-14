@@ -88,6 +88,7 @@ type UseShellConnectionResult = {
   connectToShell: () => void;
   disconnectFromShell: () => void;
   resetShellConnection: () => void;
+  handoffBlockedReason: string;
 };
 
 export function useShellConnection({
@@ -109,6 +110,7 @@ export function useShellConnection({
 }: UseShellConnectionOptions): UseShellConnectionResult {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [handoffBlockedReason, setHandoffBlockedReason] = useState('');
   const connectingRef = useRef(false);
   const manualDisconnectRef = useRef(false);
   const reconnectTimeoutRef = useRef<number | null>(null);
@@ -267,6 +269,11 @@ export function useShellConnection({
       rows: currentTerminal.rows,
       initialCommand: initialCommandRef.current,
       isPlainShell: isPlainShellRef.current,
+      externalSessionState: currentSession?.isProcessing === true
+        ? 'running'
+        : currentSession?.isProcessing === false
+          ? 'idle'
+          : 'unknown',
     } as const;
   }, [initialCommandRef, isPlainShellRef, providerRef, selectedProjectRef, selectedSessionRef, terminalRef]);
 
@@ -337,6 +344,11 @@ export function useShellConnection({
         const output = typeof message.data === 'string' ? message.data : '';
         handleProcessCompletion(output);
         terminalRef.current?.write(output);
+        return;
+      }
+
+      if (message.type === 'handoff-blocked') {
+        setHandoffBlockedReason(typeof message.reason === 'string' ? message.reason : 'external-active-session-not-shared');
         return;
       }
 
@@ -531,6 +543,7 @@ export function useShellConnection({
     setIsConnecting(false);
     connectingRef.current = false;
     setAuthUrl('');
+    setHandoffBlockedReason('');
   }, [clearHeartbeatTimers, clearReconnectTimer, clearTerminalScreen, closeSocket, setAuthUrl]);
 
   /**
@@ -575,5 +588,6 @@ export function useShellConnection({
     connectToShell,
     disconnectFromShell,
     resetShellConnection,
+    handoffBlockedReason,
   };
 }

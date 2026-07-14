@@ -322,8 +322,8 @@ test('Codex app-server default and bypass permissions stay in YOLO mode', async 
   assert.equal(defaultPolicy.approvalPolicy, 'never');
   assert.equal(bypassWithoutApprovalPolicy.sandbox, 'danger-full-access');
   assert.equal(bypassWithoutApprovalPolicy.approvalPolicy, 'never');
-  assert.ok(cliArgs.includes('sandbox_mode=danger-full-access'));
-  assert.ok(cliArgs.includes('approval_policy=never'));
+  assert.deepEqual(cliArgs.slice(0, 3), ['app-server', 'proxy', '--sock']);
+  assert.match(cliArgs[3], /app-server-control\.sock$/);
   assert.equal(cliArgs.includes('approval_policy=default'), false);
 
   evidenceRows.push({

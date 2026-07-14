@@ -144,6 +144,12 @@
       "contract": "契约能力",
       "contractMissing": "缺少契约能力",
       "path": "PATH"
+    },
+    "codexShared": {
+      "title": "Codex 共享运行时",
+      "mode": "运行模式",
+      "network": "网络模式",
+      "activeTurnWarning": "存在活动会话时，代理变化只提示确认，不会静默重启 daemon。"
     }
   },
   "permissions": {

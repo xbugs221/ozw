@@ -88,6 +88,24 @@ export class CodexAppServerSessionManager {
   }
 
   /**
+   * proxy 断开时保留 daemon 中的活动轮次，只重置客户端订阅并报告连接丢失。
+   */
+  markTransportDisconnected(errorMessage: string): void {
+    for (const session of this.sessions.values()) {
+      session.notificationSubscribed = false;
+      if (session.status !== 'running') continue;
+      const sessionId = session.providerThreadId || session.ozwSessionId;
+      session.writer?.send({
+        type: 'codex-connection-lost',
+        error: errorMessage,
+        sessionId,
+        provider: 'codex',
+        activeTurnPreserved: true,
+      });
+    }
+  }
+
+  /**
    * 清理所有测试 session，并释放 streaming batcher。
    */
   clear(): void {
@@ -116,6 +134,11 @@ export class CodexAppServerSessionManager {
       }
     }
     return result;
+  }
+
+  /** 返回会话快照，供 proxy 重连后恢复 notification 订阅。 */
+  getSessions(): CodexAppServerSession[] {
+    return [...this.sessions.values()];
   }
 
   /**

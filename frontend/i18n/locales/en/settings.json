@@ -144,6 +144,12 @@
       "contract": "Contract capabilities",
       "contractMissing": "Missing contract capabilities",
       "path": "PATH"
+    },
+    "codexShared": {
+      "title": "Codex shared runtime",
+      "mode": "Runtime mode",
+      "network": "Network mode",
+      "activeTurnWarning": "When active turns exist, proxy changes require confirmation and never restart the daemon silently."
     }
   },
   "permissions": {

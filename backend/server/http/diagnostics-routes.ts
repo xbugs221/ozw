@@ -3,6 +3,8 @@
  * 业务意义：诊断接口用于展示后端依赖与 provider 认证状态，应独立于服务启动入口。
  */
 
+import { getCodexSharedRuntimeDiagnostics } from '../../domains/codex-app-server/shared-runtime-diagnostics.js';
+
 /**
  * 注册后端诊断相关 HTTP 路由。
  */
@@ -33,6 +35,11 @@ export function registerDiagnosticsRoutes(deps: DiagnosticsRouteDeps): void {
     app.get('/api/diagnostics/runtime-dependencies', authenticateToken, async (_req: any, res: any) => {
         const diagnostics = await buildRuntimeReadinessReport();
         res.json(diagnostics);
+    });
+
+    app.get('/api/diagnostics/codex-shared-runtime', authenticateToken, async (_req: any, res: any) => {
+        /** 返回只读、已脱敏的共享 daemon 诊断，不触发启动或重启。 */
+        res.json(getCodexSharedRuntimeDiagnostics());
     });
 
     app.get('/api/agents/status', authenticateToken, async (_req: any, res: any) => {

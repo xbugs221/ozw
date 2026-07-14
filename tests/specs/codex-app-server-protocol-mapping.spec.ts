@@ -1,7 +1,7 @@
 // @ts-nocheck -- Historical app-server protocol acceptance keeps broad mocked transports; strict migration is tracked by proposal 4 follow-up after shared transport fixture extraction.
 /**
  * PURPOSE: Verify Codex app-server protocol mapping correctness:
- * - production transport spawns the daemon (not proxy)
+ * - production transport ensures a daemon and connects through its stdio proxy
  * - cold start resumes existing provider threads instead of creating new ones
  * - abort and abort-and-send include turnId and fail visibly on interrupt errors
  * - app-server notification types and deltas map to frontend-compatible shapes.
@@ -37,7 +37,7 @@ async function writeProtocolEvidence(): Promise<void> {
   );
 }
 
-test('production transport spawns codex app-server daemon instead of proxy', async () => {
+test('production transport connects to the independent daemon through proxy', async () => {
   const { buildCodexAppServerCliArgs } = await import(
     '../../backend/domains/codex-app-server/stdio-transport.ts'
   );
@@ -45,21 +45,19 @@ test('production transport spawns codex app-server daemon instead of proxy', asy
     new URL('../../backend/domains/codex-app-server/stdio-transport.ts', import.meta.url),
     'utf8',
   );
+  const lineTransportSource = await readFile(
+    new URL('../../backend/domains/codex-app-server/json-rpc-line-transport.ts', import.meta.url),
+    'utf8',
+  );
   const args = buildCodexAppServerCliArgs();
-  assert.deepEqual(args.slice(-3), ['app-server', '--listen', 'stdio://']);
-  assert.ok(
-    args.some((arg) => arg === 'sandbox_mode=danger-full-access'),
-    'production app-server must start with danger-full-access sandbox mode',
-  );
-  assert.ok(
-    args.some((arg) => arg === 'approval_policy=never'),
-    'production app-server must start with never approval policy',
-  );
-  assert.doesNotMatch(
+  assert.deepEqual(args.slice(0, 3), ['app-server', 'proxy', '--sock']);
+  assert.match(args[3], /app-server-control\.sock$/);
+  assert.match(
     runtimeSource,
-    /spawn\s*\(\s*['"]codex['"]\s*,\s*\[\s*['"]app-server['"]\s*,\s*['"]proxy['"]\s*\]/,
-    'must not spawn codex app-server proxy',
+    /spawnSync\(\s*['"]codex['"][\s\S]*ensureDaemonArgs/,
+    'production transport must ensure the independent daemon before connecting',
   );
+  assert.match(lineTransportSource, /child\.kill\(['"]SIGTERM['"]\)/, 'closing ozw must only close its proxy');
 });
 
 test('app-server runtime maps every Codex manual permission mode to YOLO', async () => {
@@ -82,7 +80,7 @@ test('app-server runtime maps every Codex manual permission mode to YOLO', async
 
 test('production transport initializes app-server before first business request', async () => {
   const runtimeSource = await readFile(
-    new URL('../../backend/domains/codex-app-server/stdio-transport.ts', import.meta.url),
+    new URL('../../backend/domains/codex-app-server/json-rpc-line-transport.ts', import.meta.url),
     'utf8',
   );
 
@@ -643,20 +641,29 @@ test('chat command runtime Codex branch does not unconditionally broadcast messa
   );
 });
 
-test('app-server transport close marks running sessions as failed and clears sharedTransport', async () => {
+test('app-server proxy close preserves daemon turns, resets subscriptions, and clears sharedTransport', async () => {
   const sessionManagerSource = await readFile(
     new URL('../../backend/domains/codex-app-server/session-manager.ts', import.meta.url),
     'utf8',
   );
   const transportSource = await readFile(
-    new URL('../../backend/domains/codex-app-server/stdio-transport.ts', import.meta.url),
+    new URL('../../backend/domains/codex-app-server/json-rpc-line-transport.ts', import.meta.url),
+    'utf8',
+  );
+  const runtimeFacadeSource = await readFile(
+    new URL('../../backend/domains/codex-app-server/runtime-facade.ts', import.meta.url),
     'utf8',
   );
 
   assert.match(
     sessionManagerSource,
-    /markRunningSessionsFailed\s*\(/,
-    'must define markRunningSessionsFailed to handle transport failure',
+    /markTransportDisconnected\s*\(/,
+    'must define shared proxy disconnect recovery',
+  );
+  assert.match(
+    runtimeFacadeSource,
+    /scheduleSharedTransportReconnect[\s\S]{0,1200}getSessions\(\)[\s\S]{0,300}subscribeSessionNotifications/,
+    'proxy disconnect must reconnect and restore existing session subscriptions',
   );
   assert.match(
     transportSource,
@@ -670,15 +677,15 @@ test('app-server transport close marks running sessions as failed and clears sha
   );
   assert.match(
     sessionManagerSource,
-    /markRunningSessionsFailed[\s\S]{0,600}codex-error/,
-    'markRunningSessionsFailed must emit codex-error to running sessions',
+    /markTransportDisconnected[\s\S]{0,600}codex-connection-lost/,
+    'proxy disconnect must be reported separately from a user abort',
   );
   assert.match(
     sessionManagerSource,
-    /markRunningSessionsFailed[\s\S]{0,700}session-status[\s\S]{0,200}isProcessing:\s*false/,
-    'markRunningSessionsFailed must emit isProcessing=false to running sessions',
+    /markTransportDisconnected[\s\S]{0,500}notificationSubscribed\s*=\s*false/,
+    'proxy disconnect must allow notification subscription to be restored',
   );
-  recordProtocolEvidence('transport failure recovery: close/error call onFailure and failed sessions emit codex-error plus isProcessing=false');
+  recordProtocolEvidence('proxy recovery: close/error resets notification subscriptions while daemon turn ownership is preserved');
 });
 
 test('concurrent session starts do not cross-assign thread/started notifications', async () => {

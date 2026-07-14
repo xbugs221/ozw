@@ -76,6 +76,12 @@ const FIXTURE_PROJECT_EXTRA_SESSIONS = [
     baseTimestamp: '2026-04-18T09:00:00.000Z',
   },
   {
+    projectLabel: 'fixture-project',
+    sessionId: 'legacy-active-handoff-acceptance',
+    userMessage: 'Legacy active handoff acceptance',
+    baseTimestamp: '2026-04-18T08:30:00.000Z',
+  },
+  {
     projectLabel: 'history-scroll',
     sessionId: 'fixture-mixed-long-virtual-session',
     userMessage: 'mixed long virtual',

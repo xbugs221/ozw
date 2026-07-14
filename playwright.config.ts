@@ -41,6 +41,7 @@ function loadOptionalEnvFile() {
 loadOptionalEnvFile();
 
 const ORIGINAL_HOME = process.env.HOME || process.env.USERPROFILE || process.cwd();
+process.env.PLAYWRIGHT_ORIGINAL_HOME ||= ORIGINAL_HOME;
 const PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH
   || path.join(ORIGINAL_HOME, '.cache', 'ms-playwright');
 

@@ -61,6 +61,7 @@ export default function Shell({
     isVirtualCtrlActive,
     authUrl,
     authUrlVersion,
+    handoffBlockedReason,
     setVirtualCtrlActive,
     sendTerminalInput,
     terminateShell,
@@ -135,15 +136,24 @@ export default function Shell({
 
   if (minimal) {
     return (
-      <ShellMinimalView
-        terminalContainerRef={terminalContainerRef}
-        authUrl={authUrl}
-        authUrlVersion={authUrlVersion}
-        initialCommand={initialCommand}
-        isConnected={isConnected}
-        openAuthUrlInBrowser={openAuthUrlInBrowser}
-        copyAuthUrlToClipboard={copyAuthUrlToClipboard}
-      />
+      <div className="flex h-full min-h-0 flex-col">
+        {handoffBlockedReason && (
+          <div className="border-b border-amber-400/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100" data-testid="unsafe-codex-handoff-warning">
+            安全阻止：外部 Codex 会话正在运行且未接入共享 daemon。请返回原终端、等待完成或迁移后重试。
+          </div>
+        )}
+        <div className="min-h-0 flex-1">
+          <ShellMinimalView
+            terminalContainerRef={terminalContainerRef}
+            authUrl={authUrl}
+            authUrlVersion={authUrlVersion}
+            initialCommand={initialCommand}
+            isConnected={isConnected}
+            openAuthUrlInBrowser={openAuthUrlInBrowser}
+            copyAuthUrlToClipboard={copyAuthUrlToClipboard}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -191,6 +201,14 @@ export default function Shell({
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white dark:bg-gray-900">
+        {!isPlainShell && provider === 'codex' && selectedSession && (
+          <div className="sr-only" data-testid="codex-terminal-runtime-mode">remote</div>
+        )}
+        {handoffBlockedReason && (
+          <div className="border-b border-amber-400/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100" data-testid="unsafe-codex-handoff-warning">
+            安全阻止：外部 Codex 会话正在运行且未接入共享 daemon。请返回原终端、等待完成或迁移后重试。
+          </div>
+        )}
         <div className="relative min-h-0 flex-1 p-2">
           <div
             ref={terminalContainerRef}

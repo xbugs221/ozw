@@ -99,6 +99,7 @@ export const api = {
   },
   diagnostics: {
     runtimeDependencies: (): Promise<Response> => authenticatedFetch('/api/diagnostics/runtime-dependencies'),
+    codexSharedRuntime: (): Promise<Response> => authenticatedFetch('/api/diagnostics/codex-shared-runtime'),
   },
   agents: {
     status: (): Promise<Response> => authenticatedFetch('/api/agents/status'),
