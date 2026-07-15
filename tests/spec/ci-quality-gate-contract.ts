@@ -2,6 +2,7 @@
  * PURPOSE: Guard the shared local and GitHub CI quality gate for Node checks.
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import test from 'node:test';
 
@@ -26,8 +27,8 @@ test('GitHub node-checks runs the shared CI gate without skip semantics', () => 
   assert.doesNotMatch(workflow, /--skip|test\.skip|continue-on-error:\s*true/);
 });
 
-test('local pre-commit hook runs the complete CI gate without changing staged files', () => {
-  /** Keep local commit checks equivalent to CI and free of implicit staging mutations. */
+test('local pre-commit hook runs only staged tests without changing staged files', () => {
+  /** Keep all local commits focused; the GitHub workflow remains the complete gate. */
   const packageJson = JSON.parse(read('package.json'));
   const hook = read('.githooks/pre-commit');
   const precommit = read('scripts/pre-commit.sh');
@@ -37,6 +38,32 @@ test('local pre-commit hook runs the complete CI gate without changing staged fi
   assert.equal(packageJson.engines?.node, nodeVersion.replace(/^v/, ''));
   assert.match(nodeVersion, /^v\d+\.\d+\.\d+$/);
   assert.match(hook, /scripts\/pre-commit\.sh/);
-  assert.match(precommit, /pnpm run test:ci/);
+  assert.match(precommit, /git diff --cached --quiet/);
+  assert.match(precommit, /GIT_REFLOG_ACTION/);
+  assert.match(precommit, /squash/);
+  assert.match(precommit, /scripts\/list-staged-tests\.mjs/);
+  assert.match(precommit, /pnpm exec vitest run/);
+  assert.doesNotMatch(precommit, /pnpm run test:ci/);
   assert.doesNotMatch(precommit, /git add|format-code\.sh/);
+});
+
+test('staged-test selector excludes every unchanged test', () => {
+  /** Keep a source-only change from rerunning test files that were not edited. */
+  const sourceOnly = execFileSync(
+    process.execPath,
+    ['scripts/list-staged-tests.mjs', 'frontend/components/chat/utils/chatFormatting.ts'],
+    { encoding: 'utf8' },
+  );
+  const changedTest = execFileSync(
+    process.execPath,
+    ['scripts/list-staged-tests.mjs', 'tests/unit/chat-markdown-fence-normalization.test.ts'],
+    { encoding: 'utf8' },
+  );
+
+  assert.equal(sourceOnly, '');
+  assert.equal(changedTest, 'unit\ttests/unit/chat-markdown-fence-normalization.test.ts\n');
+  assert.equal(
+    execFileSync(process.execPath, ['scripts/list-staged-tests.mjs', 'tests/e2e/helpers/playwright-fixture.ts'], { encoding: 'utf8' }),
+    '',
+  );
 });
