@@ -6,7 +6,10 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/manual',
-  testMatch: 'manual-session-identity-real.spec.ts',
+  testMatch: [
+    'manual-session-identity-real.spec.ts',
+    'oz-flow-session-render-real.spec.ts',
+  ],
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,

@@ -33,6 +33,7 @@ import {
   prependRenderSnapshotHistory,
   replaceRenderSnapshotBudget,
   replaceRenderSnapshotMessages,
+  resolveRenderSnapshotCalibrationStep,
   setRenderSnapshotHistoryLoading,
   type RenderSnapshotMessage,
   type RenderSnapshotState,
@@ -257,6 +258,7 @@ function ChatInterface({
   const renderSnapshotLoadingRef = useRef(false);
   const renderSnapshotTopLoadLockRef = useRef(false);
   const renderSnapshotBudgetRequestCountRef = useRef(0);
+  const renderSnapshotCalibrationCountsRef = useRef<Set<number>>(new Set());
   const renderSnapshotSearchFailureTargetRef = useRef<string | null>(null);
   const renderSnapshotGenerationRef = useRef(0);
   const lastHandledRenderSnapshotRequestIdRef = useRef(0);
@@ -371,6 +373,7 @@ function ChatInterface({
     renderSnapshotLoadingRef.current = false;
     renderSnapshotTopLoadLockRef.current = false;
     renderSnapshotBudgetRequestCountRef.current = 0;
+    renderSnapshotCalibrationCountsRef.current.clear();
     renderSnapshotSearchFailureTargetRef.current = null;
     pendingRenderSnapshotScrollRestoreRef.current = null;
     setRenderSnapshotState(createInitialRenderSnapshotState({ tuiSessionKey: chatTuiSessionKey }));
@@ -470,6 +473,7 @@ function ChatInterface({
     renderSnapshotNavigationReadyRef.current = false;
     renderSnapshotTopLoadLockRef.current = false;
     renderSnapshotBudgetRequestCountRef.current = 0;
+    renderSnapshotCalibrationCountsRef.current.clear();
     renderSnapshotSearchFailureTargetRef.current = null;
     renderSnapshotBufferedOlderRef.current = [];
     setBookmarkScrollTargetKey(null);
@@ -613,6 +617,7 @@ function ChatInterface({
     }
 
     const currentCount = renderSnapshotState.snapshotMessages.length;
+    renderSnapshotCalibrationCountsRef.current.add(currentCount);
     const viewportRatio = container.scrollHeight / container.clientHeight;
     let nextCount = currentCount;
     if (viewportRatio > RENDER_SNAPSHOT_MAX_VIEWPORTS && currentCount > 1) {
@@ -625,10 +630,15 @@ function ChatInterface({
       );
     }
 
-    if (nextCount !== currentCount) {
+    const calibrationStep = resolveRenderSnapshotCalibrationStep({
+      currentCount,
+      nextCount,
+      visitedCounts: renderSnapshotCalibrationCountsRef.current,
+    });
+    if (calibrationStep !== null) {
       setRenderSnapshotState((previous) => replaceRenderSnapshotMessages(
         previous,
-        selectRenderSnapshotFileTail(bootstrapMessages, nextCount),
+        selectRenderSnapshotFileTail(bootstrapMessages, calibrationStep),
       ));
       return;
     }
@@ -667,6 +677,7 @@ function ChatInterface({
           }
           const expandedMessages = mergeUniqueRenderSnapshotMessages(page.messages, bootstrapMessages);
           renderSnapshotBootstrapMessagesRef.current = expandedMessages;
+          renderSnapshotCalibrationCountsRef.current.clear();
           setRenderSnapshotState((previous) => replaceRenderSnapshotBudget(previous, {
             messages: expandedMessages,
             nextHistoryOffset: page.nextOffset,
@@ -703,6 +714,7 @@ function ChatInterface({
     const preparedMessages = new Set(renderSnapshotState.snapshotMessages);
     renderSnapshotBufferedOlderRef.current = bootstrapMessages.filter((message) => !preparedMessages.has(message));
     renderSnapshotBootstrapMessagesRef.current = [];
+    renderSnapshotCalibrationCountsRef.current.clear();
     renderSnapshotBudgetPreparingRef.current = false;
     if (renderSnapshotBufferedOlderRef.current.length > 0 && !renderSnapshotState.hasMoreHistory) {
       setRenderSnapshotState((previous) => replaceRenderSnapshotBudget(previous, {

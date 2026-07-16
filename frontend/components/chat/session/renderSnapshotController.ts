@@ -28,6 +28,28 @@ const AUTO_REFRESH_EVENTS = new Set([
   'externalMessageUpdate',
 ]);
 
+const RENDER_SNAPSHOT_MAX_CALIBRATION_STEPS = 12;
+
+/**
+ * Return the next measured message count only while layout calibration is
+ * converging; revisiting a count proves mixed-height content is oscillating.
+ */
+export function resolveRenderSnapshotCalibrationStep(input: {
+  currentCount: number;
+  nextCount: number;
+  visitedCounts: ReadonlySet<number>;
+}): number | null {
+  /** Bound synchronous layout updates before React's depth guard is reached. */
+  if (
+    input.nextCount === input.currentCount
+    || input.visitedCounts.has(input.nextCount)
+    || input.visitedCounts.size >= RENDER_SNAPSHOT_MAX_CALIBRATION_STEPS
+  ) {
+    return null;
+  }
+  return input.nextCount;
+}
+
 /**
  * Create the default TUI-first render state for a chat session.
  *
