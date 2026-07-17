@@ -354,7 +354,14 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             const socketPath = path.join(codexHome, 'app-server-control', 'app-server-control.sock');
                             const sharedRuntimeProbe = providerSessionId
                                 ? await probeSharedCodexThread(socketPath, providerSessionId)
-                                : { ready: false, threadOwned: false, activeTurnOwned: false };
+                                : {
+                                    ready: false,
+                                    threadOwned: false,
+                                    threadReadable: false,
+                                    threadState: 'unknown' as const,
+                                    activeTurnDetected: false,
+                                    activeTurnOwned: false,
+                                };
                             const attachPlan = codexCommandArgs ? null : resolveCodexTerminalAttachPlan({
                                 providerSessionId,
                                 managedTmuxExists,
@@ -369,6 +376,9 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                         : 'unknown',
                             });
                             if (attachPlan?.action === 'blocked') {
+                                const blockedMessage = attachPlan.reason === 'external-active-session-not-shared'
+                                    ? '安全阻止：该会话仍在旧运行时中活动，尚未接入共享服务。请返回原终端、等待完成或迁移后重试。'
+                                    : '安全阻止：暂时无法核实该会话的运行状态与共享归属，未执行接管。请稍后重试或返回原终端确认。';
                                 ws.send(JSON.stringify({
                                     type: 'handoff-blocked',
                                     reason: attachPlan.reason,
@@ -376,7 +386,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                 }));
                                 ws.send(JSON.stringify({
                                     type: 'output',
-                                    data: '\x1b[33m安全阻止：该外部 Codex 会话仍在运行且未接入共享 daemon。请返回原终端、等待完成或迁移到共享运行时。\x1b[0m\r\n',
+                                    data: `\x1b[33m${blockedMessage}\x1b[0m\r\n`,
                                 }));
                                 return;
                             }

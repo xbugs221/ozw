@@ -69,6 +69,68 @@ test('daemon 存在不等于目标旧式活动线程属于共享运行时', () =
   assert.equal(attach.commandArgs, null);
 });
 
+test('daemon 可读但未加载的空闲历史线程迁入共享运行时', () => {
+  /** 历史线程已确认没有活动轮次时，应通过 remote TUI 进入共享 daemon，而不是误报活动。 */
+  const attach = resolveCodexTerminalAttachPlan({
+    providerSessionId: 'legacy-idle-thread',
+    managedTmuxExists: false,
+    sharedRuntime: {
+      ready: true,
+      endpoint: 'unix:///tmp/live.sock',
+      threadOwned: false,
+      threadReadable: true,
+      threadState: 'idle',
+      activeTurnDetected: false,
+      activeTurnOwned: false,
+    },
+    externalSessionState: 'unknown',
+  });
+  assert.equal(attach.action, 'remote-tui');
+  assert.deepEqual(attach.commandArgs, ['--remote', 'unix:///tmp/live.sock', 'resume', 'legacy-idle-thread']);
+  assert.equal(attach.reason, 'historical-idle-thread-migrated');
+});
+
+test('daemon 可读但未加载的活动历史线程仍安全阻止', () => {
+  /** 可读只证明历史存在；检测到活动轮次但不归共享 daemon 时不得自动 resume。 */
+  const attach = resolveCodexTerminalAttachPlan({
+    providerSessionId: 'legacy-active-thread',
+    managedTmuxExists: false,
+    sharedRuntime: {
+      ready: true,
+      endpoint: 'unix:///tmp/live.sock',
+      threadOwned: false,
+      threadReadable: true,
+      threadState: 'active',
+      activeTurnDetected: true,
+      activeTurnOwned: false,
+    },
+    externalSessionState: 'unknown',
+  });
+  assert.equal(attach.action, 'blocked');
+  assert.equal(attach.reason, 'external-active-session-not-shared');
+  assert.equal(attach.commandArgs, null);
+});
+
+test('daemon 可读但最后轮次未收敛时按未知状态阻止', () => {
+  /** 私有运行时可能被 daemon 映射成 interrupted 且无完成时间，此时不得猜成空闲。 */
+  const attach = resolveCodexTerminalAttachPlan({
+    providerSessionId: 'legacy-unsettled-thread',
+    managedTmuxExists: false,
+    sharedRuntime: {
+      ready: true,
+      endpoint: 'unix:///tmp/live.sock',
+      threadOwned: false,
+      threadReadable: true,
+      threadState: 'unknown',
+      activeTurnDetected: false,
+      activeTurnOwned: false,
+    },
+    externalSessionState: 'unknown',
+  });
+  assert.equal(attach.action, 'blocked');
+  assert.equal(attach.reason, 'shared-thread-state-unavailable');
+});
+
 test('共享 daemon 已认领的线程在刷新状态未知时仍可安全复连', () => {
   /** 浏览器刷新会丢失瞬态处理状态，daemon 的线程归属才是后端真值。 */
   const attach = resolveCodexTerminalAttachPlan({

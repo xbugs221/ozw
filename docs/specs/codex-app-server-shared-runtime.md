@@ -5,6 +5,7 @@
 - ozw 通过独立 daemon 的 app-server proxy 接入，关闭 ozw 只关闭 proxy，不停止 daemon。
 - 无 ozw tmux 时，Codex 终端通过 `codex --remote unix://PATH resume <threadId>` 连接同一 daemon。
 - 只有经过真实连接握手、目标 thread 归属和活动轮次核验，才允许接管；旧式或未知活动会话必须阻止普通 resume，并提示迁移或等待。
+- daemon 能只读核实但尚未加载的历史 thread，若不存在活动轮次，应通过 remote TUI 恢复并迁入共享运行时；若仍活动或状态不可读，则继续安全阻止。
 - 接管不得启动第二个 app-server、interrupt 或额外 turn；原 thread/turn 必须保持连续。
 
 ## 网络策略

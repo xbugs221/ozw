@@ -16,18 +16,48 @@ export type CodexTerminalAttachPlan = {
 export function resolveCodexTerminalAttachPlan(input: {
   providerSessionId: string | null;
   managedTmuxExists: boolean;
-  sharedRuntime: { ready: boolean; endpoint: string | null; threadOwned?: boolean; activeTurnOwned?: boolean };
+  sharedRuntime: {
+    ready: boolean;
+    endpoint: string | null;
+    threadOwned?: boolean;
+    threadReadable?: boolean;
+    threadState?: 'active' | 'idle' | 'unknown';
+    activeTurnDetected?: boolean;
+    activeTurnOwned?: boolean;
+  };
   externalSessionState: 'running' | 'idle' | 'unknown';
 }): CodexTerminalAttachPlan {
   if (input.managedTmuxExists) {
     return { action: 'attach-tmux', commandArgs: null, reason: null, requiresOzwServer: true, mayInterruptActiveTurn: false, sessionFailed: false };
   }
-  const sharedHandoffVerified = input.sharedRuntime.threadOwned === true;
+  const sharedThreadLoaded = input.sharedRuntime.threadOwned === true;
+  const sharedThreadReadable = input.sharedRuntime.threadReadable === true;
+  const threadState = input.sharedRuntime.threadState
+    || (input.sharedRuntime.activeTurnDetected === true ? 'active' : sharedThreadReadable ? 'idle' : 'unknown');
+  const activeTurnDetected = threadState === 'active';
+  const sharedHandoffVerified = sharedThreadLoaded
+    ? input.sharedRuntime.threadReadable !== false
+    : sharedThreadReadable && threadState === 'idle';
   if (input.sharedRuntime.ready && input.sharedRuntime.endpoint && input.providerSessionId && sharedHandoffVerified) {
     return {
       action: 'remote-tui',
       commandArgs: ['--remote', input.sharedRuntime.endpoint, 'resume', input.providerSessionId],
-      reason: null, requiresOzwServer: false, mayInterruptActiveTurn: false, sessionFailed: false,
+      reason: sharedThreadLoaded ? null : 'historical-idle-thread-migrated',
+      requiresOzwServer: false, mayInterruptActiveTurn: false, sessionFailed: false,
+    };
+  }
+  if (input.sharedRuntime.ready && sharedThreadReadable && activeTurnDetected && !sharedThreadLoaded) {
+    return {
+      action: 'blocked', commandArgs: null,
+      reason: 'external-active-session-not-shared',
+      requiresOzwServer: false, mayInterruptActiveTurn: false, sessionFailed: false,
+    };
+  }
+  if (input.sharedRuntime.ready && input.providerSessionId && (!sharedThreadReadable || threadState === 'unknown')) {
+    return {
+      action: 'blocked', commandArgs: null,
+      reason: 'shared-thread-state-unavailable',
+      requiresOzwServer: false, mayInterruptActiveTurn: false, sessionFailed: false,
     };
   }
   if (input.externalSessionState === 'running' || (input.externalSessionState === 'unknown' && Boolean(input.providerSessionId))) {

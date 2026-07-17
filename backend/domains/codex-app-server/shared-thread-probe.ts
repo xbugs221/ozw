@@ -9,16 +9,34 @@ import { createWebSocketProxyTransport } from './websocket-proxy-transport.js';
 export type SharedThreadProbeResult = {
   ready: boolean;
   threadOwned: boolean;
+  threadReadable: boolean;
+  threadState: 'active' | 'idle' | 'unknown';
+  activeTurnDetected: boolean;
   activeTurnOwned: boolean;
 };
 
-/** 从 thread/read 响应中判断目标线程是否有仍在运行的轮次。 */
-function hasActiveTurn(value: unknown): boolean {
-  if (!value || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return value.some(hasActiveTurn);
-  const record = value as Record<string, unknown>;
-  if (record.status === 'inProgress' || record.status === 'running') return true;
-  return Object.values(record).some(hasActiveTurn);
+/** 把线程或轮次状态归一化为稳定字符串。 */
+function readStatus(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return '';
+  const type = (value as Record<string, unknown>).type;
+  return typeof type === 'string' ? type : '';
+}
+
+/** 只按线程和最后一轮判断活动性；更早的未完成历史不代表当前仍在运行。 */
+export function classifyCodexThreadActivity(thread: unknown): 'active' | 'idle' | 'unknown' {
+  if (!thread || typeof thread !== 'object' || Array.isArray(thread)) return 'unknown';
+  const record = thread as Record<string, unknown>;
+  const activeStatuses = new Set(['active', 'inProgress', 'running']);
+  if (activeStatuses.has(readStatus(record.status))) return 'active';
+  if (!Array.isArray(record.turns) || record.turns.length === 0) return 'idle';
+  const latestTurn = record.turns.at(-1);
+  if (!latestTurn || typeof latestTurn !== 'object' || Array.isArray(latestTurn)) return 'unknown';
+  const latest = latestTurn as Record<string, unknown>;
+  const latestStatus = readStatus(latest.status);
+  if (activeStatuses.has(latestStatus)) return 'active';
+  if (latestStatus === 'completed' || typeof latest.completedAt === 'number') return 'idle';
+  return 'unknown';
 }
 
 /** 在 loaded/list 的嵌套响应中精确查找目标线程编号。 */
@@ -49,15 +67,44 @@ export async function probeSharedCodexThread(socketPath: string, threadId: strin
   const transport = createWebSocketProxyTransport(child);
   try {
     const loaded = await withTimeout(transport.request('thread/loaded/list', {}));
-    if (!containsThreadId(loaded, threadId)) {
-      return { ready: true, threadOwned: false, activeTurnOwned: false };
+    const threadOwned = containsThreadId(loaded, threadId);
+    try {
+      const result = await withTimeout(transport.request('thread/read', { threadId, includeTurns: true }));
+      const thread = (result as Record<string, unknown> | null)?.thread;
+      const threadReadable = Boolean(
+        thread
+        && typeof thread === 'object'
+        && String((thread as Record<string, unknown>).id || '') === threadId,
+      );
+      const threadState = threadReadable ? classifyCodexThreadActivity(thread) : 'unknown';
+      const activeTurnDetected = threadState === 'active';
+      return {
+        ready: true,
+        threadOwned,
+        threadReadable,
+        threadState,
+        activeTurnDetected,
+        activeTurnOwned: threadOwned && activeTurnDetected,
+      };
+    } catch {
+      return {
+        ready: true,
+        threadOwned,
+        threadReadable: false,
+        threadState: 'unknown',
+        activeTurnDetected: false,
+        activeTurnOwned: false,
+      };
     }
-    const result = await withTimeout(transport.request('thread/read', { threadId, includeTurns: true }));
-    const thread = (result as Record<string, unknown> | null)?.thread;
-    const owned = Boolean(thread && typeof thread === 'object' && String((thread as Record<string, unknown>).id || '') === threadId);
-    return { ready: true, threadOwned: owned, activeTurnOwned: owned && hasActiveTurn(thread) };
   } catch {
-    return { ready: false, threadOwned: false, activeTurnOwned: false };
+    return {
+      ready: false,
+      threadOwned: false,
+      threadReadable: false,
+      threadState: 'unknown',
+      activeTurnDetected: false,
+      activeTurnOwned: false,
+    };
   } finally {
     transport.close();
   }

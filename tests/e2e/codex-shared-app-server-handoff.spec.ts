@@ -3,11 +3,12 @@
  * 业务意义：验收无需人工注入会话编号，且所有要求的运行证据都由同一次真实执行产生。
  */
 import { expect, test } from '@playwright/test';
-import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createStdioAppServerTransport, type CodexAppServerTransport } from '../../backend/domains/codex-app-server/stdio-transport.ts';
+import { createJsonRpcLineTransport } from '../../backend/domains/codex-app-server/json-rpc-line-transport.ts';
 import { createTmuxTerminalRuntime } from '../../backend/server/terminal-tmux-runtime.ts';
 import {
   resolveCodexDaemonNetworkPolicy,
@@ -17,7 +18,6 @@ import {
   authHeaders,
   authenticatePage,
   getFixtureProject,
-  openFixtureProject,
   PRIMARY_FIXTURE_PROJECT_PATH,
 } from '../spec/helpers/spec-test-helpers.ts';
 
@@ -48,7 +48,7 @@ async function daemon(command: string): Promise<string> {
 }
 
 /** 在 Playwright 隔离 HOME 中准备真实认证与受管 Codex 可执行文件。 */
-async function prepareRealDaemon(): Promise<Record<string, unknown>> {
+async function prepareCodexHome(): Promise<void> {
   process.env.CODEX_HOME = CODEX_HOME;
   const managedDir = path.join(CODEX_HOME, 'packages', 'standalone', 'current');
   await mkdir(managedDir, { recursive: true });
@@ -60,8 +60,19 @@ async function prepareRealDaemon(): Promise<Record<string, unknown>> {
     await rm(link, { force: true });
     await symlink(target, link);
   }
-  await daemon('enable-remote-control');
-  await daemon('start');
+}
+
+/** 准备隔离 HOME，并启动真实共享 daemon。 */
+async function prepareRealDaemon(): Promise<Record<string, unknown>> {
+  await prepareCodexHome();
+  let version: Record<string, unknown> | null = null;
+  try {
+    version = JSON.parse(await daemon('version')) as Record<string, unknown>;
+  } catch {
+    await daemon('enable-remote-control');
+    await daemon('start');
+    version = JSON.parse(await daemon('version')) as Record<string, unknown>;
+  }
   const networkPolicy = resolveCodexDaemonNetworkPolicy({
     mode: process.env.OZW_CODEX_PROXY_MODE === 'off' ? 'off' : 'inherit',
     env: process.env,
@@ -71,7 +82,29 @@ async function prepareRealDaemon(): Promise<Record<string, unknown>> {
     pendingFingerprint: null,
   });
   daemonStartedByTest = true;
-  return JSON.parse(await daemon('version')) as Record<string, unknown>;
+  return version;
+}
+
+/** 启动不连接共享 daemon 的真实私有 app-server，用于构造迁移前线程。 */
+async function startPrivateAppServer(): Promise<{
+  child: ChildProcessWithoutNullStreams;
+  transport: CodexAppServerTransport;
+}> {
+  await prepareCodexHome();
+  const child = spawn('codex', ['app-server', '--listen', 'stdio://'], {
+    env: { ...process.env, CODEX_HOME },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  return { child, transport: createJsonRpcLineTransport(child) };
+}
+
+/** 关闭私有 app-server 并等待进程退出，确保线程不再被旧运行时持有。 */
+async function stopPrivateAppServer(input: {
+  child: ChildProcessWithoutNullStreams;
+  transport: CodexAppServerTransport;
+}): Promise<void> {
+  input.transport.close();
+  await waitFor(() => input.child.exitCode !== null || input.child.signalCode !== null, 10_000);
 }
 
 /** 启动官方远端终端，并将真实终端输出保存为证据。 */
@@ -100,6 +133,17 @@ async function killFixtureTmux(projectPath: string, routeSessionId: string): Pro
   const runtime = createTmuxTerminalRuntime(`${projectPath}_codex_route:${routeSessionId}`);
   for (const sessionName of [runtime.sessionName, ...runtime.legacySessionNames]) {
     await execFileAsync('tmux', ['kill-session', '-t', sessionName]).catch(() => undefined);
+  }
+}
+
+/** 判断隔离项目的指定路由是否创建了受管 tmux。 */
+async function fixtureTmuxExists(projectPath: string, routeSessionId: string): Promise<boolean> {
+  const runtime = createTmuxTerminalRuntime(`${projectPath}_codex_route:${routeSessionId}`);
+  try {
+    await execFileAsync('tmux', ['has-session', '-t', runtime.sessionName]);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -258,20 +302,149 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
   }, null, 2)}\n`);
 });
 
-test('旧式外部活动会话显示安全阻止且没有发送接管请求', async ({ page }) => {
-  test.setTimeout(60_000);
-  await daemon('stop');
-  daemonStartedByTest = false;
+test('未加载的历史空闲线程从会话卡片迁入共享 daemon', async ({ page, request }) => {
+  /** 真实私有 app-server 创建线程并退出后，OZW 应由 daemon 只读确认空闲，再用 remote TUI 恢复。 */
+  test.setTimeout(90_000);
+  await mkdir(EVIDENCE_DIR, { recursive: true });
+  const legacyRuntime = await startPrivateAppServer();
+  const legacyNotifications: Array<{ method: string; params: unknown }> = [];
+  legacyRuntime.transport.onNotification((notification) => legacyNotifications.push(notification));
+  const threadResult = await legacyRuntime.transport.request('thread/start', {
+    cwd: PRIMARY_FIXTURE_PROJECT_PATH,
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
+    model: null,
+  }) as { thread: { id: string } };
+  const threadId = threadResult.thread.id;
+  expect(threadId).toBeTruthy();
+  await legacyRuntime.transport.request('turn/start', {
+    threadId,
+    input: [{ type: 'text', text: 'Reply only: historical-idle-ready.', text_elements: [] }],
+  });
+  await waitFor(() => legacyNotifications.some((notification) => notification.method === 'turn/completed'), 60_000);
+  const legacyRead = await legacyRuntime.transport.request('thread/read', { threadId, includeTurns: true });
+  expect(JSON.stringify(legacyRead)).toContain('completed');
+  await stopPrivateAppServer(legacyRuntime);
+
+  await prepareRealDaemon();
+  const observer = createStdioAppServerTransport();
+  const beforeLoaded = await observer.request('thread/loaded/list', {});
+  expect(JSON.stringify(beforeLoaded)).not.toContain(threadId);
+  const beforeRead = await observer.request('thread/read', { threadId, includeTurns: true }) as { thread?: { id?: string; turns?: unknown[] } };
+  expect(beforeRead.thread?.id).toBe(threadId);
+
+  const project = await getFixtureProject(request);
+  const projectName = String(project.name);
+  const projectPath = String(project.fullPath || PRIMARY_FIXTURE_PROJECT_PATH);
+  const draftResponse = await request.post(`/api/projects/${encodeURIComponent(projectName)}/manual-sessions`, {
+    headers: authHeaders(),
+    data: { provider: 'codex', label: '真实历史空闲恢复', projectPath },
+  });
+  expect(draftResponse.ok()).toBeTruthy();
+  const draftPayload = await draftResponse.json() as { session?: { id?: string } };
+  const routeSessionId = String(draftPayload.session?.id || '');
+  expect(routeSessionId).toMatch(/^c\d+$/);
+  await killFixtureTmux(projectPath, routeSessionId);
+  const finalizeResponse = await request.post(
+    `/api/projects/${encodeURIComponent(projectName)}/manual-sessions/${routeSessionId}/finalize`,
+    { headers: authHeaders(), data: { provider: 'codex', actualSessionId: threadId, projectPath } },
+  );
+  expect(finalizeResponse.ok()).toBeTruthy();
+
+  await authenticatePage(page);
+  const routePrefix = String((project as { routePath?: string }).routePath || `/projects/${encodeURIComponent(projectName)}`);
+  await page.goto(`${routePrefix}/${routeSessionId}`, { waitUntil: 'networkidle' });
+  await page.getByTestId('tab-shell').click();
+  await expect(page.getByTestId('unsafe-codex-handoff-warning')).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: /Terminal input|消息输入|Message input/i })).toBeVisible();
+  await waitFor(async () => JSON.stringify(await observer.request('thread/loaded/list', {})).includes(threadId), 20_000);
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'historical-idle-thread-migrated.png'), fullPage: true });
+  await writeFile(path.join(EVIDENCE_DIR, 'historical-idle-thread-migration.log'), `${JSON.stringify({
+    threadId,
+    routeSessionId,
+    loadedBeforeOpen: false,
+    readableBeforeOpen: beforeRead.thread?.id === threadId,
+    loadedAfterOpen: true,
+  }, null, 2)}\n`);
+  closeTransport(observer);
+  await killFixtureTmux(projectPath, routeSessionId);
+});
+
+test('旧式外部活动会话在归属不确定时安全阻止且不打断原轮次', async ({ page, request }) => {
+  /** 私有 app-server 的真实长轮次不得被共享 daemon 或 OZW 终端抢占。 */
+  test.setTimeout(120_000);
+  await mkdir(EVIDENCE_DIR, { recursive: true });
+  const legacyRuntime = await startPrivateAppServer();
+  const notifications: Array<{ method: string; params: unknown }> = [];
+  legacyRuntime.transport.onNotification((notification) => notifications.push(notification));
+  const threadResult = await legacyRuntime.transport.request('thread/start', {
+    cwd: PRIMARY_FIXTURE_PROJECT_PATH,
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
+    model: null,
+  }) as { thread: { id: string } };
+  const threadId = threadResult.thread.id;
+  const turnResult = await legacyRuntime.transport.request('turn/start', {
+    threadId,
+    input: [{ type: 'text', text: 'Run `sleep 20` in the terminal, then reply only: legacy-active-done.', text_elements: [] }],
+  }) as { turn: { id: string } };
+  const turnId = turnResult.turn.id;
+  await waitFor(async () => {
+    const snapshot = await legacyRuntime.transport.request('thread/read', { threadId, includeTurns: true });
+    return /inProgress|active|running/.test(JSON.stringify(snapshot));
+  }, 20_000);
+
+  await prepareRealDaemon();
+  const observer = createStdioAppServerTransport();
+  const sharedRead = await observer.request('thread/read', { threadId, includeTurns: true });
+  expect(JSON.stringify(sharedRead)).toContain('interrupted');
+  expect(JSON.stringify(sharedRead)).toContain('"completedAt":null');
+  expect(JSON.stringify(await observer.request('thread/loaded/list', {}))).not.toContain(threadId);
+
+  const project = await getFixtureProject(request);
+  const projectName = String(project.name);
+  const projectPath = String(project.fullPath || PRIMARY_FIXTURE_PROJECT_PATH);
+  const draftResponse = await request.post(`/api/projects/${encodeURIComponent(projectName)}/manual-sessions`, {
+    headers: authHeaders(),
+    data: { provider: 'codex', label: '真实旧式活动阻止', projectPath },
+  });
+  expect(draftResponse.ok()).toBeTruthy();
+  const draftPayload = await draftResponse.json() as { session?: { id?: string } };
+  const routeSessionId = String(draftPayload.session?.id || '');
+  expect(routeSessionId).toMatch(/^c\d+$/);
+  await killFixtureTmux(projectPath, routeSessionId);
+  const finalizeResponse = await request.post(
+    `/api/projects/${encodeURIComponent(projectName)}/manual-sessions/${routeSessionId}/finalize`,
+    { headers: authHeaders(), data: { provider: 'codex', actualSessionId: threadId, projectPath } },
+  );
+  expect(finalizeResponse.ok()).toBeTruthy();
+
   const frames: string[] = [];
   page.on('websocket', (socket) => socket.on('framesent', (event) => frames.push(String(event.payload))));
-  await openFixtureProject(page);
-  await page.goto('/workspace/fixture-project/c3', { waitUntil: 'networkidle' });
+  await authenticatePage(page);
+  const routePrefix = String((project as { routePath?: string }).routePath || `/projects/${encodeURIComponent(projectName)}`);
+  await page.goto(`${routePrefix}/${routeSessionId}`, { waitUntil: 'networkidle' });
   await page.getByTestId('tab-shell').click();
-  await expect(page.getByTestId('unsafe-codex-handoff-warning')).toContainText('正在运行', { timeout: 20_000 });
+  await expect(page.getByTestId('unsafe-codex-handoff-warning')).toContainText('暂时无法核实', { timeout: 20_000 });
+  expect(await fixtureTmuxExists(projectPath, routeSessionId)).toBe(false);
+  const afterBlock = await legacyRuntime.transport.request('thread/read', { threadId, includeTurns: true });
+  expect(JSON.stringify(afterBlock)).toContain(turnId);
+  expect(JSON.stringify(afterBlock)).toMatch(/inProgress|active|running/);
   const serialized = frames.join('\n');
   expect(serialized).not.toMatch(/codex resume|turn\/interrupt|turn\/start/);
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'unsafe-handoff-blocked.png'), fullPage: true });
-  await writeFile(path.join(EVIDENCE_DIR, 'unsafe-handoff-network.json'), `${JSON.stringify(frames, null, 2)}\n`);
+  await waitFor(() => notifications.some((notification) => notification.method === 'turn/completed'), 60_000);
+  expect(JSON.stringify(notifications)).not.toContain('turn/interrupt');
+  await writeFile(path.join(EVIDENCE_DIR, 'unsafe-handoff-network.json'), `${JSON.stringify({
+    threadId,
+    turnId,
+    routeSessionId,
+    managedTmuxCreated: false,
+    browserFrames: frames,
+    notifications,
+  }, null, 2)}\n`);
+  closeTransport(observer);
+  await stopPrivateAppServer(legacyRuntime);
 });
 
 declare global {
