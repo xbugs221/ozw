@@ -8,7 +8,7 @@ const TEST_PREFIXES = [
   ['tests/unit/', 'unit'],
   ['tests/backend/', 'backend'],
   ['tests/spec/', 'node-spec'],
-  ['tests/specs/', 'browser-spec'],
+  ['tests/specs/', 'node-spec'],
   ['tests/e2e/', 'e2e'],
 ];
 
@@ -29,7 +29,7 @@ function classifyTest(file) {
     if ((runner === 'browser-spec' || runner === 'e2e') && !/\.spec\.tsx?$/.test(file)) {
       return null;
     }
-    if (runner === 'node-spec' && file.endsWith('.spec.ts')) {
+    if (runner === 'node-spec' && prefix === 'tests/spec/' && file.endsWith('.spec.ts')) {
       return 'browser-spec';
     }
     if (runner === 'node-spec' && file.slice(prefix.length).includes('/')) {

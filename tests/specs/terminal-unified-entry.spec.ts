@@ -114,6 +114,22 @@ test('会话卡片用 cN 短路由打开终端', () => {
   );
 });
 
+test('移动端会话终端传递 cN 身份而不是降级为普通 Shell', () => {
+  /** 锁定移动分支，避免桌面分支的正确属性掩盖移动端回归。 */
+  const mainContentSource = readRequiredSource(MAIN_CONTENT_PATH, '主工作区');
+  const mobileWorkspaceSource = mainContentSource.match(
+    /const renderMobileWorkspace[\s\S]*?const renderMobileShell/,
+  )?.[0] || '';
+
+  assert.match(mobileWorkspaceSource, /session=\{selectedSession\}/, '移动终端必须传递选中的 cN 会话');
+  assert.match(mobileWorkspaceSource, /isPlainShell=\{!selectedSession\}/, '仅无会话时才能打开普通 Shell');
+  assert.match(
+    mobileWorkspaceSource,
+    /key=\{`[^`]*\$\{selectedSession\?\.__provider[^`]*\$\{selectedSession\?\.id/,
+    '移动终端实例键必须包含 provider 和 session，切换会话时才能重建连接',
+  );
+});
+
 test('tmux 承载所有终端且 close 只 detach', () => {
   const shellSource = readRequiredSource(SHELL_WEBSOCKET_PATH, 'shell WebSocket relay');
   const runtimeSource = readRequiredSource(TMUX_RUNTIME_PATH, 'tmux terminal runtime');

@@ -115,32 +115,15 @@ test('desktop shell main view keeps one websocket while staying in workspace', a
   expect(terminalBox?.height).toBeGreaterThan(300);
 });
 
-test('session TUI stays disconnected until the user reconnects', async ({ page }: { page: any }) => {
+test('session route opens terminal first and Render switches to the record view', async ({ page }: { page: any }) => {
+  /** 当前产品以终端为会话主视图，Render 只展示持久化记录。 */
   await page.goto('/workspace/fixture-project/c3', { waitUntil: 'networkidle' });
 
-  await expect(page.getByTestId('chat-tui-panel')).toBeVisible({ timeout: 10_000 });
-  await waitForOpenShellSocket(page);
-  await page.getByRole('button', { name: /^Disconnect$|^断开连接$/ }).first().click();
-
-  const connectButton = page.getByRole('button', { name: /^(?:Continue in Shell|Connect|继续使用 Shell|连接)$/i }).first();
-  await expect(connectButton).toBeVisible();
-  await page.waitForTimeout(2_000);
-  await expect(connectButton).toBeVisible();
-  await expect.poll(async () => page.evaluate(() => {
-    const sockets = window.__trackedSockets || [];
-    return sockets.filter((socket) => (
-      typeof socket.url === 'string'
-      && socket.url.includes('/shell')
-      && socket.readyState === WebSocket.OPEN
-    )).length;
-  })).toBe(0);
-  await page.screenshot({
-    path: 'docs/debug/20260710-0929-session-terminal-state/screenshots/disconnected-shell.png',
-    fullPage: true,
-  });
-
-  await connectButton.click();
-  await waitForOpenShellSocket(page);
+  await expect(page.getByTestId('tab-shell')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('textbox', { name: /Terminal input|消息输入|Message input/i })).toBeVisible();
+  await page.getByRole('button', { name: /^Render$|^渲染$/ }).click();
+  await expect(page.getByTestId('chat-tui-panel')).toBeHidden();
+  await expect(page.getByTestId('tab-shell')).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('mobile shell helper keys send escape tab arrows and held ctrl arrow input', async ({ page }: { page: any }) => {
@@ -178,6 +161,29 @@ test('mobile shell helper keys send escape tab arrows and held ctrl arrow input'
     hasTab: true,
     hasArrowUp: true,
     hasCtrlArrowRight: true,
+  });
+});
+
+test('mobile viewport lets the software keyboard resize content above the helper keybar', async ({ page }: { page: any }) => {
+  /** Android 软键盘必须缩放页面内容，不能覆盖布局视口底部。 */
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openShellProject(page);
+  await page.getByRole('button', { name: /^Shell$|^终端$/ }).click();
+
+  const viewportContent = await page.locator('meta[name="viewport"]').getAttribute('content');
+  expect(viewportContent).toContain('interactive-widget=resizes-content');
+  const keybar = page.getByTestId('shell-mobile-keybar');
+  await expect(keybar).toBeVisible({ timeout: 10_000 });
+  await page.locator('.xterm-helper-textarea').focus();
+  await page.setViewportSize({ width: 390, height: 520 });
+  await expect.poll(async () => keybar.evaluate((element) => ({
+    bottom: element.getBoundingClientRect().bottom,
+    viewportHeight: window.innerHeight,
+  }))).toMatchObject({ bottom: 520, viewportHeight: 520 });
+
+  await page.screenshot({
+    path: 'docs/debug/20260717-0829-codex-session-mobile-keyboard/screenshots/mobile-keybar-above-keyboard.png',
+    fullPage: true,
   });
 });
 

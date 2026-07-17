@@ -185,17 +185,17 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
    * Create an OZW-only cN route and let the shell backend create and bind its
    * real shared thread. Reloading the same URL must keep one route and no warning.
    */
-  const newDraftResponse = await request.post(`/api/projects/${encodeURIComponent(projectName)}/manual-sessions`, {
-    headers: authHeaders(),
-    data: { provider: 'codex', label: '刷新回绑验收', projectPath },
-  });
-  expect(newDraftResponse.ok()).toBeTruthy();
-  const newDraftPayload = await newDraftResponse.json() as { session?: { id?: string; routeIndex?: number } };
-  const newRouteSessionId = String(newDraftPayload.session?.id || '');
-  const newRouteIndex = Number(newDraftPayload.session?.routeIndex);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(routePrefix, { waitUntil: 'networkidle' });
+  const manualSessions = page.getByTestId('project-overview-manual-sessions');
+  await manualSessions.getByRole('button', { name: /新建会话|New Session/i }).click();
+  await page.getByTestId('project-new-session-provider-codex').click();
+  await page.waitForURL(/\/c\d+(?:\?|$)/, { timeout: 15_000 });
+  const newRouteSessionId = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1) || '';
+  const newRouteIndex = Number(newRouteSessionId.replace(/^c/, ''));
+  expect(newRouteSessionId).toMatch(/^c\d+$/);
   await killFixtureTmux(projectPath, newRouteSessionId);
-  await page.goto(`${routePrefix}/${newRouteSessionId}`, { waitUntil: 'networkidle' });
-  await page.getByTestId('tab-shell').click();
+  await page.reload({ waitUntil: 'networkidle' });
   await expect(page.getByTestId('unsafe-codex-handoff-warning')).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: /Terminal input|消息输入|Message input/i })).toBeVisible();
   await waitFor(async () => {
@@ -209,7 +209,7 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
   await page.reload({ waitUntil: 'networkidle' });
   await expect(page.getByTestId('unsafe-codex-handoff-warning')).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: /Terminal input|消息输入|Message input/i })).toBeVisible();
-  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'ozw-new-session-refresh-rebound.png'), fullPage: true });
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'ozw-new-session-mobile-refresh-rebound.png'), fullPage: true });
 
   const diagnosticsResponse = await request.get('/api/diagnostics/codex-shared-runtime', { headers: authHeaders() });
   const diagnostics = await diagnosticsResponse.json() as { network?: { fingerprint?: string } };
@@ -217,6 +217,7 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
     appliedFingerprint: 'previous-network-fingerprint',
     pendingFingerprint: diagnostics.network?.fingerprint || null,
   });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => window.openSettings?.('diagnostics'));
   await expect(page.getByTestId('codex-runtime-mode')).toContainText('shared-daemon', { timeout: 30_000 });
   await expect(page.getByTestId('codex-proxy-restart-warning')).toContainText(/活动会话|active turn/i);

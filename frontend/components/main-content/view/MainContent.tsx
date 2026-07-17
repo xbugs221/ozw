@@ -413,10 +413,11 @@ function MainContent({
     if (activeTab === 'shell') {
       return (
         <StandaloneShell
-          key={`shell-${selectedProject.fullPath || selectedProject.path || selectedProject.name}`}
+          key={`shell-${selectedProject.fullPath || selectedProject.path || selectedProject.name}-${selectedSession?.__provider || 'plain'}-${selectedSession?.id || 'plain'}`}
           project={selectedProject}
+          session={selectedSession}
           command={null}
-          isPlainShell
+          isPlainShell={!selectedSession}
           showHeader={false}
         />
       );
