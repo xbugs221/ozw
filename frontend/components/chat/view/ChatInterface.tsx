@@ -1677,14 +1677,16 @@ function ChatInterface({
             className={renderSnapshotState.mode === 'tui' ? 'min-h-0 flex-1' : 'hidden'}
           >
             <div className="flex h-full min-h-0 flex-col">
-              <Shell
-                selectedProject={selectedProject}
-                selectedSession={selectedSession}
-                provider={effectiveProvider === 'pi' ? 'pi' : 'codex'}
-                autoConnect
-                headerActions={tuiHeaderActions}
-                onTerminalInputReady={handleTuiTerminalInputReady}
-              />
+              {renderSnapshotState.mode === 'tui' && (
+                <Shell
+                  selectedProject={selectedProject}
+                  selectedSession={selectedSession}
+                  provider={effectiveProvider === 'pi' ? 'pi' : 'codex'}
+                  autoConnect
+                  headerActions={tuiHeaderActions}
+                  onTerminalInputReady={handleTuiTerminalInputReady}
+                />
+              )}
             </div>
           </div>
 

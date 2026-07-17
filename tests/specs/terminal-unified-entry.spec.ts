@@ -40,8 +40,11 @@ const WORKSPACE_LAYOUT_STATE_PATH = path.join(
 );
 const SHELL_CONNECTION_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'hooks', 'useShellConnection.ts');
 const SHELL_RUNTIME_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'hooks', 'useShellRuntime.ts');
+const SHELL_VIEW_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'view', 'Shell.tsx');
+const SHELL_TYPES_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'types', 'types.ts');
 const CHAT_INTERFACE_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'chat', 'view', 'ChatInterface.tsx');
 const SHELL_WEBSOCKET_PATH = path.join(REPO_ROOT, 'backend', 'server', 'shell-websocket.ts');
+const CODEX_ATTACH_PLAN_PATH = path.join(REPO_ROOT, 'backend', 'server', 'codex-terminal-attach-plan.ts');
 const TMUX_RUNTIME_PATH = path.join(REPO_ROOT, 'backend', 'server', 'terminal-tmux-runtime.ts');
 
 /**
@@ -175,6 +178,29 @@ test('tmux session 名称使用项目短路径和 cN 路由', async () => {
     runtimeModule.createLegacyTmuxSessionName('/home/zzl/projects/ozw_codex_route:c7'),
     /^ozw_[A-Za-z0-9_-]+$/,
     '旧 base64 名称必须保留，供已有 tmux 会话兼容复连',
+  );
+});
+
+test('旧式会话强制接管必须先警告并绑定新式共享会话', () => {
+  /** 用户确认后由后端创建共享线程并绑定同一卡片，前端不得自行制造 provider 身份。 */
+  const shellViewSource = readRequiredSource(SHELL_VIEW_PATH, 'Shell 接管警告');
+  const shellConnectionSource = readRequiredSource(SHELL_CONNECTION_PATH, 'Shell 接管协议');
+  const shellTypesSource = readRequiredSource(SHELL_TYPES_PATH, 'Shell 接管类型');
+  const backendSource = readRequiredSource(SHELL_WEBSOCKET_PATH, 'Shell WebSocket relay');
+  const attachPlanSource = readRequiredSource(CODEX_ATTACH_PLAN_PATH, 'Codex 接管规划器');
+
+  assert.match(shellViewSource, /force-codex-handoff/, '警告栏必须提供明确的强制接管按钮');
+  assert.match(shellViewSource, /window\.confirm/, '强制接管必须二次确认风险');
+  assert.match(shellTypesSource, /forceHandoff\?:\s*boolean/, 'init 协议必须显式表达强制接管');
+  assert.match(shellConnectionSource, /forceHandoff:\s*true/, '确认后必须复用当前 init 身份发送强制请求');
+  assert.match(backendSource, /handoff-warning/, '普通打开旧式活动会话只能返回警告');
+  assert.match(backendSource, /handoff-force-started/, '服务端接受确认后必须回执接管开始');
+  assert.match(backendSource, /beginCodexRemoteTuiThreadCapture/, '强制接管必须由共享 daemon 建立线程');
+  assert.match(backendSource, /writeProviderSessionBinding/, '共享线程必须绑定回原 Ozw 卡片');
+  assert.match(
+    attachPlanSource,
+    /action:\s*'new-shared-tui'/,
+    '活动旧线程的强制分支必须显式建立共享会话',
   );
 });
 

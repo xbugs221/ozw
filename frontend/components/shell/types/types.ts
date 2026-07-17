@@ -23,6 +23,8 @@ export type ShellInitMessage = {
   initialCommand: string | null | undefined;
   isPlainShell: boolean;
   externalSessionState?: 'running' | 'idle' | 'unknown';
+  forceHandoff?: boolean;
+  handoffToken?: string;
 };
 
 export type ShellResizeMessage = {
@@ -94,11 +96,14 @@ export type UseShellRuntimeResult = {
   authUrl: string;
   authUrlVersion: number;
   handoffBlockedReason: string;
+  canForceHandoff: boolean;
+  isForceHandoffPending: boolean;
   setVirtualCtrlActive: (isActive: boolean) => void;
   sendTerminalInput: (data: string) => boolean;
   terminateShell: () => boolean;
   connectToShell: () => void;
   disconnectFromShell: () => void;
+  forceCodexHandoff: () => boolean;
   openAuthUrlInBrowser: (url?: string) => boolean;
   copyAuthUrlToClipboard: (url?: string) => Promise<boolean>;
 };

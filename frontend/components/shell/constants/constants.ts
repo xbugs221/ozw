@@ -111,7 +111,7 @@ export function getTerminalTheme(isDarkMode: boolean): ITheme {
 }
 
 export const TERMINAL_OPTIONS: ITerminalOptions = {
-  cursorBlink: true,
+  cursorBlink: false,
   fontSize: 14,
   fontFamily: '"GitLab Mono", Menlo, Monaco, "Courier New", monospace',
   allowProposedApi: true,

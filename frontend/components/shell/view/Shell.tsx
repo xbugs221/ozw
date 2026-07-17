@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import '@xterm/xterm/css/xterm.css';
 import type { Project, ProjectSession } from '../../../types/app';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { Button } from '../../ui/button';
 import { SHELL_RESTART_DELAY_MS } from '../constants/constants';
 import { useShellRuntime } from '../hooks/useShellRuntime';
 import { getSessionDisplayName } from '../utils/auth';
@@ -32,12 +33,12 @@ type ShellProps = {
   onTerminalTerminateReady?: (terminate: (() => boolean) | null) => void;
 };
 
-/** 按后端阻止原因显示准确说明，避免把状态未知误报为正在运行。 */
-function getHandoffBlockedMessage(reason: string): string {
+/** 按后端警告原因选择用户文案，避免把状态未知误报为正在运行。 */
+function getHandoffWarningKey(reason: string): string {
   if (reason === 'external-active-session-not-shared') {
-    return '安全阻止：该会话仍在旧运行时中活动，尚未接入共享服务。请返回原终端、等待完成或迁移后重试。';
+    return 'shell.handoff.activeWarning';
   }
-  return '安全阻止：暂时无法核实该会话的运行状态与共享归属，未执行接管。请稍后重试或返回原终端确认。';
+  return 'shell.handoff.unknownWarning';
 }
 
 export default function Shell({
@@ -70,11 +71,14 @@ export default function Shell({
     authUrl,
     authUrlVersion,
     handoffBlockedReason,
+    canForceHandoff,
+    isForceHandoffPending,
     setVirtualCtrlActive,
     sendTerminalInput,
     terminateShell,
     connectToShell,
     disconnectFromShell,
+    forceCodexHandoff,
     openAuthUrlInBrowser,
     copyAuthUrlToClipboard,
   } = useShellRuntime({
@@ -99,10 +103,36 @@ export default function Shell({
     () => (sessionDisplayName ? sessionDisplayName.slice(0, 50) : null),
     [sessionDisplayName],
   );
-  const handoffBlockedMessage = useMemo(
-    () => getHandoffBlockedMessage(handoffBlockedReason),
-    [handoffBlockedReason],
+  const handoffWarningMessage = useMemo(
+    () => t(getHandoffWarningKey(handoffBlockedReason)),
+    [handoffBlockedReason, t],
   );
+
+  /** 明确确认旧式活动会话可能仍在原终端运行，再发送一次性强制接管请求。 */
+  const handleForceCodexHandoff = useCallback(() => {
+    if (!window.confirm(t('shell.handoff.forceConfirm'))) {
+      return;
+    }
+    forceCodexHandoff();
+  }, [forceCodexHandoff, t]);
+
+  const handoffWarningBanner = handoffBlockedReason ? (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-400/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100" data-testid="unsafe-codex-handoff-warning">
+      <span>{handoffWarningMessage}</span>
+      {canForceHandoff && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isForceHandoffPending}
+          data-testid="force-codex-handoff"
+          onClick={handleForceCodexHandoff}
+        >
+          {isForceHandoffPending ? t('shell.handoff.forcing') : t('shell.handoff.forceAction')}
+        </Button>
+      )}
+    </div>
+  ) : null;
 
   useEffect(() => {
     /**
@@ -149,11 +179,7 @@ export default function Shell({
   if (minimal) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        {handoffBlockedReason && (
-          <div className="border-b border-amber-400/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100" data-testid="unsafe-codex-handoff-warning">
-            {handoffBlockedMessage}
-          </div>
-        )}
+        {handoffWarningBanner}
         <div className="min-h-0 flex-1">
           <ShellMinimalView
             terminalContainerRef={terminalContainerRef}
@@ -216,11 +242,7 @@ export default function Shell({
         {!isPlainShell && provider === 'codex' && selectedSession && (
           <div className="sr-only" data-testid="codex-terminal-runtime-mode">remote</div>
         )}
-        {handoffBlockedReason && (
-          <div className="border-b border-amber-400/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100" data-testid="unsafe-codex-handoff-warning">
-            {handoffBlockedMessage}
-          </div>
-        )}
+        {handoffWarningBanner}
         <div className="relative min-h-0 flex-1 p-2">
           <div
             ref={terminalContainerRef}

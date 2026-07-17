@@ -1,10 +1,10 @@
 /**
- * 文件目的：集中决定 Codex 会话终端应复连 tmux、连接共享 daemon 或安全阻止。
- * 业务意义：已知活动的旧式外部会话不会被普通 resume 抢占。
+ * 文件目的：集中决定 Codex 会话终端应复连 tmux、连接共享 daemon、新建或警告。
+ * 业务意义：旧式活动会话只有用户确认后才能由同一卡片建立新式共享会话。
  */
 
 export type CodexTerminalAttachPlan = {
-  action: 'attach-tmux' | 'remote-tui' | 'legacy-resume' | 'new-session' | 'blocked';
+  action: 'attach-tmux' | 'remote-tui' | 'new-shared-tui' | 'legacy-resume' | 'new-session' | 'blocked';
   commandArgs: string[] | null;
   reason: string | null;
   requiresOzwServer: boolean;
@@ -16,6 +16,7 @@ export type CodexTerminalAttachPlan = {
 export function resolveCodexTerminalAttachPlan(input: {
   providerSessionId: string | null;
   managedTmuxExists: boolean;
+  forceHandoff?: boolean;
   sharedRuntime: {
     ready: boolean;
     endpoint: string | null;
@@ -43,6 +44,14 @@ export function resolveCodexTerminalAttachPlan(input: {
       action: 'remote-tui',
       commandArgs: ['--remote', input.sharedRuntime.endpoint, 'resume', input.providerSessionId],
       reason: sharedThreadLoaded ? null : 'historical-idle-thread-migrated',
+      requiresOzwServer: false, mayInterruptActiveTurn: false, sessionFailed: false,
+    };
+  }
+  if (input.forceHandoff && input.sharedRuntime.ready && input.sharedRuntime.endpoint && input.providerSessionId) {
+    return {
+      action: 'new-shared-tui',
+      commandArgs: null,
+      reason: 'user-forced-legacy-handoff',
       requiresOzwServer: false, mayInterruptActiveTurn: false, sessionFailed: false,
     };
   }

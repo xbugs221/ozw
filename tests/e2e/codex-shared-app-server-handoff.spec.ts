@@ -370,8 +370,8 @@ test('未加载的历史空闲线程从会话卡片迁入共享 daemon', async (
   await killFixtureTmux(projectPath, routeSessionId);
 });
 
-test('旧式外部活动会话在归属不确定时安全阻止且不打断原轮次', async ({ page, request }) => {
-  /** 私有 app-server 的真实长轮次不得被共享 daemon 或 OZW 终端抢占。 */
+test('旧式外部活动会话警告后可由用户强制接入共享 daemon', async ({ page, request }) => {
+  /** 默认不抢占；用户确认风险后按原 thread ID 创建受管 tmux 并迁入共享 daemon。 */
   test.setTimeout(120_000);
   await mkdir(EVIDENCE_DIR, { recursive: true });
   const legacyRuntime = await startPrivateAppServer();
@@ -390,8 +390,12 @@ test('旧式外部活动会话在归属不确定时安全阻止且不打断原�
   }) as { turn: { id: string } };
   const turnId = turnResult.turn.id;
   await waitFor(async () => {
-    const snapshot = await legacyRuntime.transport.request('thread/read', { threadId, includeTurns: true });
-    return /inProgress|active|running/.test(JSON.stringify(snapshot));
+    const snapshot = await legacyRuntime.transport.request('thread/read', { threadId, includeTurns: true }) as {
+      thread?: { path?: string | null };
+    };
+    const rolloutPath = String(snapshot.thread?.path || '');
+    if (!rolloutPath || !/inProgress|active|running/.test(JSON.stringify(snapshot))) return false;
+    return (await readFile(rolloutPath).catch(() => Buffer.alloc(0))).length > 0;
   }, 20_000);
 
   await prepareRealDaemon();
@@ -406,7 +410,7 @@ test('旧式外部活动会话在归属不确定时安全阻止且不打断原�
   const projectPath = String(project.fullPath || PRIMARY_FIXTURE_PROJECT_PATH);
   const draftResponse = await request.post(`/api/projects/${encodeURIComponent(projectName)}/manual-sessions`, {
     headers: authHeaders(),
-    data: { provider: 'codex', label: '真实旧式活动阻止', projectPath },
+    data: { provider: 'codex', label: '真实旧式活动强制接管', projectPath },
   });
   expect(draftResponse.ok()).toBeTruthy();
   const draftPayload = await draftResponse.json() as { session?: { id?: string } };
@@ -420,31 +424,74 @@ test('旧式外部活动会话在归属不确定时安全阻止且不打断原�
   expect(finalizeResponse.ok()).toBeTruthy();
 
   const frames: string[] = [];
-  page.on('websocket', (socket) => socket.on('framesent', (event) => frames.push(String(event.payload))));
+  const receivedFrames: string[] = [];
+  page.on('websocket', (socket) => {
+    socket.on('framesent', (event) => frames.push(String(event.payload)));
+    socket.on('framereceived', (event) => receivedFrames.push(String(event.payload)));
+  });
   await authenticatePage(page);
   const routePrefix = String((project as { routePath?: string }).routePath || `/projects/${encodeURIComponent(projectName)}`);
   await page.goto(`${routePrefix}/${routeSessionId}`, { waitUntil: 'networkidle' });
   await page.getByTestId('tab-shell').click();
-  await expect(page.getByTestId('unsafe-codex-handoff-warning')).toContainText('暂时无法核实', { timeout: 20_000 });
+  const warning = page.getByTestId('unsafe-codex-handoff-warning');
+  await expect(warning).toContainText(/旧式|无法核实|legacy session|cannot verify/i, { timeout: 20_000 });
+  await expect(page.getByTestId('force-codex-handoff')).toBeVisible();
   expect(await fixtureTmuxExists(projectPath, routeSessionId)).toBe(false);
   const afterBlock = await legacyRuntime.transport.request('thread/read', { threadId, includeTurns: true });
   expect(JSON.stringify(afterBlock)).toContain(turnId);
   expect(JSON.stringify(afterBlock)).toMatch(/inProgress|active|running/);
-  const serialized = frames.join('\n');
-  expect(serialized).not.toMatch(/codex resume|turn\/interrupt|turn\/start/);
-  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'unsafe-handoff-blocked.png'), fullPage: true });
+  expect(frames.join('\n')).not.toContain('"forceHandoff":true');
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'unsafe-handoff-warning.png'), fullPage: true });
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toMatch(/强制接管|force takeover/i);
+    await dialog.accept();
+  });
+  await page.getByTestId('force-codex-handoff').click();
+  await expect(warning).toHaveCount(0, { timeout: 20_000 });
+  await waitFor(() => fixtureTmuxExists(projectPath, routeSessionId), 20_000);
+  await waitFor(() => receivedFrames.some((frame) => frame.includes('handoff-force-completed')), 20_000);
+  const forceCompleted = receivedFrames
+    .map((frame) => { try { return JSON.parse(frame) as Record<string, unknown>; } catch { return null; } })
+    .find((frame) => frame?.type === 'handoff-force-completed');
+  const sharedThreadId = String(forceCompleted?.providerSessionId || '');
+  expect(sharedThreadId).toBeTruthy();
+  expect(sharedThreadId).not.toBe(threadId);
+  const routeIndex = Number(routeSessionId.replace(/^c/, ''));
+  let sharedBindingFound = false;
+  await waitFor(async () => {
+    const response = await request.get('/api/codex/sessions', {
+      headers: authHeaders(),
+      params: { projectPath },
+    });
+    const payload = await response.json() as { sessions?: Array<{ routeIndex?: number; providerSessionId?: string }> };
+    sharedBindingFound = payload.sessions?.some(
+      (session) => session.routeIndex === routeIndex && session.providerSessionId === sharedThreadId,
+    ) === true;
+    return sharedBindingFound;
+  }, 20_000);
+  const legacyAfterHandoff = await legacyRuntime.transport.request('thread/read', { threadId, includeTurns: true });
+  expect(JSON.stringify(legacyAfterHandoff)).toContain(turnId);
+  expect(frames.join('\n')).toContain('"forceHandoff":true');
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'forced-handoff-connected.png'), fullPage: true });
+
   await waitFor(() => notifications.some((notification) => notification.method === 'turn/completed'), 60_000);
-  expect(JSON.stringify(notifications)).not.toContain('turn/interrupt');
-  await writeFile(path.join(EVIDENCE_DIR, 'unsafe-handoff-network.json'), `${JSON.stringify({
-    threadId,
+  await writeFile(path.join(EVIDENCE_DIR, 'forced-handoff-network.json'), `${JSON.stringify({
+    legacyThreadId: threadId,
+    sharedThreadId,
     turnId,
     routeSessionId,
-    managedTmuxCreated: false,
+    managedTmuxCreated: await fixtureTmuxExists(projectPath, routeSessionId),
+    sharedThreadCaptured: true,
+    sharedThreadBoundToCard: sharedBindingFound,
+    legacyProcessPreserved: JSON.stringify(legacyAfterHandoff).includes(turnId),
     browserFrames: frames,
+    browserReceivedFrames: receivedFrames,
     notifications,
   }, null, 2)}\n`);
   closeTransport(observer);
   await stopPrivateAppServer(legacyRuntime);
+  await killFixtureTmux(projectPath, routeSessionId);
 });
 
 declare global {

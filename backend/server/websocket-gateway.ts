@@ -21,6 +21,9 @@ export function createWebSocketGateway(deps: any): WebSocketServer {
 
     const wss = new WebSocketServer({
         server,
+        perMessageDeflate: {
+            threshold: 1024,
+        },
         verifyClient: (info: any) => {
             console.log('WebSocket connection attempt to:', info.req.url);
 

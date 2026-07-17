@@ -192,6 +192,13 @@
       "connect": "Continue in Shell",
       "connectTitle": "Connect to shell"
     },
+    "handoff": {
+      "activeWarning": "Warning: this legacy session is still active. Waiting is safest; forced takeover may leave the original terminal running.",
+      "unknownWarning": "Warning: Ozw cannot verify whether this legacy session is still running. Check the original terminal or explicitly accept the risk.",
+      "forceAction": "Force takeover",
+      "forcing": "Taking over…",
+      "forceConfirm": "Force takeover? Ozw will keep this card ID and create a new shared session without stopping the original terminal."
+    },
     "loading": "Loading terminal...",
     "connecting": "Connecting to shell...",
     "startSession": "Start a new agent session",

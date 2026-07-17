@@ -89,6 +89,9 @@ type UseShellConnectionResult = {
   disconnectFromShell: () => void;
   resetShellConnection: () => void;
   handoffBlockedReason: string;
+  canForceHandoff: boolean;
+  isForceHandoffPending: boolean;
+  forceCodexHandoff: () => boolean;
 };
 
 export function useShellConnection({
@@ -111,6 +114,9 @@ export function useShellConnection({
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [handoffBlockedReason, setHandoffBlockedReason] = useState('');
+  const [handoffToken, setHandoffToken] = useState('');
+  const [canForceHandoff, setCanForceHandoff] = useState(false);
+  const [isForceHandoffPending, setIsForceHandoffPending] = useState(false);
   const connectingRef = useRef(false);
   const manualDisconnectRef = useRef(false);
   const reconnectTimeoutRef = useRef<number | null>(null);
@@ -348,8 +354,24 @@ export function useShellConnection({
         return;
       }
 
-      if (message.type === 'handoff-blocked') {
+      if (message.type === 'handoff-warning' || message.type === 'handoff-blocked') {
         setHandoffBlockedReason(typeof message.reason === 'string' ? message.reason : 'external-active-session-not-shared');
+        setHandoffToken(typeof message.handoffToken === 'string' ? message.handoffToken : '');
+        setCanForceHandoff(message.type === 'handoff-warning' && message.canForceHandoff === true);
+        setIsForceHandoffPending(false);
+        return;
+      }
+
+      if (message.type === 'handoff-force-started') {
+        setHandoffBlockedReason('');
+        setHandoffToken('');
+        setCanForceHandoff(false);
+        setIsForceHandoffPending(false);
+        return;
+      }
+
+      if (message.type === 'handoff-force-rejected') {
+        setIsForceHandoffPending(false);
         return;
       }
 
@@ -515,6 +537,35 @@ export function useShellConnection({
   }, [connectWebSocket, enqueueOutboundMessage, isInitialized, sendRawMessage, wsRef]);
 
   /**
+   * Re-send the current authenticated init context with the server-issued
+   * one-time token after the user explicitly confirms a risky Codex handoff.
+   */
+  const forceCodexHandoff = useCallback(() => {
+    const socket = wsRef.current;
+    const initMessage = buildInitMessage();
+    if (
+      !socket
+      || socket.readyState !== WebSocket.OPEN
+      || !initMessage
+      || !canForceHandoff
+      || !handoffToken
+      || isForceHandoffPending
+    ) {
+      return false;
+    }
+
+    const sent = sendRawMessage(socket, {
+      ...initMessage,
+      forceHandoff: true,
+      handoffToken,
+    });
+    if (sent) {
+      setIsForceHandoffPending(true);
+    }
+    return sent;
+  }, [buildInitMessage, canForceHandoff, handoffToken, isForceHandoffPending, sendRawMessage, wsRef]);
+
+  /**
    * Manually start the shell relay and opt into auto-reconnect afterwards.
    */
   const connectToShell = useCallback(() => {
@@ -545,6 +596,9 @@ export function useShellConnection({
     connectingRef.current = false;
     setAuthUrl('');
     setHandoffBlockedReason('');
+    setHandoffToken('');
+    setCanForceHandoff(false);
+    setIsForceHandoffPending(false);
   }, [clearHeartbeatTimers, clearReconnectTimer, clearTerminalScreen, closeSocket, setAuthUrl]);
 
   /**
@@ -590,5 +644,8 @@ export function useShellConnection({
     disconnectFromShell,
     resetShellConnection,
     handoffBlockedReason,
+    canForceHandoff,
+    isForceHandoffPending,
+    forceCodexHandoff,
   };
 }

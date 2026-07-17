@@ -111,6 +111,42 @@ test('daemon 可读但未加载的活动历史线程仍安全阻止', () => {
   assert.equal(attach.commandArgs, null);
 });
 
+test('用户明确确认后可由同一卡片建立新式共享会话', () => {
+  /** 强制接管保留旧进程，并由相同 cN 路由承载新的共享线程。 */
+  const attach = resolveCodexTerminalAttachPlan({
+    providerSessionId: 'legacy-active-thread',
+    managedTmuxExists: false,
+    forceHandoff: true,
+    sharedRuntime: {
+      ready: true,
+      endpoint: 'unix:///tmp/live.sock',
+      threadOwned: false,
+      threadReadable: true,
+      threadState: 'active',
+      activeTurnDetected: true,
+      activeTurnOwned: false,
+    },
+    externalSessionState: 'running',
+  });
+  assert.equal(attach.action, 'new-shared-tui');
+  assert.equal(attach.commandArgs, null);
+  assert.equal(attach.reason, 'user-forced-legacy-handoff');
+  assert.equal(attach.mayInterruptActiveTurn, false);
+});
+
+test('共享 daemon 不可用时强制接管仍保持阻止', () => {
+  /** 没有共享端点时不得退回普通 codex resume 冒充新式会话。 */
+  const attach = resolveCodexTerminalAttachPlan({
+    providerSessionId: 'legacy-active-thread',
+    managedTmuxExists: false,
+    forceHandoff: true,
+    sharedRuntime: { ready: false, endpoint: null },
+    externalSessionState: 'running',
+  });
+  assert.equal(attach.action, 'blocked');
+  assert.equal(attach.commandArgs, null);
+});
+
 test('daemon 可读但最后轮次未收敛时按未知状态阻止', () => {
   /** 私有运行时可能被 daemon 映射成 interrupted 且无完成时间，此时不得猜成空闲。 */
   const attach = resolveCodexTerminalAttachPlan({

@@ -28,6 +28,7 @@ const TUI_SESSION_KEY_PATH = path.join(
 );
 const CHAT_INTERFACE_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'chat', 'view', 'ChatInterface.tsx');
 const SHELL_WEBSOCKET_PATH = path.join(REPO_ROOT, 'backend', 'server', 'shell-websocket.ts');
+const TERMINAL_CONSTANTS_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'constants', 'constants.ts');
 
 /**
  * Read a required production source file for boundary assertions.
@@ -142,6 +143,16 @@ test('非 plain-shell 的 TUI WebSocket 断开后继续保留 PTY 会话', () =>
   assert.match(source, /detach-client/, 'Provider TUI 断开 WebSocket 后只应 detach tmux client');
   assert.match(source, /primaryPtySessionKey[\s\S]{0,180}provider/, 'PTY session key 必须包含 provider，避免 Codex/Pi 混用');
   assert.match(source, /buffer\.push|ring buffer|buffer:/, '后端必须保留可回放输出 buffer');
+  assert.match(source, /capture-pane[\s\S]{0,120}-p[\s\S]{0,120}-e/, '重连必须优先捕获 tmux 当前屏幕');
+  assert.doesNotMatch(source, /buffer\.forEach[\s\S]{0,240}ws\.send/, '重连不得逐条回放历史输出');
+});
+
+test('隐藏 TUI 卸载网络转发且终端不再周期闪烁光标', () => {
+  const chatSource = readRequiredSource(CHAT_INTERFACE_PATH, '聊天 TUI 可见性入口');
+  const constantsSource = readRequiredSource(TERMINAL_CONSTANTS_PATH, '终端渲染设置');
+
+  assert.match(chatSource, /renderSnapshotState\.mode === 'tui' && \([\s\S]{0,240}<Shell/, '仅可见 TUI 可以挂载网络终端');
+  assert.match(constantsSource, /cursorBlink:\s*false/, '终端光标必须保持稳定，避免无业务更新时持续闪烁');
 });
 
 test('Provider TUI 退出后 tmux pane 回到普通 shell', () => {

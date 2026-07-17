@@ -4,9 +4,12 @@
  */
 import type { WebSocket } from 'ws';
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { probeSharedCodexThread } from '../domains/codex-app-server/shared-thread-probe.js';
+import {
+    probeSharedCodexThread,
+} from '../domains/codex-app-server/shared-thread-probe.js';
 import { beginCodexRemoteTuiThreadCapture } from '../domains/codex-app-server/runtime-facade.js';
 import {
     readProviderSessionBinding,
@@ -14,9 +17,26 @@ import {
 } from '../domains/provider-runtime/provider-session-binding.js';
 import { finalizeManualSessionRoute } from '../projects.js';
 import { resolveCodexTerminalAttachPlan } from './codex-terminal-attach-plan.js';
+import {
+    flushShellOutput,
+    markShellOutputInteractive,
+    queueShellOutput,
+    resetShellOutputQueue,
+    takeShellReplay,
+} from './shell-output-batcher.js';
 import { createTmuxTerminalRuntime } from './terminal-tmux-runtime.js';
 
 type LooseRecord = Record<string, any>;
+type PendingForceHandoffOffer = {
+    token: string;
+    expiresAt: number;
+    projectName: string;
+    projectPath: string;
+    routeSessionId: string | null;
+    providerSessionId: string;
+};
+
+const FORCE_HANDOFF_OFFER_TTL_MS = 60_000;
 
 /**
  * 归一化聊天 TUI provider，保留 Codex/Pi 的 PTY 边界。
@@ -113,6 +133,21 @@ function tmuxSessionExists(sessionName: string): Promise<boolean> {
 }
 
 /**
+ * 捕获 tmux 当前可见屏幕，重连时用单帧快照替代逐块历史回放。
+ */
+function captureTmuxPane(sessionName: string): Promise<string> {
+    return new Promise((resolve) => {
+        execFile('tmux', ['capture-pane', '-p', '-e', '-t', sessionName], (error, stdout) => {
+            if (error) {
+                resolve('');
+                return;
+            }
+            resolve(String(stdout || ''));
+        });
+    });
+}
+
+/**
  * 返回当前 runtime 已存在的 tmux 名称，兼容短名称和旧 base64 名称。
  */
 async function findExistingTmuxSessionName(tmuxRuntime: ReturnType<typeof createTmuxTerminalRuntime>): Promise<string> {
@@ -166,6 +201,7 @@ export function closeShellPtySessions(runtime: any): void {
         if (session.timeoutId) {
             clearTimeout(session.timeoutId);
         }
+        resetShellOutputQueue(session);
         if (session.pty && session.pty.kill) {
             session.pty.kill();
         }
@@ -183,6 +219,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
         console.log('🐚 Shell client connected');
         let shellProcess: any = null;
         let ptySessionKey: string | null = null;
+        let pendingForceHandoffOffer: PendingForceHandoffOffer | null = null;
         let urlDetectionBuffer = '';
         const announcedAuthUrls = new Set();
 
@@ -209,6 +246,28 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             providerSessionId = persistedBinding.providerSessionId;
                             resumeSessionId = persistedBinding.providerSessionId;
                         }
+                    }
+                    const forceHandoffRequested = data.forceHandoff === true;
+                    const forceHandoffToken = typeof data.handoffToken === 'string' ? data.handoffToken : '';
+                    const forceHandoffAuthorized = Boolean(
+                        forceHandoffRequested
+                        && pendingForceHandoffOffer
+                        && pendingForceHandoffOffer.expiresAt >= Date.now()
+                        && pendingForceHandoffOffer.token === forceHandoffToken
+                        && pendingForceHandoffOffer.projectName === projectName
+                        && pendingForceHandoffOffer.projectPath === projectPath
+                        && pendingForceHandoffOffer.routeSessionId === routeSessionId
+                        && pendingForceHandoffOffer.providerSessionId === providerSessionId,
+                    );
+                    if (forceHandoffRequested && !forceHandoffAuthorized) {
+                        ws.send(JSON.stringify({
+                            type: 'handoff-force-rejected',
+                            reason: 'handoff-confirmation-invalid-or-expired',
+                        }));
+                        return;
+                    }
+                    if (forceHandoffAuthorized) {
+                        pendingForceHandoffOffer = null;
                     }
                     let hasSession = Boolean(data.hasSession && resumeSessionId) || Boolean(providerSessionId);
                     const initialCommand = data.initialCommand;
@@ -240,6 +299,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         if (oldSession) {
                             console.log('🧹 Cleaning up existing login session:', ptySessionKey);
                             if (oldSession.timeoutId) clearTimeout(oldSession.timeoutId);
+                            resetShellOutputQueue(oldSession);
                             if (oldSession.pty && oldSession.pty.kill) oldSession.pty.kill();
                             ptySessionsMap.delete(ptySessionKey);
                         }
@@ -280,23 +340,24 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
 
                         clearTimeout(existingSession.timeoutId);
                         existingSession.timeoutId = null;
-
-                        ws.send(JSON.stringify({
-                            type: 'output',
-                            data: `\x1b[36m[Reconnected to existing session]\x1b[0m\r\n`
-                        }));
-
-                        if (existingSession.buffer && existingSession.buffer.length > 0) {
-                            console.log(`📜 Sending ${existingSession.buffer.length} buffered messages`);
-                            existingSession.buffer.forEach((bufferedData: string) => {
-                                ws.send(JSON.stringify({
-                                    type: 'output',
-                                    data: bufferedData
-                                }));
-                            });
+                        const fallbackReplay = takeShellReplay(existingSession);
+                        resetShellOutputQueue(existingSession);
+                        existingSession.ws = null;
+                        const paneSnapshot = existingSession.tmuxSessionName
+                            ? await captureTmuxPane(existingSession.tmuxSessionName)
+                            : '';
+                        if (ws.readyState !== WebSocket.OPEN) {
+                            return;
                         }
-
                         existingSession.ws = ws;
+                        const recoveryOutput = paneSnapshot || fallbackReplay;
+                        if (recoveryOutput) {
+                            ws.send(JSON.stringify({
+                                type: 'output',
+                                data: `\x1b[2J\x1b[H${recoveryOutput}`,
+                            }));
+                        }
+                        flushShellOutput(existingSession, WebSocket);
 
                         return;
                     }
@@ -332,26 +393,50 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         let shellCommand;
                         let codexCommandArgs: string[] | null = null;
                         if (!isPlainShell && provider === 'codex') {
-                            if (!providerSessionId && routeSessionId && !managedTmuxExists) {
-                                const capture = await beginCodexRemoteTuiThreadCapture({
-                                    projectPath,
-                                });
-                                codexCommandArgs = ['--remote', capture.endpoint, '-C', projectPath];
-                                void capture.threadStarted.then(async ({ providerSessionId: capturedSessionId }) => {
-                                    await writeProviderSessionBinding({
-                                        projectName,
-                                        projectPath,
-                                        routeSessionId,
-                                        provider: 'codex',
-                                        providerSessionId: capturedSessionId,
-                                    });
-                                    await finalizeManualSessionRoute(projectName, routeSessionId, capturedSessionId, 'codex', projectPath);
-                                }).catch((error) => {
-                                    console.warn('[Shell] Failed to bind new Codex remote TUI thread:', error instanceof Error ? error.message : String(error));
-                                });
-                            }
                             const codexHome = process.env.CODEX_HOME || path.join(homedir(), '.codex');
                             const socketPath = path.join(codexHome, 'app-server-control', 'app-server-control.sock');
+
+                            /** 启动共享远端终端，并在拿到新线程编号后绑定回当前卡片。 */
+                            const startCapturedSharedTui = async (originalProviderSessionId: string | null): Promise<string[]> => {
+                                const capture = await beginCodexRemoteTuiThreadCapture({ projectPath });
+                                void capture.threadStarted.then(async ({ providerSessionId: capturedSessionId }) => {
+                                    if (routeSessionId) {
+                                        await writeProviderSessionBinding({
+                                            projectName,
+                                            projectPath,
+                                            routeSessionId,
+                                            provider: 'codex',
+                                            providerSessionId: capturedSessionId,
+                                        });
+                                        await finalizeManualSessionRoute(
+                                            projectName,
+                                            routeSessionId,
+                                            capturedSessionId,
+                                            'codex',
+                                            projectPath,
+                                        );
+                                    }
+                                    if (originalProviderSessionId && ws.readyState === WebSocket.OPEN) {
+                                        ws.send(JSON.stringify({
+                                            type: 'handoff-force-completed',
+                                            routeSessionId,
+                                            providerSessionId: capturedSessionId,
+                                            originalProviderSessionId,
+                                        }));
+                                    }
+                                }).catch((error) => {
+                                    const message = error instanceof Error ? error.message : String(error);
+                                    console.warn('[Shell] Failed to bind new Codex remote TUI thread:', message);
+                                    if (originalProviderSessionId && ws.readyState === WebSocket.OPEN) {
+                                        ws.send(JSON.stringify({ type: 'handoff-force-rejected', reason: message }));
+                                    }
+                                });
+                                return ['--remote', capture.endpoint, '-C', projectPath];
+                            };
+
+                            if (!providerSessionId && routeSessionId && !managedTmuxExists) {
+                                codexCommandArgs = await startCapturedSharedTui(null);
+                            }
                             const sharedRuntimeProbe = providerSessionId
                                 ? await probeSharedCodexThread(socketPath, providerSessionId)
                                 : {
@@ -365,6 +450,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             const attachPlan = codexCommandArgs ? null : resolveCodexTerminalAttachPlan({
                                 providerSessionId,
                                 managedTmuxExists,
+                                forceHandoff: forceHandoffAuthorized,
                                 sharedRuntime: {
                                     ...sharedRuntimeProbe,
                                     endpoint: `unix://${socketPath}`,
@@ -376,19 +462,62 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                         : 'unknown',
                             });
                             if (attachPlan?.action === 'blocked') {
+                                const canForceHandoff = Boolean(
+                                    sharedRuntimeProbe.ready
+                                    && providerSessionId,
+                                );
                                 const blockedMessage = attachPlan.reason === 'external-active-session-not-shared'
-                                    ? '安全阻止：该会话仍在旧运行时中活动，尚未接入共享服务。请返回原终端、等待完成或迁移后重试。'
-                                    : '安全阻止：暂时无法核实该会话的运行状态与共享归属，未执行接管。请稍后重试或返回原终端确认。';
-                                ws.send(JSON.stringify({
-                                    type: 'handoff-blocked',
-                                    reason: attachPlan.reason,
-                                    sessionFailed: attachPlan.sessionFailed,
-                                }));
+                                    ? '警告：该旧式会话仍在原运行时中活动。你可以等待完成，或确认风险后强制接管。'
+                                    : '警告：暂时无法核实该旧式会话的活动状态。你可以返回原终端确认，或承担风险强制接管。';
+                                if (canForceHandoff && providerSessionId) {
+                                    pendingForceHandoffOffer = {
+                                        token: randomUUID(),
+                                        expiresAt: Date.now() + FORCE_HANDOFF_OFFER_TTL_MS,
+                                        projectName,
+                                        projectPath,
+                                        routeSessionId,
+                                        providerSessionId,
+                                    };
+                                    ws.send(JSON.stringify({
+                                        type: 'handoff-warning',
+                                        reason: attachPlan.reason,
+                                        canForceHandoff: true,
+                                        handoffToken: pendingForceHandoffOffer.token,
+                                        routeSessionId,
+                                        providerSessionId,
+                                    }));
+                                } else {
+                                    pendingForceHandoffOffer = null;
+                                    ws.send(JSON.stringify({
+                                        type: 'handoff-blocked',
+                                        reason: attachPlan.reason,
+                                        sessionFailed: attachPlan.sessionFailed,
+                                    }));
+                                }
                                 ws.send(JSON.stringify({
                                     type: 'output',
                                     data: `\x1b[33m${blockedMessage}\x1b[0m\r\n`,
                                 }));
                                 return;
+                            }
+                            if (forceHandoffAuthorized && attachPlan) {
+                                if (!providerSessionId) {
+                                    throw new Error('Force handoff requires the original Codex session ID');
+                                }
+                                const originalProviderSessionId = providerSessionId;
+                                if (attachPlan.action === 'new-shared-tui') {
+                                    codexCommandArgs = await startCapturedSharedTui(originalProviderSessionId);
+                                    providerSessionId = null;
+                                    resumeSessionId = null;
+                                    hasSession = false;
+                                }
+                                ws.send(JSON.stringify({
+                                    type: 'handoff-force-started',
+                                    routeSessionId,
+                                    providerSessionId,
+                                    originalProviderSessionId,
+                                    action: attachPlan.action,
+                                }));
                             }
                             codexCommandArgs = codexCommandArgs || attachPlan?.commandArgs || null;
                         }
@@ -472,7 +601,12 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             sessionId: resumeSessionId,
                             routeSessionId,
                             providerSessionId,
-                            tmuxSessionName: activeTmuxSessionName
+                            tmuxSessionName: activeTmuxSessionName,
+                            isPlainShell,
+                            provider,
+                            pendingOutput: '',
+                            outputFlushTimer: null,
+                            interactiveOutputPending: false,
                         });
 
                         // Handle data output
@@ -480,70 +614,63 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             const session = ptySessionsMap.get(ptySessionKey);
                             if (!session) return;
 
-                            if (session.buffer.length < 5000) {
-                                session.buffer.push(data);
-                            } else {
-                                session.buffer.shift();
-                                session.buffer.push(data);
-                            }
+                            let outputData = data;
+                            const cleanChunk = stripAnsiSequences(data);
+                            urlDetectionBuffer = `${urlDetectionBuffer}${cleanChunk}`.slice(-SHELL_URL_PARSE_BUFFER_LIMIT);
 
-                            if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-                                let outputData = data;
+                            outputData = outputData.replace(
+                                /OPEN_URL:\s*(https?:\/\/[^\s\x1b\x07]+)/g,
+                                '[INFO] Opening in browser: $1'
+                            );
 
-                                const cleanChunk = stripAnsiSequences(data);
-                                urlDetectionBuffer = `${urlDetectionBuffer}${cleanChunk}`.slice(-SHELL_URL_PARSE_BUFFER_LIMIT);
+                            const emitAuthUrl = (detectedUrl: string, autoOpen = false) => {
+                                const normalizedUrl = normalizeDetectedUrl(detectedUrl);
+                                if (!normalizedUrl || !session.ws || session.ws.readyState !== WebSocket.OPEN) return;
 
-                                outputData = outputData.replace(
-                                    /OPEN_URL:\s*(https?:\/\/[^\s\x1b\x07]+)/g,
-                                    '[INFO] Opening in browser: $1'
-                                );
-
-                                const emitAuthUrl = (detectedUrl: string, autoOpen = false) => {
-                                    const normalizedUrl = normalizeDetectedUrl(detectedUrl);
-                                    if (!normalizedUrl) return;
-
-                                    const isNewUrl = !announcedAuthUrls.has(normalizedUrl);
-                                    if (isNewUrl) {
-                                        announcedAuthUrls.add(normalizedUrl);
-                                        session.ws.send(JSON.stringify({
-                                            type: 'auth_url',
-                                            url: normalizedUrl,
-                                            autoOpen
-                                        }));
-                                    }
-
-                                };
-
-                                const normalizedDetectedUrls: string[] = (extractUrlsFromText(urlDetectionBuffer) as string[])
-                                    .map((url: string) => normalizeDetectedUrl(url))
-                                    .filter((url: string | null): url is string => Boolean(url));
-
-                                // Prefer the most complete URL if shorter prefix variants are also present.
-                                const dedupedDetectedUrls = Array.from(new Set(normalizedDetectedUrls)).filter((url: string, _: number, urls: string[]) =>
-                                    !urls.some((otherUrl) => otherUrl !== url && otherUrl.startsWith(url))
-                                );
-
-                                dedupedDetectedUrls.forEach((url) => emitAuthUrl(url, false));
-
-                                if (shouldAutoOpenUrlFromOutput(cleanChunk) && dedupedDetectedUrls.length > 0) {
-                                    const bestUrl = dedupedDetectedUrls.reduce((longest: string, current: string) =>
-                                        current.length > longest.length ? current : longest
-                                    );
-                                    emitAuthUrl(bestUrl, true);
+                                const isNewUrl = !announcedAuthUrls.has(normalizedUrl);
+                                if (isNewUrl) {
+                                    announcedAuthUrls.add(normalizedUrl);
+                                    session.ws.send(JSON.stringify({
+                                        type: 'auth_url',
+                                        url: normalizedUrl,
+                                        autoOpen
+                                    }));
                                 }
+                            };
 
-                                // Send regular output
-                                session.ws.send(JSON.stringify({
-                                    type: 'output',
-                                    data: outputData
-                                }));
+                            const normalizedDetectedUrls: string[] = (extractUrlsFromText(urlDetectionBuffer) as string[])
+                                .map((url: string) => normalizeDetectedUrl(url))
+                                .filter((url: string | null): url is string => Boolean(url));
+
+                            // Prefer the most complete URL if shorter prefix variants are also present.
+                            const dedupedDetectedUrls = Array.from(new Set(normalizedDetectedUrls)).filter((url: string, _: number, urls: string[]) =>
+                                !urls.some((otherUrl) => otherUrl !== url && otherUrl.startsWith(url))
+                            );
+
+                            dedupedDetectedUrls.forEach((url) => emitAuthUrl(url, false));
+
+                            if (shouldAutoOpenUrlFromOutput(cleanChunk) && dedupedDetectedUrls.length > 0) {
+                                const bestUrl = dedupedDetectedUrls.reduce((longest: string, current: string) =>
+                                    current.length > longest.length ? current : longest
+                                );
+                                emitAuthUrl(bestUrl, true);
                             }
+
+                            queueShellOutput({
+                                session,
+                                data: outputData,
+                                isPlainShell,
+                                WebSocketState: WebSocket,
+                            });
                         });
 
                         // Handle process exit
                         shellProcess.onExit((exitCode: { exitCode: number; signal?: string }) => {
                             console.log('🔚 Shell process exited with code:', exitCode.exitCode, 'signal:', exitCode.signal);
                             const session = ptySessionsMap.get(ptySessionKey);
+                            if (session) {
+                                flushShellOutput(session, WebSocket);
+                            }
                             if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
                                 session.ws.send(JSON.stringify({
                                     type: 'output',
@@ -552,6 +679,9 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             }
                             if (session && session.timeoutId) {
                                 clearTimeout(session.timeoutId);
+                            }
+                            if (session) {
+                                resetShellOutputQueue(session);
                             }
                             ptySessionsMap.delete(ptySessionKey);
                             shellProcess = null;
@@ -574,6 +704,12 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     // Send input to shell process
                     if (shellProcess && shellProcess.write) {
                         try {
+                            if (ptySessionKey) {
+                                const session = ptySessionsMap.get(ptySessionKey);
+                                if (session && !session.isPlainShell) {
+                                    markShellOutputInteractive(session, WebSocket);
+                                }
+                            }
                             shellProcess.write(data.data);
                         } catch (error: any) {
                             console.error('Error writing to shell:', error);
@@ -597,6 +733,9 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         executeTmuxLifecycleCommand(killSessionArgs, 'kill-session');
                         if (session?.timeoutId) {
                             clearTimeout(session.timeoutId);
+                        }
+                        if (session) {
+                            resetShellOutputQueue(session);
                         }
                         if (session?.pty && session.pty.kill) {
                             session.pty.kill();

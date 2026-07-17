@@ -99,6 +99,37 @@ Open ozw in your browser.
 3. Start an `oz` run and check if you can monitor its progress from another device.
 4. If you use Codex/Pi chat, create one manual session for each provider and confirm auth and model discovery work.
 
+### 6. How Codex session cards hand off
+
+| Type | What it means to a user |
+|---|---|
+| Shared session | Already managed by the shared Codex service and safe to continue from web or terminal |
+| Legacy session | Created by an older or private Codex process that the shared service does not own yet |
+
+| Card state | What happens when opened |
+|---|---|
+| New card without a thread | Creates a shared thread and binds the card |
+| Shared session, active or idle | Reconnects directly; an active task stays continuous |
+| Legacy session, confirmed idle | Migrates the same session ID into the shared service automatically |
+| Legacy session, active or unknown | Shows a warning; confirmation keeps the card ID and creates a managed tmux plus a new shared session |
+
+```mermaid
+flowchart TD
+    Open([👤 Open Codex session card]) --> Shared{Shared service owns thread?}
+    Shared -->|No thread yet| Create[⚙️ Create shared thread and bind card]
+    Shared -->|Yes| Resume[✅ Reconnect to the same session]
+    Shared -->|No legacy session| Idle{Confirmed idle?}
+    Idle -->|Yes| Migrate[🔄 Migrate the same session ID]
+    Idle -->|No active or unknown| Warn[🚨 Show risk warning]
+    Warn --> Force{User requests force takeover?}
+    Force -->|No| Stay[Keep original terminal state]
+    Force -->|Yes| Confirm[🔐 Confirm the risk]
+    Confirm --> Tmux[⚙️ Create managed tmux for the card ID]
+    Tmux --> SharedResume[✅ Create shared session and bind card]
+```
+
+> Force takeover keeps the card ID but replaces its Codex thread with a new shared session. The original terminal is not stopped.
+
 ---
 
 ## Useful Commands

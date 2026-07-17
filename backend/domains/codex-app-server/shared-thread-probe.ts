@@ -1,6 +1,6 @@
 /**
- * 文件目的：通过真实 proxy 握手核实共享 daemon 是否拥有目标线程和活动轮次。
- * 业务意义：残留 Socket 或无关 daemon 不能绕过旧式活动会话的安全阻止。
+ * 文件目的：通过真实 proxy 核实共享 daemon 是否拥有目标线程和活动轮次。
+ * 业务意义：残留 Socket 或无关 daemon 不能绕过旧式活动会话的安全警告。
  */
 
 import { spawn } from 'node:child_process';

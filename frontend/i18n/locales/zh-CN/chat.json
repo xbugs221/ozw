@@ -192,6 +192,13 @@
       "connect": "在 Shell 中继续",
       "connectTitle": "连接到 Shell"
     },
+    "handoff": {
+      "activeWarning": "警告：这是仍在旧运行方式中活动的会话。等待原任务完成最安全；强制接管可能让原终端继续运行。",
+      "unknownWarning": "警告：无法确认这个旧式会话是否仍在运行。请先检查原终端，或明确承担风险后强制接管。",
+      "forceAction": "强制接管",
+      "forcing": "接管中…",
+      "forceConfirm": "确定强制接管吗？Ozw 将保留当前卡片编号并建立新式共享会话，不会停止原终端。"
+    },
     "loading": "正在加载终端...",
     "connecting": "正在连接到 Shell...",
     "startSession": "启动新的 agent 会话",

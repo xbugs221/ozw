@@ -1,3 +1,7 @@
+/**
+ * 文件目的：协调工作区主视图、文件辅助栏、编辑器与终端布局。
+ * 业务意义：保证各工作视图独立切换，辅助栏操作不会抢占用户当前主视图。
+ */
 import React, { useEffect } from 'react';
 const Plus = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
 const Trash2 = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>;
@@ -67,6 +71,7 @@ function MainContent({
   onRenderSnapshotRequest,
   headerLeadingContent,
 }: MainContentProps) {
+  /** 主视图由 activeTab 独立拥有，桌面辅助栏只更新各自的布局状态。 */
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom } = preferences;
   const [isRenderingSnapshot, setIsRenderingSnapshot] = React.useState(false);
@@ -315,7 +320,6 @@ function MainContent({
         } else {
           setRightDock({ activePanel: 'files', collapsed: false, fullscreen: false });
         }
-        setActiveTab('chat');
         return;
       } else if (nextTab === 'shell') {
         setActiveTab('shell');
