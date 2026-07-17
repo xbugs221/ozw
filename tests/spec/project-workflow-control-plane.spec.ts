@@ -705,7 +705,7 @@ test.describe('项目内需求工作流控制面', () => {
     await expect(page.getByTestId('workflow-status-tree')).toBeVisible();
   });
 
-  test('项目列表保持字母序并显示项目级活跃状态与未读绿点', async ({ page }) => {
+  test('项目列表保持字母序并移除左侧状态图标', async ({ page }) => {
     await expect(page.getByTestId('project-list-item-alpha')).toBeVisible();
 	    await expect(page.getByTestId('project-list-item-fixture-project')).toBeVisible();
 	    await expect(page.getByTestId('project-list-item-zeta')).toBeVisible();
@@ -716,13 +716,7 @@ test.describe('项目内需求工作流控制面', () => {
       'data-project-order',
       'alpha,fixture-project,zeta',
     );
-    await expect(
-      page
-        .getByRole('button', { name: /^fixture-project\b/i })
-        .first()
-        .locator('[data-testid="project-list-item-fixture-project-active-dot"]'),
-    ).toBeVisible();
-    await expect(page.getByTestId('project-list-item-fixture-project-unread-dot')).toBeVisible();
+    await expect(page.getByTestId('project-list-item-fixture-project-active-dot')).toHaveCount(0);
     await expect(page.getByTestId('project-list')).toHaveAttribute(
       'data-project-order',
       'alpha,fixture-project,zeta',

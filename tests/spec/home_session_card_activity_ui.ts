@@ -19,6 +19,23 @@ import {
   hasUnreadSessionActivity,
 } from '../../frontend/components/main-content/view/subcomponents/sessionActivityState.ts';
 import { getSessionRouteNumber } from '../../frontend/utils/sessionCardDisplay.ts';
+import {
+  getMobileProjectLabel,
+  MOBILE_PROJECT_LABEL_MAX_CHARACTERS,
+} from '../../frontend/components/sidebar/utils/projectLabel.ts';
+
+test('mobile project labels stop at fifteen Unicode characters', () => {
+  /**
+   * Mobile navigation stays compact while desktop rendering keeps the source
+   * label and emoji count as one visible character.
+   */
+  const fullLabel = '项目😀导航名称一二三四五六七八九十';
+  const mobileLabel = getMobileProjectLabel(fullLabel);
+
+  assert.equal(Array.from(mobileLabel).length, MOBILE_PROJECT_LABEL_MAX_CHARACTERS);
+  assert.equal(mobileLabel, Array.from(fullLabel).slice(0, 15).join(''));
+  assert.equal(fullLabel, '项目😀导航名称一二三四五六七八九十');
+});
 
 test('historical project-home sessions are read on first visit until activity changes', () => {
   /**
@@ -165,6 +182,9 @@ test('project-home cards expose business sort choices while sidebar stays naviga
   assert.doesNotMatch(sidebarProjectItemSource, /aria-label="工作流排序"/);
   assert.doesNotMatch(sidebarProjectItemSource, /新建/);
   assert.doesNotMatch(sidebarProjectItemSource, /openWorkflowComposer|createProjectWorkflow/);
+  assert.doesNotMatch(sidebarProjectItemSource, /renderProjectMarker|active-dot/);
+  assert.match(sidebarProjectItemSource, /\{mobileProjectLabel\}/);
+  assert.match(sidebarProjectItemSource, /\{fullProjectLabel\}/);
 });
 
 test('project-home manual sessions collapse after ten cards and show request-prefix titles', async () => {

@@ -12,6 +12,7 @@ const X = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidt
 import type { TFunction } from 'i18next';
 import { cn } from '../../../../lib/utils';
 import type { Project } from '../../../../types/app';
+import { getMobileProjectLabel } from '../../utils/projectLabel';
 
 const PROJECT_ACTION_LONG_PRESS_MS = 450;
 
@@ -59,7 +60,9 @@ export default function SidebarProjectItem({
     x: 0,
     y: 0,
   });
-  const normalizedProjectLabel = String(project.displayName || project.name).toLowerCase().trim();
+  const fullProjectLabel = String(project.displayName || project.name);
+  const mobileProjectLabel = getMobileProjectLabel(fullProjectLabel);
+  const normalizedProjectLabel = fullProjectLabel.toLowerCase().trim();
   const projectTestId = `project-list-item-${normalizedProjectLabel
     .replace(/^\./, 'dot-')
     .replace(/[^a-z0-9]+/g, '-')
@@ -68,25 +71,6 @@ export default function SidebarProjectItem({
   const saveProjectName = () => {
     onSaveProjectName(project.name);
   };
-
-  const renderProjectMarker = (className: string, wrapperClassName: string) => (
-    <div
-      className={cn(
-        'flex items-center justify-center rounded-md',
-        wrapperClassName,
-      )}
-      title={hasProjectActivity ? '有项目活动' : '当前无项目活动'}
-    >
-      <span
-        data-testid={hasProjectActivity ? `${projectTestId}-active-dot` : undefined}
-        className={cn(
-          className,
-          'rounded-full',
-          hasProjectActivity ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/30',
-        )}
-      />
-    </div>
-  );
 
   const selectProject = () => {
     onProjectSelect(project);
@@ -239,41 +223,28 @@ export default function SidebarProjectItem({
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex min-w-0 flex-1 items-center gap-2">
-                <div className="flex flex-shrink-0 items-center gap-1">
-                  {isEditing ? (
-                    <>
-                      <button
-                        className="w-8 h-8 rounded-lg bg-green-500 dark:bg-green-600 flex items-center justify-center active:scale-90 transition-all duration-150 shadow-sm active:shadow-none"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          saveProjectName();
-                        }}
-                      >
-                        <Check className="w-4 h-4 text-white" />
-                      </button>
-                      <button
-                        className="w-8 h-8 rounded-lg bg-gray-500 dark:bg-gray-600 flex items-center justify-center active:scale-90 transition-all duration-150 shadow-sm active:shadow-none"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onCancelEditingProject();
-                        }}
-                      >
-                        <X className="w-4 h-4 text-white" />
-                      </button>
-                    </>
-                  ) : (
-                    <></>
-                  )}
-
-                  <div
-                    className={cn(
-                      'flex h-7 w-7 items-center justify-center rounded-md border transition-colors',
-                      hasProjectActivity ? 'border-emerald-500/25 bg-emerald-500/10' : 'border-border bg-muted/70',
-                    )}
-                  >
-                    {renderProjectMarker('h-2 w-2', 'h-7 w-7')}
+                {isEditing && (
+                  <div className="flex flex-shrink-0 items-center gap-1">
+                    <button
+                      className="w-8 h-8 rounded-lg bg-green-500 dark:bg-green-600 flex items-center justify-center active:scale-90 transition-all duration-150 shadow-sm active:shadow-none"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        saveProjectName();
+                      }}
+                    >
+                      <Check className="w-4 h-4 text-white" />
+                    </button>
+                    <button
+                      className="w-8 h-8 rounded-lg bg-gray-500 dark:bg-gray-600 flex items-center justify-center active:scale-90 transition-all duration-150 shadow-sm active:shadow-none"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onCancelEditingProject();
+                      }}
+                    >
+                      <X className="w-4 h-4 text-white" />
+                    </button>
                   </div>
-                </div>
+                )}
 
                 <div className="min-w-0 flex-1">
                   {isEditing ? (
@@ -303,7 +274,9 @@ export default function SidebarProjectItem({
                     />
                   ) : (
                     <div className="flex min-w-0 items-center gap-2">
-                      <h3 className="truncate text-sm font-medium leading-5 text-foreground">{project.displayName}</h3>
+                      <h3 className="whitespace-nowrap text-sm font-medium leading-5 text-foreground">
+                        {mobileProjectLabel}
+                      </h3>
                       {project.hasUnreadActivity && (
                         <span
                           className="inline-flex h-2 w-2 flex-shrink-0 rounded-full bg-green-500"
@@ -329,40 +302,28 @@ export default function SidebarProjectItem({
           onContextMenu={handleDesktopContextMenu}
           data-testid={`${projectTestId}-desktop-surface`}
         >
-          <div className="flex flex-shrink-0 items-center gap-2">
-            {isEditing ? (
-              <>
-                <div
-                  className="w-6 h-6 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center justify-center rounded cursor-pointer transition-colors"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    saveProjectName();
-                  }}
-                >
-                  <Check className="w-3 h-3" />
-                </div>
-                <div
-                  className="w-6 h-6 text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center rounded cursor-pointer transition-colors"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCancelEditingProject();
-                  }}
-                >
-                  <X className="w-3 h-3" />
-                </div>
-              </>
-            ) : (
-              <></>
-            )}
-            <div
-              className={cn(
-                'flex h-7 w-7 items-center justify-center rounded-md border',
-                hasProjectActivity ? 'border-emerald-500/25 bg-emerald-500/10' : 'border-border bg-muted/70',
-              )}
-            >
-              {renderProjectMarker('h-2 w-2 flex-shrink-0', 'h-7 w-7 flex-shrink-0')}
+          {isEditing && (
+            <div className="flex flex-shrink-0 items-center gap-2">
+              <div
+                className="w-6 h-6 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center justify-center rounded cursor-pointer transition-colors"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  saveProjectName();
+                }}
+              >
+                <Check className="w-3 h-3" />
+              </div>
+              <div
+                className="w-6 h-6 text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center rounded cursor-pointer transition-colors"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCancelEditingProject();
+                }}
+              >
+                <X className="w-3 h-3" />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="min-w-0 flex-1 text-left leading-none">
             {isEditing ? (
@@ -385,9 +346,9 @@ export default function SidebarProjectItem({
                 />
               </div>
             ) : (
-              <div className="min-w-0" title={project.displayName}>
+              <div className="min-w-0" title={fullProjectLabel}>
                 <div className="flex min-w-0 items-center gap-2 text-sm font-medium leading-5 text-foreground">
-                  <span className="truncate">{project.displayName}</span>
+                  <span>{fullProjectLabel}</span>
                   {project.hasUnreadActivity && (
                     <span
                       data-testid={`${projectTestId}-unread-dot`}
