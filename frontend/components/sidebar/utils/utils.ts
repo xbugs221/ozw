@@ -325,8 +325,11 @@ export const getAllSessions = (
       ...session,
       __provider: 'pi' as const,
     }));
+  const claudeSessions = (project.claudeSessions || [])
+    .filter((session) => includeHidden || isVisibleByDefault(session))
+    .map((session) => ({ ...session, __provider: 'claude' as const }));
 
-  return [...codexSessions, ...piSessions].sort(compareSessionsByCreationNumber);
+  return [...codexSessions, ...piSessions, ...claudeSessions].sort(compareSessionsByCreationNumber);
 };
 
 /**

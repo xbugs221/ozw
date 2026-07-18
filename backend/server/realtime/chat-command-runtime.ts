@@ -416,6 +416,10 @@ export function createChatCommandDispatcher(deps: any, ws: WebSocket, request: a
              * PURPOSE: Keep command branching and provider runtime calls outside the
              * WebSocket lifecycle handler while preserving the legacy command behavior.
              */
+                if (data.type === 'pi-command') {
+                    writer.send({ type: 'pi-error', error: 'Pi 仅支持 tmux TUI' });
+                    return;
+                }
                 console.log('📨 Chat message received:', data.type);
                 if (data.type === 'claude-command') {
                     writer.send({ type: 'claude-error', error: 'Provider "claude" is no longer supported' });
@@ -701,6 +705,10 @@ export function createChatCommandDispatcher(deps: any, ws: WebSocket, request: a
                 } else if (data.type === 'check-session-status') {
                     const provider = normalizeManualProvider(data.provider || 'codex');
                     const sessionId = data.ozwSessionId || data.ozw_session_id || data.sessionId;
+                    if (provider === 'claude') {
+                        /** Claude 没有 OZW native runtime；TUI 状态由 shell relay 承载。 */
+                        return;
+                    }
                     const status = getNativeSessionStatus(provider, sessionId, data.projectPath || data.options?.projectPath || data.options?.cwd || '');
                     writer.send({
                         type: 'session-status',

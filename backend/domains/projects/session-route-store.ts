@@ -3,7 +3,7 @@
  * 业务意义：手动会话从草稿绑定到真实 Provider 会话是跨请求状态，独立边界能降低项目发现模块耦合。
  */
 
-type ProviderName = 'codex' | 'pi';
+type ProviderName = 'codex' | 'pi' | 'claude';
 type LooseRecord = Record<string, any>;
 
 export type SessionRouteStoreDependencies = {
@@ -31,8 +31,8 @@ export type SessionRouteStoreDependencies = {
  * 校验 Provider 名称，保持手动路由只绑定已支持的会话来源。
  */
 function assertProvider(provider: string): asserts provider is ProviderName {
-  if (provider !== 'codex' && provider !== 'pi') {
-    throw new Error('provider must be "codex" or "pi"');
+  if (provider !== 'codex' && provider !== 'pi' && provider !== 'claude') {
+    throw new Error('provider must be "codex", "pi" or "claude"');
   }
 }
 

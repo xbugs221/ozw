@@ -29,6 +29,7 @@ function getSessionProvider(session: Partial<ProjectSession> | null | undefined,
   /**
    * 从 session 字段和调用方提示中解析 provider，默认保持 Codex 兼容行为。
    */
+  if (session?.__provider === 'claude' || session?.provider === 'claude' || fallback === 'claude') return 'claude';
   return session?.__provider === 'pi' || session?.provider === 'pi' || fallback === 'pi' ? 'pi' : 'codex';
 }
 
@@ -47,7 +48,8 @@ function buildSessionNavigationUrl(
 
   if (hasStableSessionRoute(session)) {
     const route = buildProjectSessionRoute(project, session);
-    nextParams.delete('provider');
+    if (provider === 'codex') nextParams.delete('provider');
+    else nextParams.set('provider', provider);
     nextParams.delete('projectPath');
     nextParams.delete('sessionSummary');
     return `${route}${nextParams.toString() ? `?${nextParams.toString()}` : ''}`;

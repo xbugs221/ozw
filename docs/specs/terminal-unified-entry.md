@@ -12,12 +12,13 @@
 
 - Codex 会话必须使用真实 `providerSessionId` 恢复。
 - Pi 会话必须使用 `pi --session <providerSessionId>` 恢复。
+- Claude 会话必须使用 `claude --resume <providerSessionId>` 恢复，并保持 `provider=claude` 身份。
 - 默认点击不得直接加载 JSONL 富渲染记录。
 - JSONL 记录或详情必须保留为用户显式打开的入口。
 
 ### 场景：新建会话走同一个普通终端入口
 
-当用户点击新建会话并选择 Codex 或 Pi 时，系统必须打开同一个普通终端视图，并注入 provider 对应的新建命令。
+当用户点击新建会话并选择 Codex、Pi 或 Claude 时，系统必须打开同一个普通终端视图，并注入 provider 对应的新建命令。
 
 - 新建和恢复必须复用终端入口。
 - 界面和状态模型不得引入“会话终端”这类额外用户概念。
@@ -30,7 +31,7 @@
 当浏览器刷新、网络断开或 WebSocket close 时，后端不得杀死终端进程。真实终端必须继续运行在 `tmux` session 中，浏览器恢复后重新 attach 到同一 session。
 
 - 后端必须能检测、创建、attach 和向 `tmux` session 注入输入。
-- 普通 shell 与 Codex/Pi TUI 必须共享同一保活机制。
+- 普通 shell 与 Codex/Pi/Claude TUI 必须共享同一保活机制。
 - WebSocket close 只能 detach 当前 client，不得 kill 终端进程。
 - 只有用户显式结束或删除终端时，才允许 kill 对应 `tmux` session。
 - `tmux` 生命周期命令必须真实执行，不能只记录日志或拼接字符串。
@@ -51,6 +52,7 @@
 - 默认会话点击不加载记录视图。
 - 显式点击记录后才渲染 JSONL 历史。
 - 记录视图必须能返回终端。
+- Claude 默认进入 TUI 时不得请求历史；仅显式记录入口才能读取其分页历史。
 
 ### 场景：桌面终端不再固定底部 dock
 

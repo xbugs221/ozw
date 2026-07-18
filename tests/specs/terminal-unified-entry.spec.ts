@@ -1,5 +1,5 @@
 /**
- * Sources: 2026-07-06-37-终端统一入口与tmux保活
+ * Sources: 2026-07-06-37-终端统一入口与tmux保活, 41-接入Claude-Code会话与tmux-TUI
  *
  * PURPOSE: Verify terminal entry, tmux persistence, explicit record view, and
  * desktop terminal layout stay aligned with the durable terminal contract.
@@ -85,7 +85,7 @@ function readDesktopLayoutSources(): string {
   ].join('\n');
 }
 
-test('会话卡片用 cN 短路由打开终端', () => {
+test('会话卡片用 cN 短路由打开 chat 内保活 TUI', () => {
   const { overviewSource, combinedSource } = readSessionEntrySources();
 
   assert.match(
@@ -95,8 +95,8 @@ test('会话卡片用 cN 短路由打开终端', () => {
   );
   assert.match(
     combinedSource,
-    /handleOpenSessionTerminal[\s\S]{0,260}setActiveTab\(['"]shell['"]\)[\s\S]{0,260}onSelectSession\(session\)/,
-    '终端入口必须先切到终端视图，再复用现有会话短路由导航',
+    /handleOpenSessionTerminal[\s\S]{0,260}setActiveTab\(['"]chat['"]\)[\s\S]{0,260}onSelectSession\(session\)/,
+    '会话入口必须先切到 chat 内 TUI，再复用现有会话短路由导航',
   );
   assert.match(
     combinedSource,
@@ -110,6 +110,7 @@ test('会话卡片用 cN 短路由打开终端', () => {
   );
   assert.match(combinedSource, /project-new-session-provider-codex/, '新建会话必须保留 Codex provider 入口');
   assert.match(combinedSource, /project-new-session-provider-pi/, '新建会话必须保留 Pi provider 入口');
+  assert.match(combinedSource, /project-new-session-provider-claude/, '新建会话必须保留 Claude provider 入口');
   assert.doesNotMatch(
     combinedSource,
     /会话终端|managedSessionTerminal|sessionTerminalOnly|isSessionTerminal/,

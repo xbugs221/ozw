@@ -2,7 +2,7 @@
  * Session messages HTTP handler — extracted from backend/index.ts so both the
  * Express route and integration tests call the same implementation.
  */
-import { extractProjectDirectory, getCodexSessions, getPiSessions, getCodexSessionMessages, getPiSessionMessages } from './projects.js';
+import { extractProjectDirectory, getCodexSessions, getPiSessions, getClaudeSessions, getCodexSessionMessages, getPiSessionMessages, getClaudeSessionMessages } from './projects.js';
 import { getProviderActiveTurnOverlay, clearProviderActiveTurnOverlay } from './domains/provider-runtime/active-turn-store.js';
 import { resolveProviderSessionBinding } from './domains/provider-runtime/provider-session-binding.js';
 import {
@@ -13,10 +13,10 @@ import {
 import { filterRenderableMessages, type ChatMessageLike } from '../shared/provider-runtime-transcript.js';
 
 type MessageRecord = Record<string, any>;
-type ProviderName = "codex" | "pi";
+type ProviderName = "codex" | "pi" | "claude";
 type SessionMessagesRequest = { params: { projectName: string; sessionId: string }; query: Record<string, any> };
 type SessionMessagesResponse = { json(data: unknown): unknown; status(code: number): SessionMessagesResponse };
-type SessionMessageReader = (sessionId: string, limit?: number | null, offset?: number, afterLine?: number | null) => Promise<any>;
+type SessionMessageReader = (sessionId: string, limit?: number | null, offset?: number, afterLine?: number | null, historySnapshotRawLineOffset?: number | null, afterCursor?: string | null) => Promise<any>;
 
 const CC_ROUTE_SESSION_PATTERN = /^c\d+$/;
 
@@ -317,18 +317,23 @@ function isCbwRouteSessionId(sessionId: unknown): boolean {
 export async function handleGetSessionMessages(req: SessionMessagesRequest, res: SessionMessagesResponse) {
     try {
         const { projectName, sessionId } = req.params;
-        const { limit, offset, provider, afterLine, afterCursor, projectPath: queryProjectPath } = req.query;
+        const { limit, offset, provider, afterLine, afterCursor, historySnapshotRawLineOffset, projectPath: queryProjectPath } = req.query;
 
         // Parse limit and offset if provided
         const parsedLimit = limit ? parseInt(limit, 10) : null;
         const parsedOffset = offset ? parseInt(offset, 10) : 0;
         const parsedAfterLine = afterLine != null ? parseInt(afterLine, 10) : null;
-        const isIncrementalRead = parsedAfterLine !== null;
+        const parsedHistorySnapshotRawLineOffset = historySnapshotRawLineOffset != null
+            ? parseInt(historySnapshotRawLineOffset, 10)
+            : null;
+        const parsedAfterCursor = typeof afterCursor === 'string' && afterCursor ? afterCursor : null;
+        const isIncrementalRead = parsedAfterLine !== null || parsedAfterCursor !== null;
 
-        let resolvedProvider: ProviderName | null = provider === 'codex' ? 'codex' : provider === 'pi' ? 'pi' : null;
+        let resolvedProvider: ProviderName | null = provider === 'codex' ? 'codex' : provider === 'pi' ? 'pi' : provider === 'claude' ? 'claude' : null;
         let projectPath = '';
         const readCodexMessages = getCodexSessionMessages as SessionMessageReader;
         const readPiMessages = getPiSessionMessages as SessionMessageReader;
+        const readClaudeMessages = getClaudeSessionMessages as SessionMessageReader;
 
         if (isCbwRouteSessionId(sessionId)) {
             // cN route sessions no longer read from co conversation data.
@@ -347,9 +352,22 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
 
             const cNProvider: ProviderName = runtimeContext?.provider === 'pi'
                 ? 'pi'
+                : runtimeContext?.provider === 'claude'
+                    ? 'claude'
                 : runtimeContext?.provider === 'codex'
                     ? 'codex'
                     : (resolvedProvider || 'codex');
+
+            if (cNProvider === 'claude') {
+                const providerSessionId = runtimeContext?.providerSessionId || '';
+                if (!providerSessionId) {
+                    return res.json({ messages: [], total: 0, hasMore: false });
+                }
+                const claudeResult = await readClaudeMessages(providerSessionId, parsedLimit, parsedOffset, parsedAfterLine, parsedHistorySnapshotRawLineOffset, parsedAfterCursor);
+                return res.json(claudeResult && typeof claudeResult === 'object'
+                    ? claudeResult
+                    : { messages: Array.isArray(claudeResult) ? claudeResult : [] });
+            }
 
             // Running provider sessions: merge JSONL history with the live
             // transcript snapshot so completed turns (from disk) and the
@@ -362,7 +380,9 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
                     try {
                         const jsonlResult = cNProvider === 'codex'
                             ? await readCodexMessages(providerSessionIdForMerge, parsedLimit, parsedOffset, parsedAfterLine)
-                            : await readPiMessages(providerSessionIdForMerge, parsedLimit, parsedOffset, parsedAfterLine);
+                            : cNProvider === 'pi'
+                                ? await readPiMessages(providerSessionIdForMerge, parsedLimit, parsedOffset, parsedAfterLine)
+                                : await readClaudeMessages(providerSessionIdForMerge, parsedLimit, parsedOffset, parsedAfterLine, parsedHistorySnapshotRawLineOffset, parsedAfterCursor);
                         const jsonlMessages = (jsonlResult && typeof jsonlResult === 'object') ? (jsonlResult.messages || []) : [];
                         if (isIncrementalRead) {
                             return res.json(jsonlResult && typeof jsonlResult === 'object' ? jsonlResult : { messages: Array.isArray(jsonlResult) ? jsonlResult : [] });
@@ -406,7 +426,9 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
 
             const nativeResult = cNProvider === 'codex'
                 ? await readCodexMessages(providerSessionId, parsedLimit, parsedOffset, parsedAfterLine)
-                : await readPiMessages(providerSessionId, parsedLimit, parsedOffset, parsedAfterLine);
+                : cNProvider === 'pi'
+                    ? await readPiMessages(providerSessionId, parsedLimit, parsedOffset, parsedAfterLine)
+                    : await readClaudeMessages(providerSessionId, parsedLimit, parsedOffset, parsedAfterLine, parsedHistorySnapshotRawLineOffset, parsedAfterCursor);
 
             if (isIncrementalRead) {
                 return res.json(nativeResult && typeof nativeResult === 'object' ? nativeResult : { messages: Array.isArray(nativeResult) ? nativeResult : [] });
@@ -446,7 +468,12 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
                     resolvedProvider = 'codex';
                 } else {
                     const piSessions = await getPiSessions(projectPath);
-                    resolvedProvider = piSessions.some((session: { id?: string }) => session.id === sessionId) ? 'pi' : 'codex';
+                    if (piSessions.some((session: { id?: string }) => session.id === sessionId)) {
+                        resolvedProvider = 'pi';
+                    } else {
+                        const claudeSessions = await getClaudeSessions(projectPath);
+                        resolvedProvider = claudeSessions.some((session: { id?: string }) => session.id === sessionId) ? 'claude' : 'codex';
+                    }
                 }
             } catch (providerDetectionError) {
                 console.warn(
@@ -463,8 +490,10 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
         let result;
         if (resolvedProvider === 'codex') {
             result = await readCodexMessages(sessionId, parsedLimit, parsedOffset, parsedAfterLine);
-        } else {
+        } else if (resolvedProvider === 'pi') {
             result = await readPiMessages(sessionId, parsedLimit, parsedOffset, parsedAfterLine);
+        } else {
+            result = await readClaudeMessages(sessionId, parsedLimit, parsedOffset, parsedAfterLine, parsedHistorySnapshotRawLineOffset, parsedAfterCursor);
         }
 
         // Handle both old and new response formats

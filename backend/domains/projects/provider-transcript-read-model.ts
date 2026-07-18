@@ -1,5 +1,5 @@
 /**
- * PURPOSE: Typed provider transcript reader for Codex and Pi JSONL session
+ * PURPOSE: Typed provider transcript reader for Codex, Pi, and Claude JSONL session
  * headers and message payloads.
  */
 import { createReadStream } from 'fs';
@@ -26,6 +26,22 @@ type CodexRecordContext = {
 };
 
 const jsonlCursorCache = new Map<string, JsonlCursor>();
+const claudeSessionFileCache = new Map<string, string>();
+const CLAUDE_HISTORY_READ_CHUNK_BYTES = 64 * 1024;
+const CLAUDE_HISTORY_MAX_READ_BYTES = 256 * 1024;
+const CLAUDE_HISTORY_MAX_ROW_BYTES = 192 * 1024;
+const CLAUDE_HISTORY_MAX_TEXT_BYTES = 64 * 1024;
+const CLAUDE_HISTORY_CURSOR_PART_BASE = 1_000_000;
+const CLAUDE_HISTORY_OVERSIZED_STATE_BASE = 500_000;
+const CLAUDE_HISTORY_DEFAULT_LIMIT = 50;
+const CLAUDE_HISTORY_MAX_LIMIT = 500;
+let lastClaudeHistoryReadStats = {
+  filePath: '',
+  bytesRead: 0,
+  parsedLines: 0,
+  reachedStart: false,
+  usedIndexedPath: false,
+};
 
 /**
  * Derive the stable Codex session id used by project routes from transcript path.
@@ -195,6 +211,21 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
   };
 }
 
+/** Parse the first usable Claude record for lightweight project discovery. */
+export async function parseClaudeSessionHeader(filePath = ''): Promise<LooseRecord | null> {
+  let first: LooseRecord | null = null;
+  for await (const record of readJsonlRecords(filePath)) {
+    if (record.cwd && record.sessionId) { first = record; break; }
+  }
+  if (!first) return null;
+  const stat = await fs.stat(filePath).catch(() => null);
+  const timestamp = String(first.timestamp || (stat ? new Date(stat.mtimeMs).toISOString() : new Date().toISOString()));
+  const sessionId = String(first.sessionId);
+  const firstContent = typeof first.message?.content === 'string' ? first.message.content : '';
+  const title = firstContent.trim().slice(0, 80) || 'Claude Session';
+  return { id: sessionId, provider: 'claude', __provider: 'claude', sourceSessionId: sessionId, cwd: String(first.cwd), projectPath: String(first.cwd), createdAt: timestamp, lastActivity: timestamp, updated_at: timestamp, summary: title, title, routeTitle: title, messageCount: null, messageCountKnown: false, filePath, sessionFileName: path.basename(filePath) };
+}
+
 
 /**
  * Read Codex transcript messages with cursor and pagination semantics.
@@ -207,7 +238,7 @@ export async function getCodexSessionMessages(
 ): Promise<LooseRecord> {
   const filePath = await findCodexSessionFile(String(sessionId || ''));
   if (!filePath) {
-    return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextRawLineOffset: 0 };
+    return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextMessageOffset: 0, nextRawLineOffset: 0 };
   }
   const messages: LooseRecord[] = [];
   const userEchoKeys = new Set<string>();
@@ -244,7 +275,7 @@ export async function getPiSessionMessages(
 ): Promise<LooseRecord> {
   const filePath = await findPiSessionFile(String(sessionId || ''));
   if (!filePath) {
-    return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextRawLineOffset: 0 };
+    return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextMessageOffset: 0, nextRawLineOffset: 0 };
   }
   const messages: LooseRecord[] = [];
   const transcript = await readJsonlRecordsForMessages(filePath, afterLine);
@@ -252,6 +283,58 @@ export async function getPiSessionMessages(
     messages.push(...piRecordToMessages(record, String(sessionId), lineNumber));
   }
   return paginateMessages(messages, limit, offset, transcript.totalLines);
+}
+
+/** Read Claude history only for an explicit messages request. */
+export async function getClaudeSessionMessages(
+  sessionId: unknown = '',
+  limit: unknown = null,
+  offset: unknown = 0,
+  afterLine: unknown = null,
+  historySnapshotRawLineOffset: unknown = null,
+  indexedFilePath: unknown = '',
+  afterCursor: unknown = '',
+): Promise<LooseRecord> {
+  /** Freeze historical pages at a byte boundary so page reads can start at EOF. */
+  const normalizedSessionId = String(sessionId || '');
+  const normalizedIndexedPath = String(indexedFilePath || '');
+  const filePath = await findClaudeSessionFile(normalizedSessionId, normalizedIndexedPath);
+  if (!filePath) return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextMessageOffset: 0, nextRawLineOffset: 0, historySnapshotRawLineOffset: 0 };
+  const afterByte = normalizeAfterLine(afterLine);
+  const decodedCursor = decodeClaudeAppendCursor(afterCursor);
+  if (afterByte !== null || decodedCursor !== null) {
+    const result = await readClaudeMessagesAfterCursor(
+      filePath,
+      normalizedSessionId,
+      limit,
+      decodedCursor || { byteOffset: afterByte || 0, partIndex: 0 },
+    );
+    lastClaudeHistoryReadStats = {
+      filePath,
+      bytesRead: result.bytesRead,
+      parsedLines: result.parsedLines,
+      reachedStart: false,
+      usedIndexedPath: Boolean(normalizedIndexedPath && path.resolve(normalizedIndexedPath) === path.resolve(filePath)),
+    };
+    return result.page;
+  }
+  const stat = await fs.stat(filePath);
+  const requestedSnapshotBoundary = Number(historySnapshotRawLineOffset);
+  const hasSnapshotBoundary = historySnapshotRawLineOffset !== null
+    && historySnapshotRawLineOffset !== undefined
+    && historySnapshotRawLineOffset !== ''
+    && Number.isSafeInteger(requestedSnapshotBoundary)
+    && requestedSnapshotBoundary >= 0;
+  const snapshotByteOffset = hasSnapshotBoundary ? Math.min(stat.size, requestedSnapshotBoundary) : stat.size;
+  const result = await readClaudeHistoryWindow(filePath, normalizedSessionId, limit, offset, snapshotByteOffset);
+  lastClaudeHistoryReadStats = {
+    filePath,
+    bytesRead: result.bytesRead,
+    parsedLines: result.parsedLines,
+    reachedStart: result.reachedStart,
+    usedIndexedPath: Boolean(normalizedIndexedPath && path.resolve(normalizedIndexedPath) === path.resolve(filePath)),
+  };
+  return result.page;
 }
 
 /**
@@ -268,6 +351,11 @@ export async function listPiSessionFiles(): Promise<string[]> {
   return listJsonlFiles(path.join(os.homedir(), '.pi', 'agent', 'sessions'));
 }
 
+/** List Claude project JSONL files for the background indexer. */
+export async function listClaudeSessionFiles(): Promise<string[]> {
+  return listJsonlFiles(path.join(os.homedir(), '.claude', 'projects'));
+}
+
 /**
  * Locate one Codex transcript by id or filename.
  */
@@ -280,6 +368,772 @@ export async function findCodexSessionFile(sessionId: string): Promise<string | 
  */
 export async function findPiSessionFile(sessionId: string): Promise<string | null> {
   return findSessionFile(await listPiSessionFiles(), sessionId);
+}
+
+/** Find a Claude transcript by provider session id. */
+export async function findClaudeSessionFile(sessionId: string, indexedFilePath = ''): Promise<string | null> {
+  /** Only trust persistent-index/cache paths; request handling must never scan HOME. */
+  const candidates = [indexedFilePath, claudeSessionFileCache.get(sessionId) || ''].filter(Boolean);
+  for (const candidate of candidates) {
+    const exists = await fs.stat(candidate).then((entry) => entry.isFile()).catch(() => false);
+    if (exists) {
+      claudeSessionFileCache.set(sessionId, candidate);
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/** Bound visible Claude text while making omission explicit to the renderer. */
+function truncateClaudeText(value: unknown): string {
+  /** Slice by bytes so multi-byte text cannot bypass the response budget. */
+  const text = String(value || '');
+  const bytes = Buffer.from(text);
+  if (bytes.length <= CLAUDE_HISTORY_MAX_TEXT_BYTES) return text;
+  return `${bytes.subarray(0, CLAUDE_HISTORY_MAX_TEXT_BYTES).toString('utf8')}\n[内容过长，已截断]`;
+}
+
+/** Represent an oversized JSONL row without retaining or returning its payload. */
+function createClaudeOversizedRowMessage(sessionId: string, byteOffset: number): LooseRecord {
+  /** Keep the response useful and bounded when a provider emits a pathological row. */
+  return {
+    type: 'assistant', provider: 'claude', truncated: true,
+    messageKey: `claude:${sessionId}:byte:${byteOffset}:oversized`,
+    message: { role: 'assistant', content: '[单条 Claude 历史记录过大，内容已省略]' },
+  };
+}
+
+type ClaudeOversizedReverseState = {
+  depth: number;
+  mode: number;
+  stringMatch: number;
+  expectsKey: number;
+  pendingValue: number;
+  recordType: number;
+  sidechain: number;
+};
+
+type ClaudeOversizedForwardState = {
+  depth: number;
+  mode: number;
+  stringMatch: number;
+  phase: number;
+  currentKey: number;
+  recordType: number;
+  sidechain: number;
+};
+
+const CLAUDE_STATE_STRING_INVALID = 17;
+const CLAUDE_STATE_VALUE_NONE = 0;
+const CLAUDE_STATE_VALUE_USER = 1;
+const CLAUDE_STATE_VALUE_ASSISTANT = 2;
+const CLAUDE_STATE_VALUE_TRUE = 3;
+const CLAUDE_STATE_VALUE_OTHER = 4;
+const CLAUDE_STATE_TYPE_UNSEEN = 0;
+const CLAUDE_STATE_TYPE_USER = 1;
+const CLAUDE_STATE_TYPE_ASSISTANT = 2;
+const CLAUDE_STATE_TYPE_OTHER = 3;
+const CLAUDE_STATE_SIDECHAIN_UNSEEN = 0;
+const CLAUDE_STATE_SIDECHAIN_OTHER = 1;
+const CLAUDE_STATE_SIDECHAIN_TRUE = 2;
+
+/** Pack a bounded JSON classifier into the opaque cursor's row-part field. */
+function packClaudeOversizedState(values: number[], radices: number[]): number {
+  /** Mixed-radix storage keeps cross-request state below the numeric cursor budget. */
+  let packed = 0;
+  let multiplier = 1;
+  for (let index = 0; index < values.length; index += 1) {
+    packed += values[index] * multiplier;
+    multiplier *= radices[index];
+  }
+  return CLAUDE_HISTORY_OVERSIZED_STATE_BASE + packed;
+}
+
+/** Restore mixed-radix classifier fields from an opaque row-part cursor. */
+function unpackClaudeOversizedState(partIndex: number, radices: number[]): number[] {
+  /** Invalid state is decoded conservatively by each directional classifier. */
+  let packed = Math.max(0, partIndex - CLAUDE_HISTORY_OVERSIZED_STATE_BASE);
+  return radices.map((radix) => {
+    const value = packed % radix;
+    packed = Math.floor(packed / radix);
+    return value;
+  });
+}
+
+/** Identify a row-part value reserved for an in-progress oversized classifier. */
+function isClaudeOversizedStatePart(partIndex: number): boolean {
+  /** Ordinary message-part indexes remain below the reserved half of the range. */
+  return partIndex >= CLAUDE_HISTORY_OVERSIZED_STATE_BASE;
+}
+
+/** Advance an exact key or chat-role string matcher one ASCII byte. */
+function advanceClaudeOversizedStringMatch(match: number, byte: number, key: boolean, reverse: boolean): number {
+  /** Only type, isSidechain, user and assistant can affect placeholder visibility. */
+  if (match === CLAUDE_STATE_STRING_INVALID) return match;
+  const character = String.fromCharCode(byte);
+  const targets = key
+    ? (reverse ? ['epyt', 'niahcediSsi'] : ['type', 'isSidechain'])
+    : (reverse ? ['tnatsissa', 'resu'] : ['assistant', 'user']);
+  const firstLength = targets[0].length;
+  let targetIndex = -1;
+  let matchedLength = 0;
+  if (match === 0) {
+    targetIndex = targets.findIndex((target) => target[0] === character);
+    matchedLength = 1;
+  } else if (match <= firstLength) {
+    targetIndex = 0;
+    matchedLength = match + 1;
+  } else {
+    targetIndex = 1;
+    matchedLength = match - firstLength + 1;
+  }
+  const target = targets[targetIndex];
+  if (!target || matchedLength > target.length || target[matchedLength - 1] !== character) {
+    return CLAUDE_STATE_STRING_INVALID;
+  }
+  return targetIndex === 0 ? matchedLength : firstLength + matchedLength;
+}
+
+/** Convert a completed exact string match into a key or visible record value. */
+function classifyClaudeOversizedString(match: number, key: boolean): number {
+  /** Exact completion prevents prefixes and escaped lookalikes from being accepted. */
+  if (key) {
+    if (match === 4) return 1;
+    if (match === 15) return 2;
+    return 0;
+  }
+  if (match === 9) return CLAUDE_STATE_VALUE_ASSISTANT;
+  if (match === 13) return CLAUDE_STATE_VALUE_USER;
+  return CLAUDE_STATE_VALUE_OTHER;
+}
+
+/** Encode the reverse top-level JSON classifier used by history pagination. */
+function encodeClaudeOversizedReverseState(state: ClaudeOversizedReverseState): number {
+  /** The largest valid packed state stays below the one-million row-part base. */
+  return packClaudeOversizedState(
+    [state.depth, state.mode, state.stringMatch, state.expectsKey, state.pendingValue, state.recordType, state.sidechain],
+    [16, 10, 18, 2, 5, 4, 3],
+  );
+}
+
+/** Decode a reverse classifier cursor into its bounded structural state. */
+function decodeClaudeOversizedReverseState(partIndex: number): ClaudeOversizedReverseState {
+  /** Each field has a fixed radix so chunk boundaries cannot erase JSON context. */
+  const [depth, mode, stringMatch, expectsKey, pendingValue, recordType, sidechain] = unpackClaudeOversizedState(
+    partIndex,
+    [16, 10, 18, 2, 5, 4, 3],
+  );
+  return { depth, mode, stringMatch, expectsKey, pendingValue, recordType, sidechain };
+}
+
+/** Pair one reverse-scanned top-level key with its already scanned value. */
+function applyClaudeOversizedReversePair(state: ClaudeOversizedReverseState, key: number): void {
+  /** Reverse order sees the value before the key; duplicate JSON keys keep the last value. */
+  if (key === 1 && state.recordType === CLAUDE_STATE_TYPE_UNSEEN) {
+    state.recordType = state.pendingValue === CLAUDE_STATE_VALUE_USER
+      ? CLAUDE_STATE_TYPE_USER
+      : state.pendingValue === CLAUDE_STATE_VALUE_ASSISTANT
+        ? CLAUDE_STATE_TYPE_ASSISTANT
+        : CLAUDE_STATE_TYPE_OTHER;
+  }
+  if (key === 2 && state.sidechain === CLAUDE_STATE_SIDECHAIN_UNSEEN) {
+    state.sidechain = state.pendingValue === CLAUDE_STATE_VALUE_TRUE
+      ? CLAUDE_STATE_SIDECHAIN_TRUE
+      : CLAUDE_STATE_SIDECHAIN_OTHER;
+  }
+  state.pendingValue = CLAUDE_STATE_VALUE_NONE;
+  state.expectsKey = 0;
+}
+
+/** Reverse-scan a bounded row fragment while preserving top-level JSON structure. */
+function scanClaudeOversizedReverse(state: ClaudeOversizedReverseState, fragment: Buffer): void {
+  /** Strings and nesting are tracked across chunks so nested metadata cannot mimic top-level fields. */
+  for (let index = fragment.length - 1; index >= 0; index -= 1) {
+    const byte = fragment[index];
+    let revisit = true;
+    while (revisit) {
+      revisit = false;
+      if (state.mode >= 2 && state.mode <= 4) {
+        if (byte === 0x5c) {
+          state.stringMatch = CLAUDE_STATE_STRING_INVALID;
+          state.mode = state.mode === 2 ? 3 : state.mode === 3 ? 4 : 3;
+          continue;
+        }
+        if (state.mode === 3) {
+          state.mode = 1;
+          state.stringMatch = CLAUDE_STATE_STRING_INVALID;
+          revisit = true;
+          continue;
+        }
+        const key = state.expectsKey === 1;
+        const classified = classifyClaudeOversizedString(state.stringMatch, key);
+        if (state.depth === 1) {
+          if (key) applyClaudeOversizedReversePair(state, classified);
+          else state.pendingValue = classified;
+        }
+        state.mode = 0;
+        state.stringMatch = 0;
+        revisit = true;
+        continue;
+      }
+      if (state.mode === 1) {
+        if (byte === 0x22) state.mode = 2;
+        else if (byte === 0x5c) state.stringMatch = CLAUDE_STATE_STRING_INVALID;
+        else if (state.depth === 1) {
+          state.stringMatch = advanceClaudeOversizedStringMatch(state.stringMatch, byte, state.expectsKey === 1, true);
+        }
+        continue;
+      }
+      if (state.mode >= 5) {
+        const tokenByte = (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5a)
+          || (byte >= 0x61 && byte <= 0x7a) || byte === 0x2b || byte === 0x2d || byte === 0x2e;
+        if (tokenByte) {
+          const expected = state.mode === 5 ? 0x75 : state.mode === 6 ? 0x72 : state.mode === 7 ? 0x74 : -1;
+          state.mode = byte === expected ? state.mode + 1 : 9;
+          continue;
+        }
+        state.pendingValue = state.mode === 8 ? CLAUDE_STATE_VALUE_TRUE : CLAUDE_STATE_VALUE_OTHER;
+        state.mode = 0;
+        revisit = true;
+        continue;
+      }
+      if (byte === 0x22) {
+        state.mode = 1;
+        state.stringMatch = 0;
+      } else if (byte === 0x7d || byte === 0x5d) {
+        if (state.depth >= 15) state.sidechain = CLAUDE_STATE_SIDECHAIN_TRUE;
+        else state.depth += 1;
+      } else if (byte === 0x7b || byte === 0x5b) {
+        if (state.depth > 0) state.depth -= 1;
+        if (state.depth === 1) state.pendingValue = CLAUDE_STATE_VALUE_OTHER;
+      } else if (state.depth === 1 && byte === 0x3a && state.pendingValue !== CLAUDE_STATE_VALUE_NONE) {
+        state.expectsKey = 1;
+      } else if (state.depth === 1 && state.expectsKey === 0 && byte === 0x65) {
+        state.mode = 5;
+      }
+    }
+  }
+}
+
+/** Encode the forward top-level JSON classifier used by append pagination. */
+function encodeClaudeOversizedForwardState(state: ClaudeOversizedForwardState): number {
+  /** Forward and reverse cursors share the reserved range but are decoded only in their own API path. */
+  return packClaudeOversizedState(
+    [state.depth, state.mode, state.stringMatch, state.phase, state.currentKey, state.recordType, state.sidechain],
+    [16, 8, 18, 4, 3, 4, 3],
+  );
+}
+
+/** Decode a forward classifier cursor into its bounded structural state. */
+function decodeClaudeOversizedForwardState(partIndex: number): ClaudeOversizedForwardState {
+  /** Cursor-carried state makes field order and chunk alignment irrelevant. */
+  const [depth, mode, stringMatch, phase, currentKey, recordType, sidechain] = unpackClaudeOversizedState(
+    partIndex,
+    [16, 8, 18, 4, 3, 4, 3],
+  );
+  return { depth, mode, stringMatch, phase, currentKey, recordType, sidechain };
+}
+
+/** Finalize a forward scalar before its delimiter is processed structurally. */
+function finalizeClaudeOversizedForwardScalar(state: ClaudeOversizedForwardState): void {
+  /** Only a complete top-level true assigned to isSidechain hides an otherwise visible row. */
+  if (state.currentKey === 2) {
+    state.sidechain = state.mode === 6 ? CLAUDE_STATE_SIDECHAIN_TRUE : CLAUDE_STATE_SIDECHAIN_OTHER;
+  }
+  if (state.currentKey === 1) {
+    state.recordType = CLAUDE_STATE_TYPE_OTHER;
+  }
+  state.currentKey = 0;
+  state.phase = 3;
+  state.mode = 0;
+}
+
+/** Forward-scan a bounded row fragment while preserving top-level JSON structure. */
+function scanClaudeOversizedForward(state: ClaudeOversizedForwardState, fragment: Buffer): void {
+  /** The scanner retains only structural state and exact visibility fields, never oversized content. */
+  for (let index = 0; index < fragment.length; index += 1) {
+    const byte = fragment[index];
+    let revisit = true;
+    while (revisit) {
+      revisit = false;
+      if (state.mode === 1 || state.mode === 2) {
+        if (state.mode === 2) {
+          state.mode = 1;
+          state.stringMatch = CLAUDE_STATE_STRING_INVALID;
+        } else if (byte === 0x5c) {
+          state.mode = 2;
+          state.stringMatch = CLAUDE_STATE_STRING_INVALID;
+        } else if (byte === 0x22) {
+          if (state.depth === 1 && state.phase === 0) {
+            state.currentKey = classifyClaudeOversizedString(state.stringMatch, true);
+            state.phase = 1;
+          } else if (state.depth === 1 && state.phase === 2) {
+            if (state.currentKey === 1) {
+              const value = classifyClaudeOversizedString(state.stringMatch, false);
+              state.recordType = value === CLAUDE_STATE_VALUE_USER
+                ? CLAUDE_STATE_TYPE_USER
+                : value === CLAUDE_STATE_VALUE_ASSISTANT
+                  ? CLAUDE_STATE_TYPE_ASSISTANT
+                  : CLAUDE_STATE_TYPE_OTHER;
+            }
+            if (state.currentKey === 2) {
+              state.sidechain = CLAUDE_STATE_SIDECHAIN_OTHER;
+            }
+            state.currentKey = 0;
+            state.phase = 3;
+          }
+          state.mode = 0;
+          state.stringMatch = 0;
+        } else if (state.depth === 1 && (state.phase === 0 || (state.phase === 2 && state.currentKey === 1))) {
+          state.stringMatch = advanceClaudeOversizedStringMatch(state.stringMatch, byte, state.phase === 0, false);
+        }
+        continue;
+      }
+      if (state.mode >= 3) {
+        const tokenByte = (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5a)
+          || (byte >= 0x61 && byte <= 0x7a) || byte === 0x2b || byte === 0x2d || byte === 0x2e;
+        if (tokenByte) {
+          const expected = state.mode === 3 ? 0x72 : state.mode === 4 ? 0x75 : state.mode === 5 ? 0x65 : -1;
+          state.mode = byte === expected ? state.mode + 1 : 7;
+          continue;
+        }
+        finalizeClaudeOversizedForwardScalar(state);
+        revisit = true;
+        continue;
+      }
+      if (byte === 0x22) {
+        state.mode = 1;
+        state.stringMatch = 0;
+      } else if (byte === 0x7b || byte === 0x5b) {
+        if (state.depth >= 15) state.sidechain = CLAUDE_STATE_SIDECHAIN_TRUE;
+        else state.depth += 1;
+        if (state.depth === 1) state.phase = 0;
+        else if (state.depth === 2 && state.phase === 2) {
+          state.currentKey = 0;
+          state.phase = 3;
+        }
+      } else if (byte === 0x7d || byte === 0x5d) {
+        if (state.depth > 0) state.depth -= 1;
+      } else if (state.depth === 1 && byte === 0x3a && state.phase === 1) {
+        state.phase = 2;
+      } else if (state.depth === 1 && byte === 0x2c && state.phase === 3) {
+        state.phase = 0;
+      } else if (state.depth === 1 && state.phase === 2 && byte === 0x74) {
+        state.mode = 3;
+      }
+    }
+  }
+}
+
+/** Decide visibility only after a complete oversized top-level object was scanned. */
+function isClaudeOversizedStateVisible(state: { recordType: number; sidechain: number }): boolean {
+  /** Incomplete JSON, unknown types and confirmed sidechains stay hidden by default. */
+  const structural = state as { depth?: number; mode?: number };
+  return structural.depth === 0 && structural.mode === 0
+    && state.sidechain !== CLAUDE_STATE_SIDECHAIN_TRUE
+    && (state.recordType === CLAUDE_STATE_TYPE_USER || state.recordType === CLAUDE_STATE_TYPE_ASSISTANT);
+}
+
+/** Normalize Claude user, assistant, thinking, tool and result blocks. */
+function claudeRecordToMessages(record: LooseRecord, sessionId: string, lineNumber: number): LooseRecord[] {
+  if (record.type === 'file-history-snapshot' || record.isSidechain) return [];
+  const content = record.message?.content;
+  const parts = Array.isArray(content) ? content : [{ type: 'text', text: content }];
+  return (parts as any[]).flatMap((part: any, index: number): LooseRecord[] => {
+    if (!part) return [];
+    const type = part.type === 'thinking' ? 'thinking' : part.type === 'tool_use' ? 'tool_use' : part.type === 'tool_result' ? 'tool_result' : record.type === 'user' ? 'user' : 'assistant';
+    const key = `claude:${sessionId}:line:${lineNumber}:${index}`;
+    if (type === 'tool_use') return [{ type, provider: 'claude', timestamp: record.timestamp, messageKey: `${key}:tool`, toolName: part.name, toolInput: part.input, toolCallId: part.id }];
+    if (type === 'tool_result') return [{ type, provider: 'claude', timestamp: record.timestamp, messageKey: `${key}:result`, toolCallId: part.tool_use_id, output: truncateClaudeText(stringifyMessageContent(part.content)) }];
+    const text = truncateClaudeText(typeof part === 'string' ? part : String(part.text || part.thinking || (typeof content === 'string' ? content : '') || ''));
+    return text ? [{ type, provider: 'claude', timestamp: record.timestamp, messageKey: `${key}:msg`, message: { role: type === 'thinking' ? 'assistant' : type, content: text } }] : [];
+  });
+}
+
+/**
+ * Read one Claude history page backwards from a stable file-size snapshot.
+ */
+async function readClaudeHistoryWindow(
+  filePath: string,
+  sessionId: string,
+  limit: unknown,
+  offset: unknown,
+  snapshotByteOffset: number,
+): Promise<{ page: LooseRecord; bytesRead: number; parsedLines: number; reachedStart: boolean }> {
+  /** Decode an opaque monotonic token into a reverse byte boundary and row part. */
+  const normalizedOffset = Math.max(0, Math.floor(Number(offset) || 0));
+  const requestedLimit = limit === null || limit === undefined
+    ? CLAUDE_HISTORY_DEFAULT_LIMIT
+    : Math.max(0, Math.floor(Number(limit) || 0));
+  const normalizedLimit = Math.min(CLAUDE_HISTORY_MAX_LIMIT, requestedLimit);
+  if (normalizedLimit === 0) {
+    /** A zero-sized page is terminal and must never synthesize delayed placeholders. */
+    return {
+      page: {
+        messages: [], total: 0, hasMore: false, offset: Math.max(0, Math.floor(Number(offset) || 0)), limit: 0,
+        nextMessageOffset: Math.max(0, Math.floor(Number(offset) || 0)),
+        nextRawLineOffset: snapshotByteOffset,
+        historySnapshotRawLineOffset: snapshotByteOffset,
+        appendCursor: encodeClaudeAppendCursor(snapshotByteOffset, 0),
+      },
+      bytesRead: 0,
+      parsedLines: 0,
+      reachedStart: true,
+    };
+  }
+  const selectedNewestFirst: LooseRecord[] = [];
+  let visibleSeen = 0;
+  let parsedLines = 0;
+  let bytesRead = 0;
+  const decoded = decodeClaudeHistoryOffset(normalizedOffset, snapshotByteOffset);
+  let cursor = decoded.byteOffset;
+  let pendingPartSkip = decoded.partIndex;
+  let nextBoundary = cursor;
+  let nextPartIndex = pendingPartSkip;
+  let carry = Buffer.alloc(0);
+  let reachedStart = cursor === 0;
+  let pageBoundaryLocked = false;
+  let visibleAfterPageBoundary = 0;
+  const handle = await fs.open(filePath, 'r');
+  try {
+    if (isClaudeOversizedStatePart(pendingPartSkip)) {
+      /** Continue reverse structural classification until this physical row reaches its prefix. */
+      const oversizedState = decodeClaudeOversizedReverseState(pendingPartSkip);
+      while (cursor > 0 && bytesRead < CLAUDE_HISTORY_MAX_READ_BYTES) {
+        const start = Math.max(0, cursor - CLAUDE_HISTORY_READ_CHUNK_BYTES);
+        const chunk = Buffer.alloc(cursor - start);
+        const { bytesRead: currentRead } = await handle.read(chunk, 0, chunk.length, start);
+        bytesRead += currentRead;
+        const previousNewline = chunk.subarray(0, currentRead).lastIndexOf(0x0a);
+        if (previousNewline >= 0) {
+          scanClaudeOversizedReverse(oversizedState, chunk.subarray(previousNewline + 1, currentRead));
+          nextBoundary = start + previousNewline + 1;
+          nextPartIndex = 0;
+          pendingPartSkip = 0;
+          cursor = nextBoundary;
+          if (isClaudeOversizedStateVisible(oversizedState) && selectedNewestFirst.length < normalizedLimit) {
+            selectedNewestFirst.push(createClaudeOversizedRowMessage(sessionId, nextBoundary));
+            visibleSeen += 1;
+            pageBoundaryLocked = selectedNewestFirst.length >= normalizedLimit;
+          }
+          break;
+        }
+        scanClaudeOversizedReverse(oversizedState, chunk.subarray(0, currentRead));
+        if (start === 0) {
+          nextBoundary = 0;
+          nextPartIndex = 0;
+          pendingPartSkip = 0;
+          cursor = 0;
+          if (isClaudeOversizedStateVisible(oversizedState) && selectedNewestFirst.length < normalizedLimit) {
+            selectedNewestFirst.push(createClaudeOversizedRowMessage(sessionId, 0));
+            visibleSeen += 1;
+          }
+          break;
+        }
+        cursor = start;
+        nextBoundary = start;
+        nextPartIndex = encodeClaudeOversizedReverseState(oversizedState);
+      }
+      reachedStart = nextBoundary === 0;
+    }
+    while (!pageBoundaryLocked && cursor > 0 && bytesRead < CLAUDE_HISTORY_MAX_READ_BYTES) {
+      if (isClaudeOversizedStatePart(nextPartIndex)) break;
+      const start = Math.max(0, cursor - CLAUDE_HISTORY_READ_CHUNK_BYTES);
+      const chunk = Buffer.alloc(cursor - start);
+      const { bytesRead: currentRead } = await handle.read(chunk, 0, chunk.length, start);
+      bytesRead += currentRead;
+      const data = Buffer.concat([chunk.subarray(0, currentRead), carry]);
+      if (data.length >= CLAUDE_HISTORY_MAX_ROW_BYTES && (data.indexOf(0x0a) < 0 || data.indexOf(0x0a) >= CLAUDE_HISTORY_MAX_ROW_BYTES)) {
+        /** Begin a cursor-carried reverse classifier before skipping the remaining physical row. */
+        const oversizedState: ClaudeOversizedReverseState = {
+          depth: 0, mode: 0, stringMatch: 0, expectsKey: 0, pendingValue: 0, recordType: 0, sidechain: 0,
+        };
+        scanClaudeOversizedReverse(oversizedState, data);
+        nextBoundary = start;
+        nextPartIndex = encodeClaudeOversizedReverseState(oversizedState);
+        cursor = start;
+        break;
+      }
+      const firstNewline = data.indexOf(0x0a);
+      const completeStart = start === 0 ? 0 : firstNewline >= 0 ? firstNewline + 1 : data.length;
+      let lineEnd = data.length;
+      while (lineEnd > completeStart) {
+        const lineBoundaryIndex = lineEnd;
+        const previousNewline = data.lastIndexOf(0x0a, lineEnd - 1);
+        const lineStart = Math.max(completeStart, previousNewline + 1);
+        const lineBuffer = data.subarray(lineStart, lineEnd);
+        lineEnd = previousNewline;
+        if (!lineBuffer.toString('utf8').trim()) continue;
+        parsedLines += 1;
+        try {
+          const record = JSON.parse(lineBuffer.toString('utf8'));
+          if (!record || typeof record !== 'object' || Array.isArray(record)) continue;
+          const absoluteByteOffset = start + lineStart;
+          const lineMessages = claudeRecordToMessages(record, sessionId, absoluteByteOffset);
+          visibleSeen += lineMessages.length;
+          if (pageBoundaryLocked) visibleAfterPageBoundary += lineMessages.length;
+          if (!pageBoundaryLocked && lineMessages.length > 0) {
+            const newestFirst = [...lineMessages].reverse();
+            const skip = Math.min(pendingPartSkip, newestFirst.length);
+            pendingPartSkip = 0;
+            const available = newestFirst.slice(skip);
+            const remaining = Math.max(0, normalizedLimit - selectedNewestFirst.length);
+            const delivered = available.slice(0, remaining);
+            selectedNewestFirst.push(...delivered);
+            const absoluteLineBoundary = start + lineBoundaryIndex + (data[lineBoundaryIndex] === 0x0a ? 1 : 0);
+            if (delivered.length < available.length) {
+              nextBoundary = absoluteLineBoundary;
+              nextPartIndex = skip + delivered.length;
+              pageBoundaryLocked = true;
+            } else {
+              nextBoundary = absoluteByteOffset;
+              nextPartIndex = 0;
+              if (selectedNewestFirst.length >= normalizedLimit) pageBoundaryLocked = true;
+            }
+          }
+        } catch {
+          // Ignore malformed append-only rows without expanding the read window.
+        }
+      }
+      if (!pageBoundaryLocked) {
+        /** Filtered, malformed and empty complete rows still advance the opaque scan cursor. */
+        nextBoundary = start + completeStart;
+        nextPartIndex = 0;
+      }
+      carry = start > 0 && firstNewline >= 0 ? data.subarray(0, firstNewline) : start > 0 ? data : Buffer.alloc(0);
+      cursor = start;
+      reachedStart = cursor === 0;
+      if (pageBoundaryLocked) break;
+    }
+  } finally {
+    await handle.close();
+  }
+  if (reachedStart && nextPartIndex === 0 && visibleAfterPageBoundary === 0) {
+    /** Invisible metadata before the oldest visible message must not create an empty extra page. */
+    nextBoundary = 0;
+  }
+  const messages = selectedNewestFirst.reverse();
+  const hasMore = nextBoundary > 0 || nextPartIndex > 0;
+  const total = reachedStart ? visibleSeen : messages.length + (hasMore ? 1 : 0);
+  const nextOffset = encodeClaudeHistoryOffset(snapshotByteOffset, nextBoundary, nextPartIndex);
+  return {
+    page: {
+      messages,
+      total,
+      hasMore,
+      offset: normalizedOffset,
+      limit: normalizedLimit,
+      nextMessageOffset: nextOffset,
+      nextRawLineOffset: snapshotByteOffset,
+      historySnapshotRawLineOffset: snapshotByteOffset,
+      appendCursor: encodeClaudeAppendCursor(snapshotByteOffset, 0),
+    },
+    bytesRead,
+    parsedLines,
+    reachedStart,
+  };
+}
+
+/** Encode reverse byte progress and in-row progress as one monotonic numeric token. */
+function encodeClaudeHistoryOffset(snapshotByteOffset: number, byteOffset: number, partIndex: number): number {
+  /** Keep legacy numeric offset plumbing while making the value an opaque cursor. */
+  const scannedBytes = Math.max(0, snapshotByteOffset - byteOffset);
+  return scannedBytes * CLAUDE_HISTORY_CURSOR_PART_BASE + Math.max(0, partIndex) + 1;
+}
+
+/** Decode a validated reverse history token; zero always means the snapshot tail. */
+function decodeClaudeHistoryOffset(value: number, snapshotByteOffset: number): { byteOffset: number; partIndex: number } {
+  /** Invalid or foreign offsets safely restart at the frozen snapshot boundary. */
+  if (!Number.isSafeInteger(value) || value <= 0) return { byteOffset: snapshotByteOffset, partIndex: 0 };
+  const raw = value - 1;
+  const scannedBytes = Math.floor(raw / CLAUDE_HISTORY_CURSOR_PART_BASE);
+  const partIndex = raw % CLAUDE_HISTORY_CURSOR_PART_BASE;
+  if (scannedBytes > snapshotByteOffset) return { byteOffset: snapshotByteOffset, partIndex: 0 };
+  return { byteOffset: snapshotByteOffset - scannedBytes, partIndex };
+}
+
+/**
+ * Encode the byte and in-record part position used by Claude incremental reads.
+ */
+function encodeClaudeAppendCursor(byteOffset: number, partIndex: number): string {
+  /** Keep the cursor opaque to callers while remaining easy to validate. */
+  return `claude-byte:${byteOffset}:part:${partIndex}`;
+}
+
+/** Decode a validated Claude byte-and-part append cursor. */
+function decodeClaudeAppendCursor(value: unknown): { byteOffset: number; partIndex: number } | null {
+  /** Reject foreign or malformed cursors instead of guessing their meaning. */
+  const match = String(value || '').match(/^claude-byte:(\d+):part:(\d+)$/);
+  if (!match) return null;
+  const byteOffset = Number(match[1]);
+  const partIndex = Number(match[2]);
+  return Number.isSafeInteger(byteOffset) && Number.isSafeInteger(partIndex)
+    ? { byteOffset, partIndex }
+    : null;
+}
+
+/**
+ * Stream Claude rows after a byte-and-part cursor until the response limit.
+ */
+async function readClaudeMessagesAfterCursor(
+  filePath: string,
+  sessionId: string,
+  limit: unknown,
+  cursor: { byteOffset: number; partIndex: number },
+): Promise<{ page: LooseRecord; bytesRead: number; parsedLines: number }> {
+  /** Stop at the last delivered part so unread messages remain reachable. */
+  const stat = await fs.stat(filePath);
+  const startByte = Math.min(stat.size, cursor.byteOffset);
+  const normalizedLimit = limit === null || limit === undefined
+    ? CLAUDE_HISTORY_DEFAULT_LIMIT
+    : Math.min(CLAUDE_HISTORY_MAX_LIMIT, Math.max(0, Math.floor(Number(limit) || 0)));
+  if (normalizedLimit === 0) {
+    /** Incremental zero-sized pages use the same terminal contract as history pages. */
+    return {
+      page: {
+        messages: [], total: 0, hasMore: false, offset: 0, limit: 0, nextMessageOffset: 0,
+        nextRawLineOffset: startByte,
+        historySnapshotRawLineOffset: stat.size,
+        appendCursor: encodeClaudeAppendCursor(startByte, cursor.partIndex),
+      },
+      bytesRead: 0,
+      parsedLines: 0,
+    };
+  }
+  const messages: LooseRecord[] = [];
+  let bytesRead = 0;
+  let parsedLines = 0;
+  let readPosition = startByte;
+  let carry = Buffer.alloc(0);
+  let carryStart = startByte;
+  let nextByteOffset = startByte;
+  let nextPartIndex = cursor.partIndex;
+  const handle = await fs.open(filePath, 'r');
+  try {
+    if (isClaudeOversizedStatePart(nextPartIndex)) {
+      /** Continue classifying one oversized physical row before deciding placeholder visibility. */
+      const oversizedState = decodeClaudeOversizedForwardState(nextPartIndex);
+      while (readPosition < stat.size && bytesRead < CLAUDE_HISTORY_MAX_READ_BYTES) {
+        const readLength = Math.min(CLAUDE_HISTORY_READ_CHUNK_BYTES, stat.size - readPosition);
+        const chunk = Buffer.alloc(readLength);
+        const { bytesRead: currentRead } = await handle.read(chunk, 0, readLength, readPosition);
+        if (currentRead <= 0) break;
+        bytesRead += currentRead;
+        const newlineIndex = chunk.subarray(0, currentRead).indexOf(0x0a);
+        if (newlineIndex >= 0) {
+          scanClaudeOversizedForward(oversizedState, chunk.subarray(0, newlineIndex));
+          nextByteOffset = readPosition + newlineIndex + 1;
+          nextPartIndex = 0;
+          readPosition = nextByteOffset;
+          if (isClaudeOversizedStateVisible(oversizedState) && messages.length < normalizedLimit) {
+            messages.push(createClaudeOversizedRowMessage(sessionId, nextByteOffset));
+          }
+          break;
+        }
+        scanClaudeOversizedForward(oversizedState, chunk.subarray(0, currentRead));
+        readPosition += currentRead;
+        nextByteOffset = readPosition;
+        nextPartIndex = encodeClaudeOversizedForwardState(oversizedState);
+      }
+      if (readPosition >= stat.size && isClaudeOversizedStatePart(nextPartIndex)) {
+        /** An unterminated oversized append is classified once at this frozen EOF. */
+        if (isClaudeOversizedStateVisible(oversizedState) && messages.length < normalizedLimit) {
+          messages.push(createClaudeOversizedRowMessage(sessionId, readPosition));
+        }
+        nextPartIndex = 0;
+      }
+    }
+    while (!isClaudeOversizedStatePart(nextPartIndex) && readPosition < stat.size && messages.length < normalizedLimit && bytesRead < CLAUDE_HISTORY_MAX_READ_BYTES) {
+      const readLength = Math.min(CLAUDE_HISTORY_READ_CHUNK_BYTES, stat.size - readPosition);
+      const chunk = Buffer.alloc(readLength);
+      const { bytesRead: currentRead } = await handle.read(chunk, 0, readLength, readPosition);
+      if (currentRead <= 0) break;
+      bytesRead += currentRead;
+      readPosition += currentRead;
+      const data = Buffer.concat([carry, chunk.subarray(0, currentRead)]);
+      if (data.length >= CLAUDE_HISTORY_MAX_ROW_BYTES && (data.indexOf(0x0a) < 0 || data.indexOf(0x0a) >= CLAUDE_HISTORY_MAX_ROW_BYTES)) {
+        const oversizedState: ClaudeOversizedForwardState = {
+          depth: 0, mode: 0, stringMatch: 0, phase: 0, currentKey: 0, recordType: 0, sidechain: 0,
+        };
+        const oversizedNewline = data.indexOf(0x0a);
+        if (oversizedNewline >= 0) {
+          scanClaudeOversizedForward(oversizedState, data.subarray(0, oversizedNewline));
+          if (isClaudeOversizedStateVisible(oversizedState) && messages.length < normalizedLimit) {
+            messages.push(createClaudeOversizedRowMessage(sessionId, carryStart));
+          }
+          nextByteOffset = carryStart + oversizedNewline + 1;
+          nextPartIndex = 0;
+        } else {
+          scanClaudeOversizedForward(oversizedState, data);
+          nextByteOffset = readPosition;
+          nextPartIndex = encodeClaudeOversizedForwardState(oversizedState);
+        }
+        break;
+      }
+      let lineStartInBuffer = 0;
+      while (messages.length < normalizedLimit) {
+        const newlineIndex = data.indexOf(0x0a, lineStartInBuffer);
+        if (newlineIndex < 0) break;
+        const lineStartByte = carryStart + lineStartInBuffer;
+        const lineEndByte = carryStart + newlineIndex + 1;
+        const lineBuffer = data.subarray(lineStartInBuffer, newlineIndex);
+        lineStartInBuffer = newlineIndex + 1;
+        nextByteOffset = lineEndByte;
+        nextPartIndex = 0;
+        if (!lineBuffer.toString('utf8').trim()) continue;
+        parsedLines += 1;
+        try {
+          const record = JSON.parse(lineBuffer.toString('utf8'));
+          if (!record || typeof record !== 'object' || Array.isArray(record)) continue;
+          const lineMessages = claudeRecordToMessages(record, sessionId, lineStartByte);
+          const firstPart = lineStartByte === startByte ? cursor.partIndex : 0;
+          for (let partIndex = firstPart; partIndex < lineMessages.length; partIndex += 1) {
+            if (messages.length >= normalizedLimit) {
+              nextByteOffset = lineStartByte;
+              nextPartIndex = partIndex;
+              break;
+            }
+            messages.push(lineMessages[partIndex]);
+            if (partIndex + 1 < lineMessages.length) {
+              nextByteOffset = lineStartByte;
+              nextPartIndex = partIndex + 1;
+            } else {
+              nextByteOffset = lineEndByte;
+              nextPartIndex = 0;
+            }
+          }
+        } catch {
+          // Malformed complete rows are skipped while the byte cursor advances.
+        }
+      }
+      carry = data.subarray(lineStartInBuffer);
+      carryStart += lineStartInBuffer;
+    }
+  } finally {
+    await handle.close();
+  }
+  const hasMore = nextPartIndex > 0 || nextByteOffset < stat.size;
+  return {
+    page: {
+      messages,
+      total: messages.length,
+      hasMore,
+      offset: 0,
+      limit: normalizedLimit,
+      nextMessageOffset: messages.length,
+      nextRawLineOffset: nextByteOffset,
+      historySnapshotRawLineOffset: stat.size,
+      appendCursor: encodeClaudeAppendCursor(nextByteOffset, nextPartIndex),
+    },
+    bytesRead,
+    parsedLines,
+  };
+}
+
+/** Return bounded-reader diagnostics for acceptance tests. */
+export function getClaudeHistoryReadStatsForTest(): typeof lastClaudeHistoryReadStats {
+  /** Expose a copy so tests cannot mutate production reader state. */
+  return { ...lastClaudeHistoryReadStats };
 }
 
 /**
@@ -994,6 +1848,7 @@ function paginateMessages(messages: LooseRecord[], limit: unknown, offset: unkno
     hasMore: normalizedLimit !== null ? total > nextRawLineOffset : false,
     offset: normalizedOffset,
     limit: normalizedLimit,
+    nextMessageOffset: nextRawLineOffset,
     nextRawLineOffset,
   };
 }

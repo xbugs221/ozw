@@ -5,7 +5,7 @@
 import path from 'path';
 
 type ProviderSessionIndexRecord = {
-  provider: 'codex' | 'pi';
+  provider: string;
   id: string;
   sourceSessionId?: string | null;
   origin?: 'manual' | 'workflow' | string | null;
@@ -25,7 +25,7 @@ type ProviderSessionIndexRecord = {
 };
 
 type ProviderSessionIndexRow = {
-  provider: 'codex' | 'pi';
+  provider: string;
   session_id: string;
   source_session_id: string | null;
   origin: string | null;
@@ -147,7 +147,7 @@ function rowToSession(row: ProviderSessionIndexRow): Record<string, unknown> {
    * PURPOSE: Keep project overview callers independent from SQLite column
    * naming and preserve provider-specific identity fields.
    */
-  const fallbackTitle = row.provider === 'pi' ? 'Pi Session' : 'Codex Session';
+  const fallbackTitle = row.provider === 'pi' ? 'Pi Session' : row.provider === 'claude' ? 'Claude Session' : 'Codex Session';
   const routeTitle = row.route_title || row.title || row.summary || fallbackTitle;
   return {
     id: row.session_id,
@@ -255,7 +255,7 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
 /**
  * Return recent provider sessions for one project from SQLite.
  */
-function listProviderSessionsForProject(db: any, provider: 'codex' | 'pi', projectPath: string, limit: number): Record<string, unknown>[] {
+function listProviderSessionsForProject(db: any, provider: string, projectPath: string, limit: number): Record<string, unknown>[] {
   /**
    * PURPOSE: Serve project overview from indexed headers in milliseconds.
    */
@@ -293,7 +293,7 @@ function listProviderSessionsForProject(db: any, provider: 'codex' | 'pi', proje
 /**
  * Return the project path currently indexed for one provider session file.
  */
-function getProviderSessionProjectPathForFile(db: any, provider: 'codex' | 'pi', filePath: string): string {
+function getProviderSessionProjectPathForFile(db: any, provider: string, filePath: string): string {
   /**
    * PURPOSE: Let unlink watchers repair project_index after the JSONL file has
    * already disappeared from disk.
@@ -306,6 +306,24 @@ function getProviderSessionProjectPathForFile(db: any, provider: 'codex' | 'pi',
     LIMIT 1
   `).get(provider, String(filePath || '')) as { project_path?: string } | undefined;
   return row?.project_path || '';
+}
+
+/**
+ * Return the indexed transcript path for one provider session identity.
+ */
+function getProviderSessionFilePath(db: any, provider: string, sessionId: string): string {
+  /**
+   * PURPOSE: Let explicit history reads locate one transcript without recursively
+   * scanning every provider directory on the request path.
+   */
+  ensureProviderSessionIndexSchema(db);
+  const row = db.prepare(`
+    SELECT file_path
+    FROM provider_session_index
+    WHERE provider = ? AND session_id = ?
+    LIMIT 1
+  `).get(provider, String(sessionId || '')) as { file_path?: string } | undefined;
+  return row?.file_path || '';
 }
 
 /**
@@ -332,7 +350,7 @@ function countProviderSessionsForProject(db: any, projectPath: string): number {
 /**
  * Remove stale index rows for a deleted or rewritten provider file.
  */
-function deleteProviderSessionFile(db: any, provider: 'codex' | 'pi', filePath: string): void {
+function deleteProviderSessionFile(db: any, provider: string, filePath: string): void {
   /**
    * PURPOSE: Give file watchers a cheap invalidation hook.
    */
@@ -345,6 +363,7 @@ const providerSessionIndexDb = {
   upsert: upsertProviderSessionIndex,
   listForProject: listProviderSessionsForProject,
   getProjectPathForFile: getProviderSessionProjectPathForFile,
+  getFilePath: getProviderSessionFilePath,
   countForProject: countProviderSessionsForProject,
   deleteFile: deleteProviderSessionFile,
 };

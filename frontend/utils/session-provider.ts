@@ -13,17 +13,18 @@ import type { SessionProvider } from '../types/session.ts';
  *
  * Priority:
  *   1. childSession.provider (set by buildWorkflowReadModel)
- *   2. projectSession.__provider (from project sidebar read model)
+ *   2. projectSession.__provider / provider (from project sidebar read model)
  *   3. Project provider session list membership (codexSessions / piSessions)
  *
  * Returns 'codex', 'pi', or 'codex' as default.
  */
 export function resolveSessionProvider(
   childSession: { id?: string; provider?: string } | null | undefined,
-  projectSession: { id?: string; __provider?: string } | null | undefined,
+  projectSession: { id?: string; __provider?: string; provider?: string } | null | undefined,
   project?: {
     codexSessions?: Array<{ id: string }>;
     piSessions?: Array<{ id: string }>;
+    claudeSessions?: Array<{ id: string }>;
   } | null,
 ): SessionProvider {
   const sessionId = childSession?.id || projectSession?.id || '';
@@ -33,14 +34,21 @@ export function resolveSessionProvider(
   // not be overridden by project provider session list membership.
   if (childSession?.provider === 'codex') return 'codex';
   if (childSession?.provider === 'pi') return 'pi';
+  if (childSession?.provider === 'claude') return 'claude';
 
-  // Priority 2: projectSession.__provider (from project sidebar read model).
+  // Priority 2: project sidebar read models may expose either the persisted
+  // provider field or the UI metadata field while a route is being restored.
   if (projectSession?.__provider === 'codex') return 'codex';
   if (projectSession?.__provider === 'pi') return 'pi';
+  if (projectSession?.__provider === 'claude') return 'claude';
+  if (projectSession?.provider === 'codex') return 'codex';
+  if (projectSession?.provider === 'pi') return 'pi';
+  if (projectSession?.provider === 'claude') return 'claude';
 
   // Priority 3 (fallback): project provider session list membership.
   if ((project?.codexSessions || []).some((entry) => entry.id === sessionId)) return 'codex';
   if ((project?.piSessions || []).some((entry) => entry.id === sessionId)) return 'pi';
+  if ((project?.claudeSessions || []).some((entry) => entry.id === sessionId)) return 'claude';
 
   return 'codex';
 }

@@ -24,8 +24,8 @@ const PROCESS_EXIT_REGEX = /Process exited with code (\d+)/;
 /**
  * Resolve shell session providers to supported agent backends only.
  */
-function normalizeShellSessionProvider(provider: unknown): 'codex' | 'pi' {
-  return provider === 'pi' ? 'pi' : 'codex';
+function normalizeShellSessionProvider(provider: unknown): 'codex' | 'pi' | 'claude' {
+  return provider === 'pi' ? 'pi' : provider === 'claude' ? 'claude' : 'codex';
 }
 
 /**
@@ -69,7 +69,7 @@ type UseShellConnectionOptions = {
   fitAddonRef: MutableRefObject<FitAddon | null>;
   selectedProjectRef: MutableRefObject<Project | null | undefined>;
   selectedSessionRef: MutableRefObject<ProjectSession | null | undefined>;
-  providerRef: MutableRefObject<'codex' | 'pi' | undefined>;
+  providerRef: MutableRefObject<'codex' | 'pi' | 'claude' | undefined>;
   initialCommandRef: MutableRefObject<string | null | undefined>;
   isPlainShellRef: MutableRefObject<boolean>;
   onProcessCompleteRef: MutableRefObject<((exitCode: number) => void) | null | undefined>;
@@ -92,6 +92,9 @@ type UseShellConnectionResult = {
   canForceHandoff: boolean;
   isForceHandoffPending: boolean;
   forceCodexHandoff: () => boolean;
+  providerRisk: { provider: 'pi' | 'claude'; reason: string; failures: string[] } | null;
+  confirmProviderRisk: () => boolean;
+  cancelProviderRisk: () => void;
 };
 
 export function useShellConnection({
@@ -117,6 +120,7 @@ export function useShellConnection({
   const [handoffToken, setHandoffToken] = useState('');
   const [canForceHandoff, setCanForceHandoff] = useState(false);
   const [isForceHandoffPending, setIsForceHandoffPending] = useState(false);
+  const [providerRisk, setProviderRisk] = useState<{ provider: 'pi' | 'claude'; reason: string; failures: string[] } | null>(null);
   const connectingRef = useRef(false);
   const manualDisconnectRef = useRef(false);
   const reconnectTimeoutRef = useRef<number | null>(null);
@@ -280,6 +284,8 @@ export function useShellConnection({
         ? 'running'
         : currentSession?.isProcessing === false
           ? 'idle'
+          : currentSession?.status === 'failed'
+            ? 'failed'
           : 'unknown',
     } as const;
   }, [initialCommandRef, isPlainShellRef, providerRef, selectedProjectRef, selectedSessionRef, terminalRef]);
@@ -372,6 +378,17 @@ export function useShellConnection({
 
       if (message.type === 'handoff-force-rejected') {
         setIsForceHandoffPending(false);
+        return;
+      }
+
+      if (message.type === 'provider-risk-confirmation-required') {
+        const provider = message.provider === 'pi' ? 'pi' : message.provider === 'claude' ? 'claude' : null;
+        if (provider) {
+          const failures = Array.isArray(message.failures)
+            ? message.failures.filter((item): item is string => typeof item === 'string')
+            : [];
+          setProviderRisk({ provider, reason: typeof message.reason === 'string' ? message.reason : 'unknown', failures });
+        }
         return;
       }
 
@@ -565,6 +582,18 @@ export function useShellConnection({
     return sent;
   }, [buildInitMessage, canForceHandoff, handoffToken, isForceHandoffPending, sendRawMessage, wsRef]);
 
+  /** 用户确认外部 CLI 异常风险后，才允许同一终端进入 tmux TUI。 */
+  const confirmProviderRisk = useCallback(() => {
+    const socket = wsRef.current;
+    const initMessage = buildInitMessage();
+    if (!socket || socket.readyState !== WebSocket.OPEN || !initMessage || !providerRisk) {
+      return false;
+    }
+    const sent = sendRawMessage(socket, { ...initMessage, riskConfirmed: true });
+    if (sent) setProviderRisk(null);
+    return sent;
+  }, [buildInitMessage, providerRisk, sendRawMessage, wsRef]);
+
   /**
    * Manually start the shell relay and opt into auto-reconnect afterwards.
    */
@@ -599,7 +628,13 @@ export function useShellConnection({
     setHandoffToken('');
     setCanForceHandoff(false);
     setIsForceHandoffPending(false);
+    setProviderRisk(null);
   }, [clearHeartbeatTimers, clearReconnectTimer, clearTerminalScreen, closeSocket, setAuthUrl]);
+
+  /** 取消风险启动并断开当前连接，确保不会创建 PTY 或 tmux。 */
+  const cancelProviderRisk = useCallback(() => {
+    resetConnectionState(true);
+  }, [resetConnectionState]);
 
   /**
    * Fully disconnect after an explicit user action and suppress auto-reconnect.
@@ -647,5 +682,8 @@ export function useShellConnection({
     canForceHandoff,
     isForceHandoffPending,
     forceCodexHandoff,
+    providerRisk,
+    confirmProviderRisk,
+    cancelProviderRisk,
   };
 }

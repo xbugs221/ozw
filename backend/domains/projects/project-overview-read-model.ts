@@ -10,6 +10,7 @@ export type ProjectOverviewReadModelDependencies = {
   attachWorkflowMetadata(projects: LooseRecord[]): Promise<LooseRecord[]>;
   getCodexSessions(projectPath: string, options: LooseRecord): Promise<LooseRecord[]>;
   getPiSessions(projectPath: string, options: LooseRecord): Promise<LooseRecord[]>;
+  getClaudeSessions?(projectPath: string, options: LooseRecord): Promise<LooseRecord[]>;
 };
 
 /**
@@ -61,6 +62,7 @@ export function summarizeProjectForList(project: LooseRecord = {}): LooseRecord 
     sessions,
     codexSessions,
     piSessions,
+    claudeSessions,
     workflows,
     batches,
     ...summary
@@ -68,6 +70,7 @@ export function summarizeProjectForList(project: LooseRecord = {}): LooseRecord 
   void sessions;
   void codexSessions;
   void piSessions;
+  void claudeSessions;
   void workflows;
   void batches;
   return summary;
@@ -105,6 +108,9 @@ export async function buildProjectOverviewReadModel(
       workflowOwnedSessionIds: workflowOwnedSessionIdsByProvider.pi || new Set<string>(),
     }),
   ]);
+  const claudeSessions = typeof dependencies.getClaudeSessions === 'function'
+    ? await dependencies.getClaudeSessions(projectPath, { limit: 10, skipProviderScan: true })
+    : [];
 
   return {
     ...dependencies.summarizeProjectForList(project),
@@ -112,6 +118,7 @@ export async function buildProjectOverviewReadModel(
     sessionMeta: projectRecord.sessionMeta || { hasMore: false, total: 0 },
     codexSessions,
     piSessions,
+    claudeSessions,
     workflows: workflowProject.workflows || [],
     batches: workflowProject.batches || [],
     hasUnreadActivity: workflowProject.hasUnreadActivity === true,

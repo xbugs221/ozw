@@ -139,11 +139,12 @@ export const resolveRouteSelection = (
 
   if (sessionRouteIndex && routeSegments.length === 1) {
     const searchParams = new URLSearchParams(search);
-    const hintedProvider = searchParams.get('provider') === 'pi' ? 'pi' : null;
+    const routeProvider = searchParams.get('provider');
+    const hintedProvider = routeProvider === 'pi' ? 'pi' : routeProvider === 'claude' ? 'claude' : null;
     const session = getProjectSessions(matchedProject).find((entry) => (
       entry.routeIndex === sessionRouteIndex
       && !isWorkflowOwnedSession(matchedProject, entry)
-      && (!hintedProvider || (entry.__provider || 'codex') === hintedProvider)
+      && (!hintedProvider || resolveSessionProvider(null, entry, matchedProject) === hintedProvider)
     )) || null;
     return {
       project: matchedProject,

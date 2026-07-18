@@ -107,3 +107,27 @@ test('provider session index ignores unknown origin labels', () => {
     db.close();
   }
 });
+
+test('provider session index locates Claude transcript by session identity', () => {
+  /** PURPOSE: Keep explicit Claude history requests off recursive HOME scans. */
+  const db = new Database(':memory:');
+  try {
+    providerSessionIndexDb.upsert(db, {
+      provider: 'claude',
+      id: 'claude-indexed-session',
+      projectPath: '/tmp/ozw-claude-indexed-project',
+      title: 'indexed Claude session',
+      filePath: '/tmp/claude-indexed-session.jsonl',
+      createdAt: '2026-07-18T02:00:00.000Z',
+      lastActivity: '2026-07-18T02:00:01.000Z',
+    });
+
+    assert.equal(
+      providerSessionIndexDb.getFilePath(db, 'claude', 'claude-indexed-session'),
+      '/tmp/claude-indexed-session.jsonl',
+    );
+    assert.equal(providerSessionIndexDb.getFilePath(db, 'claude', 'missing-session'), '');
+  } finally {
+    db.close();
+  }
+});

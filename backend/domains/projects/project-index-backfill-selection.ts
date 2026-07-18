@@ -1,19 +1,20 @@
 /**
- * PURPOSE: Select startup provider transcript files fairly so Codex and Pi can
- * both repair their SQLite read-model rows under one global processing limit.
+ * PURPOSE: Select startup provider transcript files fairly so every supported
+ * provider can repair its SQLite read-model rows under one global processing limit.
  */
 
 export type ProviderBackfillFile = {
-  provider: 'codex' | 'pi';
+  provider: 'codex' | 'pi' | 'claude';
   filePath: string;
 };
 
 /**
- * Interleave newest Codex and Pi files, then let either side consume unused capacity.
+ * Interleave newest files from every provider, then let available providers consume unused capacity.
  */
 export function selectProviderBackfillFiles(
   codexFiles: string[],
   piFiles: string[],
+  claudeFiles: string[],
   limit: number,
 ): ProviderBackfillFile[] {
   /**
@@ -24,6 +25,7 @@ export function selectProviderBackfillFiles(
   const queues: ProviderBackfillFile[][] = [
     [...codexFiles].reverse().map((filePath) => ({ provider: 'codex', filePath })),
     [...piFiles].reverse().map((filePath) => ({ provider: 'pi', filePath })),
+    [...claudeFiles].reverse().map((filePath) => ({ provider: 'claude', filePath })),
   ];
   const selected: ProviderBackfillFile[] = [];
 

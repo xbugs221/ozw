@@ -1159,7 +1159,12 @@ export function useChatRealtimeHandlers({
       case 'session-status': {
         const statusSessionId = latestMessage.sessionId;
         const statusCbwSessionId = latestMessage.ozwSessionId || latestMessage.ozw_session_id || null;
+        const selectedProvider = selectedSession?.__provider || provider;
         if (!statusSessionId) {
+          break;
+        }
+        if (latestMessage.provider && selectedProvider && latestMessage.provider !== selectedProvider) {
+          /** Provider 不匹配的状态回包不得修改当前会话的 processing/idle 状态。 */
           break;
         }
 

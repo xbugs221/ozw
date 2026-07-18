@@ -22,6 +22,8 @@ import {
   listPiSessionFiles,
   parseCodexSessionHeader,
   parsePiSessionHeader,
+  listClaudeSessionFiles,
+  parseClaudeSessionHeader,
 } from './provider-transcript-read-model.js';
 import { providerSessionIndexDb } from '../../provider-session-index-store.js';
 import { selectProviderBackfillFiles } from './project-index-backfill-selection.js';
@@ -242,7 +244,7 @@ export function hideProviderProjectIndex(projectPath: string, reason = 'provider
 /**
  * Upsert one provider session header into the provider-session read model.
  */
-function upsertProviderSessionIndexFromHeader(provider: 'codex' | 'pi', session: LooseRecord | null | undefined): void {
+function upsertProviderSessionIndexFromHeader(provider: 'codex' | 'pi' | 'claude', session: LooseRecord | null | undefined): void {
   /**
    * PURPOSE: Keep startup backfill self-contained instead of depending on the
    * project-domain facade to configure provider-session read-model helpers.
@@ -320,16 +322,17 @@ export async function backfillProjectIndex(): Promise<{ manualCount: number; pro
   const config = await loadProjectConfig();
   const manualCount = await backfillManualProjects(config);
   let providerCount = 0;
-  const [codexFiles, piFiles] = await Promise.all([
+  const [codexFiles, piFiles, claudeFiles] = await Promise.all([
     listCodexSessionFiles(),
     listPiSessionFiles(),
+    listClaudeSessionFiles(),
   ]);
-  const providerFiles = selectProviderBackfillFiles(codexFiles, piFiles, BACKFILL_FILE_LIMIT);
+  const providerFiles = selectProviderBackfillFiles(codexFiles, piFiles, claudeFiles, BACKFILL_FILE_LIMIT);
   for (const { provider, filePath } of providerFiles) {
     try {
       const session = provider === 'codex'
         ? await parseCodexSessionHeader(filePath)
-        : await parsePiSessionHeader(filePath);
+        : provider === 'pi' ? await parsePiSessionHeader(filePath) : await parseClaudeSessionHeader(filePath);
       upsertProviderSessionIndexFromHeader(provider, session);
       const projectPath = await upsertProjectIndexFromProviderSession(session);
       if (projectPath) {

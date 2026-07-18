@@ -2,8 +2,10 @@
  * PURPOSE: Own model and depth control rules for chat sessions.
  */
 
+import type { SessionProvider } from '../../../types/app';
+
 export interface SessionControlSelection {
-  provider: 'codex' | 'pi';
+  provider: SessionProvider;
   model: string;
   reasoningEffort?: string;
   thinkingLevel?: string;

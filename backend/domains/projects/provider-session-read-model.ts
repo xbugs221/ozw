@@ -13,6 +13,7 @@ export type ProviderSessionReadModelDependencies = {
   parseCodexSessionFile(filePath: string): Promise<ProviderSession | null>;
   buildCodexSessionFromHeader(sessionData: ProviderSession, filePath: string): ProviderSession;
   parsePiSessionHeader(filePath: string): Promise<ProviderSession | null>;
+  parseClaudeSessionHeader(filePath: string): Promise<ProviderSession | null>;
   warn(message: string, error: unknown): void;
 };
 
@@ -112,6 +113,12 @@ export async function indexProviderSessionFile(provider: ProviderName, filePath:
       await upsertProviderSessionIndex('pi', session);
       return session;
     }
+    if (provider === 'claude') {
+      const session = await deps.parseClaudeSessionHeader(filePath);
+      if (!session?.id || !session.cwd) return null;
+      await upsertProviderSessionIndex('claude', session);
+      return session;
+    }
   } catch (error) {
     deps.warn(`[ProviderIndex] Could not index ${provider} file ${filePath}:`, error);
   }
@@ -134,6 +141,26 @@ export async function getProviderSessionProjectPathForFile(provider: ProviderNam
     return providerSessionIndexDb.getProjectPathForFile(db, provider, filePath);
   } catch (error) {
     deps.warn(`[ProviderIndex] Could not locate ${provider} file ${filePath}:`, error);
+    return '';
+  }
+}
+
+/**
+ * 从 SQLite 索引读取一个 Provider 会话的转录文件路径。
+ */
+export async function getIndexedProviderSessionFilePath(provider: ProviderName, sessionId: string): Promise<string> {
+  /**
+   * 业务目的：显式历史请求按会话主键直接定位文件，避免递归扫描 Provider HOME。
+   */
+  const deps = getDependencies();
+  try {
+    const [db, providerSessionIndexDb] = await Promise.all([
+      deps.getDb(),
+      deps.getProviderSessionIndexDb(),
+    ]);
+    return providerSessionIndexDb.getFilePath(db, provider, sessionId);
+  } catch (error) {
+    deps.warn(`[ProviderIndex] Could not locate ${provider} session ${sessionId}:`, error);
     return '';
   }
 }

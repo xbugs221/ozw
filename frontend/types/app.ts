@@ -2,7 +2,7 @@
  * PURPOSE: Define shared application read-model types used by project,
  * workflow, and session UI components.
  */
-export type SessionProvider = 'codex' | 'pi';
+export type SessionProvider = 'codex' | 'pi' | 'claude';
 
 export type AppTab = 'overview' | 'chat' | 'files' | 'shell' | 'preview';
 
@@ -344,6 +344,7 @@ export interface Project {
   sessions?: ProjectSession[];
   codexSessions?: ProjectSession[];
   piSessions?: ProjectSession[];
+  claudeSessions?: ProjectSession[];
   workflows?: ProjectWorkflow[];
   batches?: WorkflowBatchInfo[];
   sessionMeta?: ProjectSessionMeta;

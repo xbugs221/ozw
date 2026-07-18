@@ -23,17 +23,21 @@ import { summarizeProjectForList } from './project-overview-read-model.js';
 import {
   getCodexSessions,
   getPiSessions,
+  getClaudeSessions,
 } from './project-overview-service.js';
 import {
   buildCodexSessionsIndex,
   buildPiSessionsIndex,
+  buildClaudeSessionsIndex,
   clearProviderSessionIndexCaches,
 } from './provider-session-index-read-model.js';
 import {
   listCodexSessionFiles,
   listPiSessionFiles,
+  listClaudeSessionFiles,
   parseCodexSessionHeader,
   parsePiSessionHeader,
+  parseClaudeSessionHeader,
 } from './provider-transcript-read-model.js';
 import { db } from '../../database/db.js';
 import { projectIndexDb } from '../../project-index-store.js';
@@ -210,7 +214,7 @@ async function appendProviderOnlyProjects(
   knownPaths: Set<string>,
   config: LooseRecord,
   lightweightList: boolean,
-  hydratedIndexes: { codex: Map<string, LooseRecord[]>; pi: Map<string, LooseRecord[]> } | null,
+  hydratedIndexes: { codex: Map<string, LooseRecord[]>; pi: Map<string, LooseRecord[]>; claude: Map<string, LooseRecord[]> } | null,
 ): Promise<void> {
   const providerCandidates = lightweightList
     ? await collectLightweightProviderOnlyCandidates()
@@ -250,6 +254,9 @@ async function appendProviderOnlyProjects(
           providerSessionIndex: hydratedIndexes?.pi,
           skipProviderScan: true,
         }))
+        : [];
+      project.claudeSessions = candidate.provider === 'claude'
+        ? await getClaudeSessions(normalizedPath, { providerSessionIndex: hydratedIndexes?.claude, skipProviderScan: true })
         : [];
     }
     projects.push(project);
@@ -354,12 +361,13 @@ function isEmptyGoTestProject(project: LooseRecord): boolean {
  * Collect provider-only projects from fully hydrated provider session lists.
  */
 async function collectHydratedProviderOnlyCandidates(
-  hydratedIndexes: { codex: Map<string, LooseRecord[]>; pi: Map<string, LooseRecord[]> } | null,
+  hydratedIndexes: { codex: Map<string, LooseRecord[]>; pi: Map<string, LooseRecord[]>; claude: Map<string, LooseRecord[]> } | null,
 ): Promise<LooseRecord[]> {
   const indexes = hydratedIndexes || await resolveProviderIndexesWithinHomeBudget();
   const providerSessions = [
     ...flattenProviderIndex(indexes.codex),
     ...flattenProviderIndex(indexes.pi),
+    ...flattenProviderIndex(indexes.claude),
   ];
   const candidatesByProviderPath = new Map<string, LooseRecord>();
   for (const session of providerSessions) {
@@ -389,12 +397,13 @@ async function collectHydratedProviderOnlyCandidates(
 /**
  * Build provider indexes once per getProjects call.
  */
-async function resolveProviderIndexesWithinHomeBudget(): Promise<{ codex: Map<string, LooseRecord[]>; pi: Map<string, LooseRecord[]> }> {
-  const [codex, pi] = await Promise.all([
+async function resolveProviderIndexesWithinHomeBudget(): Promise<{ codex: Map<string, LooseRecord[]>; pi: Map<string, LooseRecord[]>; claude: Map<string, LooseRecord[]> }> {
+  const [codex, pi, claude] = await Promise.all([
     resolveProviderIndexWithinHomeBudget(buildCodexSessionsIndex),
     resolveProviderIndexWithinHomeBudget(buildPiSessionsIndex),
+    resolveProviderIndexWithinHomeBudget(buildClaudeSessionsIndex),
   ]);
-  return { codex, pi };
+  return { codex, pi, claude };
 }
 
 /**
@@ -449,27 +458,28 @@ function getIndexedProjectSessions(index: Map<string, LooseRecord[]> | undefined
  * session arrays into the /api/projects payload.
  */
 async function collectLightweightProviderOnlyCandidates(): Promise<LooseRecord[]> {
-  const [codexCandidates, piCandidates] = await Promise.all([
+  const [codexCandidates, piCandidates, claudeCandidates] = await Promise.all([
     collectLightweightProviderCandidates('codex'),
     collectLightweightProviderCandidates('pi'),
+    collectLightweightProviderCandidates('claude'),
   ]);
-  return [...codexCandidates, ...piCandidates].sort(sortProviderCandidatesByActivity);
+  return [...codexCandidates, ...piCandidates, ...claudeCandidates].sort(sortProviderCandidatesByActivity);
 }
 
 /**
  * Parse recent provider transcript headers into project candidates.
  */
-async function collectLightweightProviderCandidates(provider: 'codex' | 'pi'): Promise<LooseRecord[]> {
+async function collectLightweightProviderCandidates(provider: 'codex' | 'pi' | 'claude'): Promise<LooseRecord[]> {
   const files = provider === 'codex'
     ? await listCodexSessionFiles()
-    : await listPiSessionFiles();
+    : provider === 'pi' ? await listPiSessionFiles() : await listClaudeSessionFiles();
   const candidatesByPath = new Map<string, LooseRecord>();
   for (const filePath of [...files].reverse().slice(0, LIGHTWEIGHT_PROVIDER_PROJECT_FILE_LIMIT)) {
     let header: LooseRecord | null = null;
     try {
       header = provider === 'codex'
         ? await parseCodexSessionHeader(filePath)
-        : await parsePiSessionHeader(filePath);
+        : provider === 'pi' ? await parsePiSessionHeader(filePath) : await parseClaudeSessionHeader(filePath);
     } catch (error) {
       console.warn(`[Projects] Could not read ${provider} project header ${filePath}:`, error);
       continue;
@@ -537,6 +547,7 @@ function buildProjectSummary(projectName: string, projectPath: string, config: L
     sessionMeta: { hasMore: false, total: 0 },
     codexSessions: [],
     piSessions: [],
+    claudeSessions: [],
   };
 }
 

@@ -154,6 +154,7 @@ export const api = {
     afterLine: number | null = null,
     afterCursor: string | null = null,
     projectPath = '',
+    historySnapshotRawLineOffset: number | null = null,
   ): Promise<Response> => {
     const params = new URLSearchParams();
     // Always pass provider so the server doesn't fall into provider-guessing
@@ -164,6 +165,9 @@ export const api = {
     }
     if (typeof projectPath === 'string' && projectPath) {
       params.append('projectPath', projectPath);
+    }
+    if (typeof historySnapshotRawLineOffset === 'number') {
+      params.append('historySnapshotRawLineOffset', String(historySnapshotRawLineOffset));
     }
     if (typeof afterLine === 'number') {
       params.append('afterLine', String(afterLine));

@@ -12,6 +12,7 @@ import {
 import {
   parseCodexSessionHeader,
   parsePiSessionHeader,
+  parseClaudeSessionHeader,
 } from './provider-transcript-read-model.js';
 
 configureProviderSessionReadModel({
@@ -21,6 +22,7 @@ configureProviderSessionReadModel({
   parseCodexSessionFile: parseCodexSessionHeader,
   buildCodexSessionFromHeader: (sessionData, filePath) => ({ ...sessionData, filePath }),
   parsePiSessionHeader,
+  parseClaudeSessionHeader,
   warn: (message, error) => console.warn(message, error),
 });
 
@@ -64,6 +66,8 @@ export {
   getCodexSessions,
   getProviderSessionProjectPathForFile,
   getPiSessionMessages,
+  getClaudeSessionMessages,
+  getClaudeSessions,
   getPiSessions,
   getSessionMessages,
   getSessions,
@@ -83,6 +87,7 @@ export { searchChatHistory } from './chat-history-search-service.js';
 export {
   buildCodexSessionsIndex,
   buildPiSessionsIndex,
+  buildClaudeSessionsIndex,
 } from './provider-session-index-read-model.js';
 export {
   renameCodexSession,

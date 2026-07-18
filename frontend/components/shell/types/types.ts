@@ -22,9 +22,10 @@ export type ShellInitMessage = {
   rows: number;
   initialCommand: string | null | undefined;
   isPlainShell: boolean;
-  externalSessionState?: 'running' | 'idle' | 'unknown';
+  externalSessionState?: 'running' | 'idle' | 'failed' | 'unknown';
   forceHandoff?: boolean;
   handoffToken?: string;
+  riskConfirmed?: boolean;
 };
 
 export type ShellResizeMessage = {
@@ -64,7 +65,7 @@ export type ShellIncomingMessage =
 export type UseShellRuntimeOptions = {
   selectedProject: Project | null | undefined;
   selectedSession: ProjectSession | null | undefined;
-  provider?: 'codex' | 'pi';
+  provider?: 'codex' | 'pi' | 'claude';
   initialCommand: string | null | undefined;
   isPlainShell: boolean;
   isDarkMode: boolean;
@@ -81,7 +82,7 @@ export type ShellSharedRefs = {
   authUrlRef: MutableRefObject<string>;
   selectedProjectRef: MutableRefObject<Project | null | undefined>;
   selectedSessionRef: MutableRefObject<ProjectSession | null | undefined>;
-  providerRef: MutableRefObject<'codex' | 'pi' | undefined>;
+  providerRef: MutableRefObject<'codex' | 'pi' | 'claude' | undefined>;
   initialCommandRef: MutableRefObject<string | null | undefined>;
   isPlainShellRef: MutableRefObject<boolean>;
   onProcessCompleteRef: MutableRefObject<((exitCode: number) => void) | null | undefined>;
@@ -98,12 +99,15 @@ export type UseShellRuntimeResult = {
   handoffBlockedReason: string;
   canForceHandoff: boolean;
   isForceHandoffPending: boolean;
+  providerRisk: { provider: 'pi' | 'claude'; reason: string; failures: string[] } | null;
   setVirtualCtrlActive: (isActive: boolean) => void;
   sendTerminalInput: (data: string) => boolean;
   terminateShell: () => boolean;
   connectToShell: () => void;
   disconnectFromShell: () => void;
   forceCodexHandoff: () => boolean;
+  confirmProviderRisk: () => boolean;
+  cancelProviderRisk: () => void;
   openAuthUrlInBrowser: (url?: string) => boolean;
   copyAuthUrlToClipboard: (url?: string) => Promise<boolean>;
 };

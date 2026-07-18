@@ -1,7 +1,7 @@
 // @ts-nocheck -- Historical app-server protocol acceptance keeps broad mocked transports; strict migration is tracked by proposal 4 follow-up after shared transport fixture extraction.
 /**
  * PURPOSE: Verify Codex app-server protocol mapping correctness:
- * - production transport ensures a daemon and connects through its stdio proxy
+ * - production transport only connects to a user-managed daemon through its stdio proxy
  * - cold start resumes existing provider threads instead of creating new ones
  * - abort and abort-and-send include turnId and fail visibly on interrupt errors
  * - app-server notification types and deltas map to frontend-compatible shapes.
@@ -52,11 +52,7 @@ test('production transport connects to the independent daemon through proxy', as
   const args = buildCodexAppServerCliArgs();
   assert.deepEqual(args.slice(0, 3), ['app-server', 'proxy', '--sock']);
   assert.match(args[3], /app-server-control\.sock$/);
-  assert.match(
-    runtimeSource,
-    /spawnSync\(\s*['"]codex['"][\s\S]*ensureDaemonArgs/,
-    'production transport must ensure the independent daemon before connecting',
-  );
+  assert.doesNotMatch(runtimeSource, /daemon['"],\s*['"](?:start|restart)['"]|spawnSync|--listen|stdio:\/\/|OZW_CODEX_ALLOW_PRIVATE_STDIO/, 'production transport must only connect to the user-managed daemon');
   assert.match(lineTransportSource, /child\.kill\(['"]SIGTERM['"]\)/, 'closing ozw must only close its proxy');
 });
 

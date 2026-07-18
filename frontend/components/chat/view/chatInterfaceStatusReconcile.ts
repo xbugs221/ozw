@@ -60,7 +60,12 @@ export function useChatStatusReconcile({
       return;
     }
 
-    const statusProvider = effectiveProvider === 'pi' ? 'pi' : 'codex';
+    if (effectiveProvider === 'claude') {
+      /** Claude 由 tmux TUI 承载，不存在 OZW native runtime 状态可协调。 */
+      return;
+    }
+
+    const statusProvider: StatusProvider = effectiveProvider === 'pi' ? 'pi' : 'codex';
     const statusProjectPath = selectedSessionProjectPath || selectedProjectPath;
     const reconcileKey = buildReconcileKey(statusProvider, statusSessionId, activeRouteSessionId, statusProjectPath);
 

@@ -17,11 +17,12 @@ import ShellEmptyState from './subcomponents/ShellEmptyState';
 import ShellHeader from './subcomponents/ShellHeader';
 import ShellMinimalView from './subcomponents/ShellMinimalView';
 import ShellMobileKeyBar from './subcomponents/ShellMobileKeyBar';
+import { PROVIDER_RUNTIME_POLICY } from '../../../utils/providerRuntimePolicy';
 
 type ShellProps = {
   selectedProject?: Project | null;
   selectedSession?: ProjectSession | null;
-  provider?: 'codex' | 'pi';
+  provider?: 'codex' | 'pi' | 'claude';
   initialCommand?: string | null;
   isPlainShell?: boolean;
   onProcessComplete?: ((exitCode: number) => void) | null;
@@ -73,12 +74,15 @@ export default function Shell({
     handoffBlockedReason,
     canForceHandoff,
     isForceHandoffPending,
+    providerRisk,
     setVirtualCtrlActive,
     sendTerminalInput,
     terminateShell,
     connectToShell,
     disconnectFromShell,
     forceCodexHandoff,
+    confirmProviderRisk,
+    cancelProviderRisk,
     openAuthUrlInBrowser,
     copyAuthUrlToClipboard,
   } = useShellRuntime({
@@ -116,6 +120,12 @@ export default function Shell({
     forceCodexHandoff();
   }, [forceCodexHandoff, t]);
 
+  /** 外部 Claude/Pi 状态异常时，显式继续才进入 tmux TUI。 */
+  const handleProviderRiskConfirmation = useCallback(() => {
+    if (!providerRisk) return;
+    confirmProviderRisk();
+  }, [confirmProviderRisk, providerRisk]);
+
   const handoffWarningBanner = handoffBlockedReason ? (
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-400/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100" data-testid="unsafe-codex-handoff-warning">
       <span>{handoffWarningMessage}</span>
@@ -131,6 +141,18 @@ export default function Shell({
           {isForceHandoffPending ? t('shell.handoff.forcing') : t('shell.handoff.forceAction')}
         </Button>
       )}
+    </div>
+  ) : null;
+
+  const providerRiskBanner = providerRisk ? (
+    <div className="space-y-2 border-b border-amber-400/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100" data-testid="provider-risk-confirmation">
+      <div>{providerRisk.provider === 'claude' ? 'Claude Code' : 'Pi'} 状态无法安全确认；默认不会启动终端。失败探测：{providerRisk.failures.join('、') || providerRisk.reason}。OZW 不提供运行时、守护进程或自动修复。</div>
+      <div>安装：{PROVIDER_RUNTIME_POLICY[providerRisk.provider].install.command}；认证：{PROVIDER_RUNTIME_POLICY[providerRisk.provider].authentication.command}</div>
+      <div className="flex flex-wrap gap-2">
+        {PROVIDER_RUNTIME_POLICY[providerRisk.provider].officialDocs.map((url) => <a key={url} href={url} target="_blank" rel="noreferrer" className="underline">官方诊断</a>)}
+        <Button type="button" variant="outline" size="sm" data-testid="provider-risk-cancel" onClick={cancelProviderRisk}>取消</Button>
+        <Button type="button" variant="outline" size="sm" data-testid="provider-risk-confirm" onClick={handleProviderRiskConfirmation}>继续并自行承担风险</Button>
+      </div>
     </div>
   ) : null;
 
@@ -180,6 +202,7 @@ export default function Shell({
     return (
       <div className="flex h-full min-h-0 flex-col">
         {handoffWarningBanner}
+        {providerRiskBanner}
         <div className="min-h-0 flex-1">
           <ShellMinimalView
             terminalContainerRef={terminalContainerRef}
@@ -243,6 +266,7 @@ export default function Shell({
           <div className="sr-only" data-testid="codex-terminal-runtime-mode">remote</div>
         )}
         {handoffWarningBanner}
+        {providerRiskBanner}
         <div className="relative min-h-0 flex-1 p-2">
           <div
             ref={terminalContainerRef}

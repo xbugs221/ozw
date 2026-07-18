@@ -41,13 +41,14 @@ const FORCE_HANDOFF_OFFER_TTL_MS = 60_000;
 /**
  * 归一化聊天 TUI provider，保留 Codex/Pi 的 PTY 边界。
  */
-function normalizeShellProvider(provider: unknown): 'codex' | 'pi' | 'plain-shell' {
+function normalizeShellProvider(provider: unknown): 'codex' | 'pi' | 'claude' | 'plain-shell' {
     if (provider === 'pi') {
         return 'pi';
     }
     if (provider === 'plain-shell') {
         return 'plain-shell';
     }
+    if (provider === 'claude') return 'claude';
     return 'codex';
 }
 
@@ -56,20 +57,22 @@ function normalizeShellProvider(provider: unknown): 'codex' | 'pi' | 'plain-shel
  */
 function buildProviderShellCommand(input: {
     os: any;
-    provider: 'codex' | 'pi';
+    provider: 'codex' | 'pi' | 'claude';
     projectPath: string;
     hasSession: boolean;
     resumeSessionId?: string | null;
     codexCommandArgs?: string[] | null;
 }): string {
     const { os, provider, projectPath, hasSession, resumeSessionId, codexCommandArgs } = input;
-    const cliName = provider === 'pi' ? 'pi' : 'codex';
+    const cliName = provider === 'pi' ? 'pi' : provider === 'claude' ? 'claude' : 'codex';
     const plannedCodexCommand = provider === 'codex' && codexCommandArgs
         ? `codex${codexCommandArgs.length ? ` ${codexCommandArgs.map(quotePosixShell).join(' ')}` : ''}`
         : '';
     const resumeCommand = plannedCodexCommand || (provider === 'pi'
         ? `${cliName} --session ${quotePosixShell(String(resumeSessionId || ''))}`
-        : `${cliName} resume ${quotePosixShell(String(resumeSessionId || ''))}`);
+        : provider === 'claude'
+            ? `${cliName} --resume ${quotePosixShell(String(resumeSessionId || ''))}`
+            : `${cliName} resume ${quotePosixShell(String(resumeSessionId || ''))}`);
     if (os.platform() === 'win32') {
         if (hasSession && resumeSessionId) {
             return `Set-Location -Path "${projectPath}"; ${resumeCommand}; powershell.exe -NoExit`;
@@ -94,16 +97,44 @@ function quotePosixShell(value: string): string {
 function buildPortableUserBinPathExport(): string {
     return [
         'export PATH="',
+        '$HOME/.local/bin:',
+        '$HOME/bin:',
         '${PNPM_HOME:+$PNPM_HOME:}',
         '${PNPM_HOME:+$PNPM_HOME/bin:}',
         '$HOME/.local/share/pnpm:',
         '$HOME/.local/share/pnpm/bin:',
-        '$HOME/.local/bin:',
-        '$HOME/bin:',
         '$HOME/.bun/bin:',
         '$HOME/.cargo/bin:',
         '$PATH"',
     ].join('');
+}
+
+/** 执行一个有界、只读的外部 CLI 能力探测。 */
+function runExternalProviderProbe(command: string): Promise<boolean> {
+    const probe = `${buildPortableUserBinPathExport()}; ${command}`;
+    return new Promise((resolve) => {
+        execFile(process.env.SHELL || '/bin/sh', ['-lc', probe], { timeout: 2_000 }, (error) => resolve(!error));
+    });
+}
+
+/**
+ * 探测外部 Provider 的安装、版本与认证能力。
+ * OZW 只报告失败项，不安装、登录、升级或托管 Provider。
+ */
+async function diagnoseExternalProvider(provider: 'pi' | 'claude'): Promise<string[]> {
+    const cliName = provider === 'pi' ? 'pi' : 'claude';
+    const [cliAvailable, versionReadable, authenticationReady] = await Promise.all([
+        runExternalProviderProbe(`command -v ${cliName} >/dev/null 2>&1`),
+        runExternalProviderProbe(`${cliName} --version >/dev/null 2>&1`),
+        provider === 'claude'
+            ? runExternalProviderProbe('claude auth status >/dev/null 2>&1')
+            : Promise.resolve(false),
+    ]);
+    const failures: string[] = [];
+    if (!cliAvailable) failures.push('cli-unavailable');
+    if (cliAvailable && !versionReadable) failures.push('version-unavailable');
+    if (cliAvailable && !authenticationReady) failures.push('authentication-unverified');
+    return failures;
 }
 
 /**
@@ -136,7 +167,7 @@ function buildManagedTmuxShellCommand(sessionName: string, projectPath: string, 
     return [
         `if [ ! -d ${quotedProjectPath} ]; then echo "Ozw project directory does not exist: ${quotedProjectPath}" >&2; exit 1; fi`,
         `if tmux has-session -t ${quotedSessionName} 2>/dev/null; then tmux list-panes -t ${quotedSessionName} -F '#{pane_current_path}' 2>/dev/null | while IFS= read -r pane_path; do if [ -z "$pane_path" ] || [ ! -d "$pane_path" ]; then tmux kill-session -t ${quotedSessionName} 2>/dev/null || true; break; fi; done; fi`,
-        `tmux has-session -t ${quotedSessionName} 2>/dev/null || tmux new-session -d -s ${quotedSessionName} ${quotedShellCommand}`,
+        `tmux has-session -t ${quotedSessionName} 2>/dev/null || tmux new-session -d -s ${quotedSessionName} -e HOME="$HOME" -e USERPROFILE="\${USERPROFILE:-$HOME}" -e PATH="$PATH" -e SHELL="\${SHELL:-/bin/bash}" ${quotedShellCommand}`,
         `tmux attach-session -t ${quotedSessionName}`,
     ].join('; ');
 }
@@ -307,8 +338,25 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     let hasSession = Boolean(data.hasSession && resumeSessionId) || Boolean(providerSessionId);
                     const initialCommand = data.initialCommand;
                     const isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell';
+                    const riskConfirmed = data.riskConfirmed === true;
                     urlDetectionBuffer = '';
                     announcedAuthUrls.clear();
+
+                    if (!isPlainShell && (provider === 'claude' || provider === 'pi') && !riskConfirmed) {
+                        const failures = await diagnoseExternalProvider(provider);
+                        if (hasSession && data.externalSessionState !== 'idle') {
+                            failures.push(`session-${data.externalSessionState || 'unknown'}`);
+                        }
+                        if (failures.length > 0) {
+                            ws.send(JSON.stringify({
+                                type: 'provider-risk-confirmation-required',
+                                provider,
+                                reason: failures[0],
+                                failures,
+                            }));
+                            return;
+                        }
+                    }
 
                     // Login commands should never reuse cached sessions.
                     const isLoginCommand = initialCommand && (
@@ -412,7 +460,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     if (isPlainShell) {
                         welcomeMsg = `\x1b[36mStarting terminal in: ${projectPath}\x1b[0m\r\n`;
                     } else {
-                        const providerName = provider === 'pi' ? 'Pi' : 'Codex';
+                        const providerName = provider === 'pi' ? 'Pi' : provider === 'claude' ? 'Claude Code' : 'Codex';
                         welcomeMsg = hasSession ?
                             `\x1b[36mResuming ${providerName} session ${resumeSessionId} in: ${projectPath}\x1b[0m\r\n` :
                             `\x1b[36mStarting new ${providerName} session in: ${projectPath}\x1b[0m\r\n`;
@@ -567,7 +615,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                     ? `cd "${projectPath}" && ${initialCommand}`
                                     : `cd "${projectPath}" && exec "${process.env.SHELL || '/bin/bash'}" -l`;
                             }
-                        } else if (provider === 'codex' || provider === 'pi') {
+                        } else if (provider === 'codex' || provider === 'pi' || provider === 'claude') {
                             shellCommand = buildProviderShellCommand({
                                 os,
                                 provider,

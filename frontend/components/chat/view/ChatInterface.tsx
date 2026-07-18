@@ -125,6 +125,15 @@ function hasOrderedRenderSnapshotCursors(messages: RenderSnapshotMessage[]): boo
   return true;
 }
 
+/** Resolve the next history-page cursor without confusing it with incremental raw lines. */
+function resolveNextHistoryOffset(data: Record<string, unknown>, fallback: number): number {
+  /** Prefer the explicit message cursor; retain raw cursor support for legacy providers. */
+  const nextMessageOffset = Number(data?.nextMessageOffset);
+  if (Number.isSafeInteger(nextMessageOffset)) return nextMessageOffset;
+  const nextRawLineOffset = Number(data?.nextRawLineOffset);
+  return Number.isSafeInteger(nextRawLineOffset) ? nextRawLineOffset : fallback;
+}
+
 /**
  * Wait until React and the virtual transcript have committed a measured page.
  */
@@ -261,6 +270,7 @@ function ChatInterface({
   const renderSnapshotCalibrationCountsRef = useRef<Set<number>>(new Set());
   const renderSnapshotSearchFailureTargetRef = useRef<string | null>(null);
   const renderSnapshotGenerationRef = useRef(0);
+  const renderSnapshotHistoryRawLineBoundaryRef = useRef<number | null>(null);
   const lastHandledRenderSnapshotRequestIdRef = useRef(0);
   const pendingRenderSnapshotScrollRestoreRef = useRef<ReturnType<typeof captureSessionScrollSnapshot>>(null);
   const [workflowTurnOutcomes, setWorkflowTurnOutcomes] = useState<Record<string, 'completed' | 'failed'>>({});
@@ -310,7 +320,7 @@ function ChatInterface({
     // URL query param takes highest precedence — it's the most reliable
     // signal on page reload when session routes haven't been resolved yet.
     const urlProvider = new URLSearchParams(location.search).get('provider');
-    if (urlProvider === 'pi' || urlProvider === 'codex') {
+    if (urlProvider === 'pi' || urlProvider === 'codex' || urlProvider === 'claude') {
       return urlProvider;
     }
     const sessionProvider = selectedSession?.__provider || null;
@@ -345,7 +355,7 @@ function ChatInterface({
 
     return buildChatTuiSessionKey({
       projectPath: selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '',
-      provider: effectiveProvider === 'pi' ? 'pi' : 'codex',
+      provider: effectiveProvider,
       routeSessionId,
       providerSessionId,
     });
@@ -366,6 +376,7 @@ function ChatInterface({
 
   useEffect(() => {
     renderSnapshotGenerationRef.current += 1;
+    renderSnapshotHistoryRawLineBoundaryRef.current = null;
     renderSnapshotBootstrapMessagesRef.current = [];
     renderSnapshotBufferedOlderRef.current = [];
     renderSnapshotBudgetPreparingRef.current = false;
@@ -391,6 +402,7 @@ function ChatInterface({
     isLoadingSessionMessages,
     isLoadingMoreMessages,
     hasMoreMessages,
+    historySnapshotRawLineOffset,
     totalMessages,
     setIsSystemSessionChange,
     canAbortSession,
@@ -483,7 +495,7 @@ function ChatInterface({
       const projectName = selectedSession?.__projectName || selectedProject?.name || '';
       const sessionId = getSessionLoadId(selectedSession) || currentSessionId || '';
       const projectPath = selectedSession?.projectPath || selectedProject?.fullPath || selectedProject?.path || '';
-      const snapshotProvider = effectiveProvider === 'pi' ? 'pi' : 'codex';
+      const snapshotProvider = effectiveProvider;
       if (!projectName || !sessionId) {
         renderSnapshotBootstrapMessagesRef.current = [];
         renderSnapshotBudgetPreparingRef.current = false;
@@ -501,6 +513,7 @@ function ChatInterface({
         SESSION_BULK_MESSAGE_PAGE_SIZE,
       );
       if (loadedWindow.length > 0) {
+        renderSnapshotHistoryRawLineBoundaryRef.current = historySnapshotRawLineOffset;
         const snapshotMessages = loadedWindow as RenderSnapshotMessage[];
         renderSnapshotBootstrapMessagesRef.current = snapshotMessages;
         setRenderSnapshotState((previous) =>
@@ -533,15 +546,16 @@ function ChatInterface({
         return;
       }
       const messages = Array.isArray(data?.messages) ? data.messages : (Array.isArray(data) ? data : []);
+      renderSnapshotHistoryRawLineBoundaryRef.current = Number.isSafeInteger(Number(data?.historySnapshotRawLineOffset))
+        ? Number(data.historySnapshotRawLineOffset)
+        : null;
       const snapshotMessages = convertSessionMessages(messages) as RenderSnapshotMessage[];
       renderSnapshotBootstrapMessagesRef.current = snapshotMessages;
       setRenderSnapshotState((previous) =>
         applyUserRenderSnapshot(previous, {
           messages: snapshotMessages,
           loadedAt: new Date().toISOString(),
-          nextHistoryOffset: Number.isFinite(Number(data?.nextRawLineOffset))
-            ? Number(data.nextRawLineOffset)
-            : SESSION_BULK_MESSAGE_PAGE_SIZE,
+          nextHistoryOffset: resolveNextHistoryOffset(data, SESSION_BULK_MESSAGE_PAGE_SIZE),
           hasMoreHistory: Boolean(data?.hasMore),
         }),
       );
@@ -559,6 +573,7 @@ function ChatInterface({
     selectedProject?.path,
     selectedSession,
     hasMoreMessages,
+    historySnapshotRawLineOffset,
     totalMessages,
     visibleMessages,
   ]);
@@ -582,19 +597,18 @@ function ChatInterface({
       sessionId,
       SESSION_BULK_MESSAGE_PAGE_SIZE,
       offset,
-      effectiveProvider === 'pi' ? 'pi' : 'codex',
+      effectiveProvider,
       null,
       null,
       projectPath,
+      renderSnapshotHistoryRawLineBoundaryRef.current,
     );
     if (!response.ok) {
       throw new Error('Failed to load older render snapshot history');
     }
     const data = await response.json();
     const rawMessages = Array.isArray(data?.messages) ? data.messages : (Array.isArray(data) ? data : []);
-    const nextOffset = Number.isFinite(Number(data?.nextRawLineOffset))
-      ? Number(data.nextRawLineOffset)
-      : offset + rawMessages.length;
+    const nextOffset = resolveNextHistoryOffset(data, offset + rawMessages.length);
     const madeProgress = nextOffset > offset;
     return {
       messages: convertSessionMessages(rawMessages) as RenderSnapshotMessage[],
@@ -960,10 +974,11 @@ function ChatInterface({
           sessionId,
           SESSION_BULK_MESSAGE_PAGE_SIZE,
           offset,
-          effectiveProvider === 'pi' ? 'pi' : 'codex',
+          effectiveProvider,
           null,
           null,
           projectPath,
+          renderSnapshotHistoryRawLineBoundaryRef.current,
         );
         if (!response.ok) {
           requestFailed = true;
@@ -975,9 +990,7 @@ function ChatInterface({
         const convertedMessages = convertSessionMessages(rawMessages) as RenderSnapshotMessage[];
         loadedOlder = mergeUniqueRenderSnapshotMessages(loadedOlder, convertedMessages);
         foundTarget = loadedOlder.some((message) => message.messageKey === messageKey);
-        const nextOffset = Number.isFinite(Number(data?.nextRawLineOffset))
-          ? Number(data.nextRawLineOffset)
-          : offset + rawMessages.length;
+        const nextOffset = resolveNextHistoryOffset(data, offset + rawMessages.length);
         hasMoreHistory = Boolean(data?.hasMore);
         if (nextOffset <= offset) {
           hasMoreHistory = false;
@@ -1504,7 +1517,7 @@ function ChatInterface({
 
     sendMessage({
       type: 'subscribe-session',
-      provider: effectiveProvider === 'pi' ? 'pi' : 'codex',
+      provider: effectiveProvider,
       sessionId,
       ozwSessionId: routeSessionId,
       ozw_session_id: routeSessionId,
@@ -1672,7 +1685,7 @@ function ChatInterface({
           <div
             data-testid="chat-tui-panel"
             data-tui-session-key={renderSnapshotState.tuiSessionKey}
-            data-provider={effectiveProvider === 'pi' ? 'pi' : 'codex'}
+            data-provider={effectiveProvider}
             data-connection-state="mounted"
             className={renderSnapshotState.mode === 'tui' ? 'min-h-0 flex-1' : 'hidden'}
           >
@@ -1681,7 +1694,7 @@ function ChatInterface({
                 <Shell
                   selectedProject={selectedProject}
                   selectedSession={selectedSession}
-                  provider={effectiveProvider === 'pi' ? 'pi' : 'codex'}
+                  provider={effectiveProvider}
                   autoConnect
                   headerActions={tuiHeaderActions}
                   onTerminalInputReady={handleTuiTerminalInputReady}

@@ -55,7 +55,7 @@ const DEFAULT_VISIBLE_MANUAL_SESSION_CARDS = 10;
 type WorkflowCardSortMode = 'created' | 'updated' | 'title' | 'provider';
 
 const normalizeActionSessionProvider = (provider: unknown): SessionProvider => (
-  provider === 'pi' ? 'pi' : 'codex'
+  provider === 'pi' ? 'pi' : provider === 'claude' ? 'claude' : 'codex'
 );
 
 const CARD_SORT_OPTIONS: Array<{ value: SessionCardSortMode; label: string }> = [
@@ -1100,6 +1100,15 @@ export default function ProjectOverviewPanel({
                     onClick={() => handleCreateSession('pi')}
                   >
                     Pi
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    data-testid="project-new-session-provider-claude"
+                    onClick={() => handleCreateSession('claude')}
+                  >
+                    Claude Code
                   </Button>
                   <Button
                     type="button"

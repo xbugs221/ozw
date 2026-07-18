@@ -55,7 +55,7 @@ function buildSessionNavigationUrl(
   /**
    * 为项目会话生成导航 URL；无 cN 绑定的 provider 历史会话回退到兼容路由。
    */
-  const provider: SessionProvider = session.__provider === 'pi' ? 'pi' : 'codex';
+  const provider: SessionProvider = session.__provider === 'pi' ? 'pi' : session.__provider === 'claude' ? 'claude' : 'codex';
   const projectPath = session.projectPath || project.fullPath || project.path || '';
 
   if (hasStableSessionRoute(session)) {
@@ -104,7 +104,7 @@ export function useProjectsState({
     if (!selectedSession?.id) return;
     const explicitTab = new URLSearchParams(locationSearch).get('tab');
     if (!explicitTab) {
-      setActiveTab('shell');
+      setActiveTab('chat');
     }
   }, [locationSearch, selectedSession?.id]);
   useEffect(() => {
@@ -281,6 +281,7 @@ export function useProjectsState({
     const projectKey = `${selectedProject.name}:${projectPath}`;
     const hasOverview = Array.isArray(selectedProject.codexSessions)
       || Array.isArray(selectedProject.piSessions)
+      || Array.isArray(selectedProject.claudeSessions)
       || Array.isArray(selectedProject.workflows)
       || Array.isArray(selectedProject.batches);
     if (hasOverview || projectOverviewRequestKeyRef.current === projectKey) {
@@ -542,7 +543,7 @@ export function useProjectsState({
       const baseRoute = targetWorkflow
         ? buildWorkflowChildSessionRoute(projectWithSyntheticSession, targetWorkflow, syntheticSession)
         : buildProjectSessionRoute(projectWithSyntheticSession, syntheticSession);
-      navigate(baseRoute);
+      navigate(provider === 'codex' ? baseRoute : `${baseRoute}?provider=${encodeURIComponent(provider)}`);
       return { ok: true as const };
     },
     [navigate, projects],
@@ -560,6 +561,7 @@ export function useProjectsState({
           sessions: project.sessions?.filter((session) => session.id !== sessionIdToDelete) ?? [],
           codexSessions: project.codexSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [],
           piSessions: project.piSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [],
+          claudeSessions: project.claudeSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [],
           sessionMeta: {
             ...project.sessionMeta,
             total: Math.max(0, (project.sessionMeta?.total as number | undefined ?? 0) - 1),

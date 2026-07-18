@@ -1,6 +1,6 @@
 /**
  * 文件目的：归一化聊天 WebSocket 入站协议命令。
- * 业务意义：codex-command、pi-command、abort-session 和 subscribe-session 等命令在进入 dispatcher 前拥有统一解析边界。
+ * 业务意义：Codex、终止会话和订阅等命令在进入 dispatcher 前拥有统一解析边界；Pi/Claude 只走 tmux TUI。
  */
 
 export type ChatCommandType =

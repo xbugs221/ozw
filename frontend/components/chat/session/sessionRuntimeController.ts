@@ -160,6 +160,7 @@ export function useChatSessionState({
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [totalMessages, setTotalMessages] = useState(0);
+  const [historySnapshotRawLineOffset, setHistorySnapshotRawLineOffset] = useState<number | null>(null);
   const [isSystemSessionChange, setIsSystemSessionChange] = useState(false);
   const [canAbortSession, setCanAbortSession] = useState(false);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
@@ -180,6 +181,7 @@ export function useChatSessionState({
   const pendingScrollRestoreRef = useRef<SessionScrollSnapshot | null>(null);
   const pendingInitialScrollRef = useRef(true);
   const messagesOffsetRef = useRef(0);
+  const historySnapshotRawLineOffsetRef = useRef<number | null>(null);
   const loadAllFinishedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Monotonic counter to discard stale loadSessionMessages results when sessions change quickly.
   const sessionLoadGenRef = useRef(0);
@@ -201,6 +203,8 @@ export function useChatSessionState({
   const isFollowingLatestRef = useRef(isFollowingLatest);
   /** Latest raw JSONL line seen by bottom refreshes. */
   const latestRawLineCursorRef = useRef<number | null>(null);
+  /** Opaque provider cursor for byte-and-part incremental delivery. */
+  const latestAppendCursorRef = useRef<string | null>(null);
   if (sessionMessagesStateRef.current !== sessionMessages) {
     sessionMessagesStateRef.current = sessionMessages;
     sessionMessagesRef.current = sessionMessages;
@@ -243,6 +247,7 @@ export function useChatSessionState({
       afterLine: number | null = null,
       afterCursor: string | null = null,
       projectPath: string = '',
+      requestedHistorySnapshotRawLineOffset: number | null = null,
     ) => {
       if (!projectName || !sessionId) {
         return {
@@ -252,7 +257,9 @@ export function useChatSessionState({
           tokenUsage: null as Record<string, unknown> | null,
           error: null as string | null,
           appendCursor: null as string | null,
+          nextMessageOffset: null as number | null,
           nextRawLineOffset: null as number | null,
+          historySnapshotRawLineOffset: null as number | null,
         };
       }
 
@@ -266,6 +273,7 @@ export function useChatSessionState({
           afterLine,
           afterCursor,
           projectPath,
+          requestedHistorySnapshotRawLineOffset,
         );
         if (!response.ok) {
           throw new Error('Failed to load session messages');
@@ -283,7 +291,9 @@ export function useChatSessionState({
           tokenUsage: (data?.tokenUsage || null) as Record<string, unknown> | null,
           error: null as string | null,
           appendCursor: (typeof data?.appendCursor === 'string' && data.appendCursor) ? data.appendCursor : null,
+          nextMessageOffset: Number.isFinite(Number(data?.nextMessageOffset)) ? Number(data.nextMessageOffset) : null,
           nextRawLineOffset: Number.isFinite(Number(data?.nextRawLineOffset)) ? Number(data.nextRawLineOffset) : null,
+          historySnapshotRawLineOffset: Number.isFinite(Number(data?.historySnapshotRawLineOffset)) ? Number(data.historySnapshotRawLineOffset) : null,
         };
       } catch (error) {
         console.error('Error loading session messages:', error);
@@ -294,7 +304,9 @@ export function useChatSessionState({
           tokenUsage: null as Record<string, unknown> | null,
           error: error instanceof Error ? error.message : 'Failed to load session messages',
           appendCursor: null as string | null,
+          nextMessageOffset: null as number | null,
           nextRawLineOffset: null as number | null,
+          historySnapshotRawLineOffset: null as number | null,
         };
       }
     },
@@ -325,7 +337,15 @@ export function useChatSessionState({
           requestWindow.afterLine,
           requestWindow.afterCursor,
           projectPath,
+          loadMore ? historySnapshotRawLineOffsetRef.current : null,
         );
+        if (result.historySnapshotRawLineOffset !== null) {
+          historySnapshotRawLineOffsetRef.current = result.historySnapshotRawLineOffset;
+          setHistorySnapshotRawLineOffset(result.historySnapshotRawLineOffset);
+        }
+        if (result.appendCursor !== null) {
+          latestAppendCursorRef.current = result.appendCursor;
+        }
         if (isInitialLoad && result.tokenUsage) {
           setTokenBudget(result.tokenUsage);
         }
@@ -336,7 +356,7 @@ export function useChatSessionState({
 
         if (result.total > 0 || result.hasMore) {
           const loadedCount = result.messages.length;
-          const nextOffset = result.nextRawLineOffset ?? (currentOffset + loadedCount);
+          const nextOffset = result.nextMessageOffset ?? result.nextRawLineOffset ?? (currentOffset + loadedCount);
           setHasMoreMessages(result.total > 0 ? result.total > nextOffset : result.hasMore);
           setTotalMessages(result.total > 0 ? result.total : loadedCount);
           messagesOffsetRef.current = nextOffset;
@@ -346,7 +366,7 @@ export function useChatSessionState({
         const messages = result.messages;
         setHasMoreMessages(false);
         setTotalMessages(messages.length);
-        messagesOffsetRef.current = result.nextRawLineOffset ?? messages.length;
+        messagesOffsetRef.current = result.nextMessageOffset ?? result.nextRawLineOffset ?? messages.length;
         return messages;
       } finally {
         if (isInitialLoad) {
@@ -410,7 +430,10 @@ export function useChatSessionState({
     setCanAbortSession(false);
     setTokenBudget(null);
     messagesOffsetRef.current = 0;
+    historySnapshotRawLineOffsetRef.current = null;
+    setHistorySnapshotRawLineOffset(null);
     latestRawLineCursorRef.current = null;
+    latestAppendCursorRef.current = null;
     setHasMoreMessages(false);
     setTotalMessages(0);
     setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
@@ -837,7 +860,10 @@ export function useChatSessionState({
           }
 
           messagesOffsetRef.current = 0;
+          historySnapshotRawLineOffsetRef.current = null;
+          setHistorySnapshotRawLineOffset(null);
           latestRawLineCursorRef.current = null;
+          latestAppendCursorRef.current = null;
           setHasMoreMessages(false);
           setTotalMessages(0);
           setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
@@ -856,29 +882,42 @@ export function useChatSessionState({
           // Always send check-session-status via sendMessage (which handles queuing
           // when WebSocket is temporarily disconnected) instead of gating on the ws
           // object which may be stale in the useMemo closure.
-          sendMessage({
-            type: 'check-session-status',
-            sessionId: curSession.id,
-            provider: sessionProvider,
-            projectPath: sessionProjectPath,
-          });
+          if (sessionProvider !== 'claude') {
+            sendMessage({
+              type: 'check-session-status',
+              sessionId: curSession.id,
+              provider: sessionProvider,
+              projectPath: sessionProjectPath,
+            });
+          }
         } else if (currentSessionId === null) {
           messagesOffsetRef.current = 0;
+          historySnapshotRawLineOffsetRef.current = null;
+          setHistorySnapshotRawLineOffset(null);
           latestRawLineCursorRef.current = null;
+          latestAppendCursorRef.current = null;
           setHasMoreMessages(false);
           setTotalMessages(0);
 
-          sendMessage({
-            type: 'check-session-status',
-            sessionId: curSession.id,
-            provider: sessionProvider,
-            projectPath: sessionProjectPath,
-          });
+          if (sessionProvider !== 'claude') {
+            sendMessage({
+              type: 'check-session-status',
+              sessionId: curSession.id,
+              provider: sessionProvider,
+              projectPath: sessionProjectPath,
+            });
+          }
         }
 
         setCurrentSessionId(curSession.id);
 
-        if (!isSystemSessionChange || shouldResetForSessionLoad) {
+        if (sessionProvider === 'claude') {
+          // Claude opens in its native TUI; transcript history is fetched only
+          // when the user explicitly opens the rendered Messages tab.
+          lastHydratedSessionIdRef.current = curSession.id;
+          lastHydratedSessionViewKeyRef.current = curSessionViewKey;
+          setSessionMessages([]);
+        } else if (!isSystemSessionChange || shouldResetForSessionLoad) {
           const messages = await loadSessionMessages(
             sessionProjectName,
             getSessionLoadId(curSession),
@@ -911,7 +950,10 @@ export function useChatSessionState({
         lastHydratedSessionViewKeyRef.current = null;
         setCurrentSessionId(null);
         messagesOffsetRef.current = 0;
+        historySnapshotRawLineOffsetRef.current = null;
+        setHistorySnapshotRawLineOffset(null);
         latestRawLineCursorRef.current = null;
+        latestAppendCursorRef.current = null;
         setHasMoreMessages(false);
         setTotalMessages(0);
         setFrozenTailMessageKey(null);
@@ -955,6 +997,7 @@ export function useChatSessionState({
       const isCoSession = /^c\d+$/.test(String(sessionLoadId || ''));
       const sessionProvider = resolveSessionProvider(curProject, curSession) || 'codex';
       const sessionProjectPath = curSession.projectPath || curProject.fullPath || curProject.path || '';
+      const knownAppendCursor = sessionProvider === 'claude' ? latestAppendCursorRef.current : null;
 
       // Use the provider raw-line cursor for both co-backed and direct session
       // ids because the backend read model consumes afterLine for JSONL files.
@@ -964,8 +1007,8 @@ export function useChatSessionState({
         null,
         0,
         sessionProvider,
-        knownRawLineCursor,
-        null,
+        knownAppendCursor ? null : knownRawLineCursor,
+        knownAppendCursor,
         sessionProjectPath,
       );
 
@@ -975,6 +1018,9 @@ export function useChatSessionState({
       }
 
       const newMessages = result.messages;
+      if (result.appendCursor !== null) {
+        latestAppendCursorRef.current = result.appendCursor;
+      }
       const newTotal = Math.max(
         knownTotal,
         result.total > 0 ? result.total : 0,
@@ -1024,7 +1070,10 @@ export function useChatSessionState({
             sessionMessagesRef.current = nextMessages;
             return nextMessages;
           });
-          messagesOffsetRef.current += newKeyCount;
+          if (historySnapshotRawLineOffsetRef.current === null) {
+            // Historical offsets count only rows inside a frozen Claude snapshot.
+            messagesOffsetRef.current += newKeyCount;
+          }
           if (!shouldKeepCurrentViewport) {
             setVisibleMessageCount((previousCount) => {
               if (!Number.isFinite(previousCount)) {
@@ -1055,7 +1104,10 @@ export function useChatSessionState({
               { messages: previous },
               { type: 'persistedDeltaAppended', incomingRawMessages: uniqueNewMessages, sessionId: sessionLoadId },
             ).messages);
-          messagesOffsetRef.current += uniqueNewMessages.length;
+          if (historySnapshotRawLineOffsetRef.current === null) {
+            // Incremental tail rows must not move the frozen historical window.
+            messagesOffsetRef.current += uniqueNewMessages.length;
+          }
           if (!shouldKeepCurrentViewport) {
             setVisibleMessageCount((previousCount) => {
               if (!Number.isFinite(previousCount)) {
@@ -1314,7 +1366,7 @@ export function useChatSessionState({
     const scrollSnapshot = captureSessionScrollSnapshot(scrollContainerRef.current);
 
     try {
-      const { messages: allMessages, total } = await loadSessionMessagesInPages({
+      const { messages: allMessages, total, historySnapshotRawLineOffset: loadedSnapshotBoundary } = await loadSessionMessagesInPages({
         sessionMessages: api.sessionMessages as never,
         projectName: sessionProjectName,
         sessionId: requestSessionId,
@@ -1325,6 +1377,8 @@ export function useChatSessionState({
       if (currentSessionId !== requestSessionId) return;
 
       const normalizedAllMessages = Array.isArray(allMessages) ? allMessages : [];
+      historySnapshotRawLineOffsetRef.current = loadedSnapshotBoundary;
+      setHistorySnapshotRawLineOffset(loadedSnapshotBoundary);
 
         pendingScrollRestoreRef.current = scrollSnapshot;
 
@@ -1379,6 +1433,7 @@ export function useChatSessionState({
 
     const sessionProvider = resolveSessionProvider(selectedProject, selectedSession) || 'codex';
     const sessionProjectName = getSessionProjectName(selectedProject, selectedSession);
+    const sessionProjectPath = selectedSession.projectPath || selectedProject.fullPath || selectedProject.path || '';
     const requestSessionId = selectedSession.id;
     let loadedMessages = sessionMessagesRef.current;
     let loadedVisibleCount = visibleMessageCount;
@@ -1405,6 +1460,8 @@ export function useChatSessionState({
           sessionProvider,
           requestWindow.afterLine,
           requestWindow.afterCursor,
+          sessionProjectPath,
+          historySnapshotRawLineOffsetRef.current,
         );
 
         if (currentSessionId !== requestSessionId || result.error) {
@@ -1412,7 +1469,7 @@ export function useChatSessionState({
         }
 
         const loadedCount = result.messages.length;
-        const nextOffset = result.nextRawLineOffset ?? (currentOffset + loadedCount);
+        const nextOffset = result.nextMessageOffset ?? result.nextRawLineOffset ?? (currentOffset + loadedCount);
         if (nextOffset <= currentOffset) {
           setHasMoreMessages(false);
           allMessagesLoadedRef.current = true;
@@ -1488,6 +1545,7 @@ export function useChatSessionState({
     isLoadingMoreMessages,
     hasMoreMessages,
     totalMessages,
+    historySnapshotRawLineOffset,
     isSystemSessionChange,
     setIsSystemSessionChange,
     canAbortSession,

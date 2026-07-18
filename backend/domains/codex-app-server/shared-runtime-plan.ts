@@ -1,6 +1,6 @@
 /**
- * 文件目的：规划 Codex daemon、stdio proxy 与 Unix Socket 的所有权和命令。
- * 业务意义：ozw 只拥有客户端 proxy，daemon 可独立服务网页与终端。
+ * 文件目的：规划连接用户自管 Codex daemon 的 stdio proxy 与 Unix Socket。
+ * 业务意义：ozw 只拥有客户端 proxy，不启动、重启或守护用户 daemon。
  */
 
 import path from 'node:path';
@@ -10,7 +10,6 @@ export type SharedCodexRuntimePlan = {
   mode: 'shared-daemon' | 'unsupported';
   endpoint: string | null;
   socketPath: string | null;
-  ensureDaemonArgs: string[] | null;
   proxyArgs: string[] | null;
   privateStdioArgs: string[] | null;
   stopDaemonOnClose: false;
@@ -33,7 +32,7 @@ export function resolveSharedCodexRuntimePlan(input: {
   const supported = Object.values(input.capabilities).every(Boolean);
   if (!supported) {
     return {
-      mode: 'unsupported', endpoint: null, socketPath: null, ensureDaemonArgs: null,
+      mode: 'unsupported', endpoint: null, socketPath: null,
       proxyArgs: null, privateStdioArgs: null, stopDaemonOnClose: false,
       ready: false, reason: 'codex-shared-runtime-capability-missing',
     };
@@ -43,11 +42,10 @@ export function resolveSharedCodexRuntimePlan(input: {
     mode: 'shared-daemon',
     endpoint: `unix://${socketPath}`,
     socketPath,
-    ensureDaemonArgs: ['app-server', 'daemon', 'start'],
     proxyArgs: ['app-server', 'proxy', '--sock', socketPath],
     privateStdioArgs: null,
     stopDaemonOnClose: false,
     ready: input.socketReady,
-    reason: input.socketReady ? null : 'daemon-start-required',
+    reason: input.socketReady ? null : 'user-managed-daemon-unavailable',
   };
 }

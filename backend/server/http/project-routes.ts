@@ -27,12 +27,14 @@ export interface ProjectRouteDeps {
         attachWorkflowMetadata: (projects: ProjectLike[]) => Promise<ProjectLike[]>;
         getCodexSessions: (projectPath?: string) => Promise<unknown[]> | unknown[];
         getPiSessions: (projectPath?: string) => Promise<unknown[]> | unknown[];
+        getClaudeSessions?: (projectPath?: string) => Promise<unknown[]> | unknown[];
     }) => Promise<ProjectLike>;
     attachWorkflowMetadata: (projects: ProjectLike[]) => Promise<ProjectLike[]>;
     attachProjectOverviewWorkflowMetadata?: (projects: ProjectLike[]) => Promise<ProjectLike[]>;
     syncProjectWorkflowOverviewIndex?: (projectPath: string) => Promise<unknown>;
     getCodexSessions: (projectPath?: string) => Promise<unknown[]> | unknown[];
     getPiSessions: (projectPath?: string) => Promise<unknown[]> | unknown[];
+    getClaudeSessions: (projectPath?: string) => Promise<unknown[]> | unknown[];
     extractProjectDirectory: (projectName: string) => Promise<string>;
     renameProject: (projectName: string, displayName: string, projectPath?: string) => Promise<unknown>;
     deleteProject: (projectName: string, force: boolean, projectPath?: string) => Promise<unknown>;
@@ -44,7 +46,7 @@ export interface ProjectRouteDeps {
  * 注册项目相关 HTTP 路由。
  */
 export function registerProjectRoutes(deps: ProjectRouteDeps): void {
-    const { app, authenticateToken, heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList, ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget, buildProjectOverviewReadModel, attachWorkflowMetadata, attachProjectOverviewWorkflowMetadata, syncProjectWorkflowOverviewIndex, getCodexSessions, getPiSessions, extractProjectDirectory, renameProject, deleteProject, addProjectManually, broadcastProjectListInvalidated } = deps;
+    const { app, authenticateToken, heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList, ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget, buildProjectOverviewReadModel, attachWorkflowMetadata, attachProjectOverviewWorkflowMetadata, syncProjectWorkflowOverviewIndex, getCodexSessions, getPiSessions, getClaudeSessions, extractProjectDirectory, renameProject, deleteProject, addProjectManually, broadcastProjectListInvalidated } = deps;
 
 const listProjectsHandler = async (req: any, res: any) => {
     try {
@@ -84,6 +86,7 @@ const getProjectOverviewHandler = async (req: any, res: any) => {
                 attachWorkflowMetadata: attachProjectOverviewWorkflowMetadata || attachWorkflowMetadata,
                 getCodexSessions,
                 getPiSessions,
+                getClaudeSessions,
             });
         });
         if (!overview) {

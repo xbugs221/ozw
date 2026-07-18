@@ -14,6 +14,7 @@ export const getProjectSessions = (project: Project): ProjectSession[] => {
     ...(project.sessions ?? []),
     ...(project.codexSessions ?? []),
     ...(project.piSessions ?? []),
+    ...(project.claudeSessions ?? []),
   ];
 
   return visibleSessions.filter((session) => !(
@@ -104,6 +105,7 @@ export const withSessionProjectMetadata = (
 export const providerToSessionsKey = (provider: SessionProvider): keyof Project => {
   if (provider === 'codex') return 'codexSessions';
   if (provider === 'pi') return 'piSessions';
+  if (provider === 'claude') return 'claudeSessions';
   throw new Error(`Unsupported session provider: ${String(provider)}`);
 };
 

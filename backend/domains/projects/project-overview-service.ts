@@ -21,19 +21,23 @@ import {
   countProviderSessionsForProject as countIndexedProviderSessionsForProject,
   deleteProviderSessionIndexFile as deleteIndexedProviderSessionFile,
   getProviderSessionProjectPathForFile as getIndexedProviderSessionProjectPathForFile,
+  getIndexedProviderSessionFilePath,
   indexProviderSessionFile as indexProviderSessionFileInReadModel,
   listIndexedProviderSessionsForProject,
   upsertProviderSessionIndex,
 } from './provider-session-read-model.js';
-import { buildPiSessionsIndex } from './provider-session-index-read-model.js';
+import { buildPiSessionsIndex, buildClaudeSessionsIndex } from './provider-session-index-read-model.js';
 import { listWorkflowReadModels } from '../workflows/workflow-read-model.js';
 import {
   getCodexSessionMessages,
   getPiSessionMessages,
+  getClaudeSessionMessages as readClaudeSessionMessages,
   listCodexSessionFiles,
   listPiSessionFiles,
+  listClaudeSessionFiles,
   parseCodexSessionHeader,
   parsePiSessionHeader,
+  parseClaudeSessionHeader,
   readJsonlFirstRecord,
   sessionBelongsToProject,
 } from './provider-transcript-read-model.js';
@@ -83,6 +87,7 @@ export async function getSessionMessages(
   limit: unknown = null,
   offset: unknown = 0,
   afterLine: unknown = null,
+  historySnapshotRawLineOffset: unknown = null,
 ) {
   const codexMessages = await getCodexSessionMessages(sessionId, limit, offset, afterLine);
   if (codexMessages.total > 0) {
@@ -92,7 +97,7 @@ export async function getSessionMessages(
   if (piMessages.total > 0) {
     return piMessages;
   }
-  throw new Error('Claude session history is no longer supported');
+  return getClaudeSessionMessages(sessionId, limit, offset, afterLine, historySnapshotRawLineOffset);
 }
 
 /**
@@ -122,6 +127,36 @@ export async function getPiSessions(projectPath: unknown = '', options: LooseRec
   const sessions = await readProviderSessions('pi', String(projectPath || ''), options);
   return mergeProviderSessionsWithRoutes('pi', String(projectPath || ''), sessions, options);
 }
+
+/** Read Claude session headers from the shared indexed provider read model. */
+export async function getClaudeSessions(projectPath: unknown = '', options: LooseRecord = {}): Promise<LooseRecord[]> {
+  return readProviderSessions('claude', String(projectPath || ''), options);
+}
+
+/** Read Claude history from its indexed transcript path. */
+export async function getClaudeSessionMessages(
+  sessionId: unknown = '',
+  limit: unknown = null,
+  offset: unknown = 0,
+  afterLine: unknown = null,
+  historySnapshotRawLineOffset: unknown = null,
+  afterCursor: unknown = '',
+) {
+  /** Keep recursive HOME discovery out of the normal explicit-history path. */
+  const normalizedSessionId = String(sessionId || '');
+  const indexedFilePath = await getIndexedProviderSessionFilePath('claude', normalizedSessionId).catch(() => '');
+  return readClaudeSessionMessages(
+    normalizedSessionId,
+    limit,
+    offset,
+    afterLine,
+    historySnapshotRawLineOffset,
+    indexedFilePath,
+    afterCursor,
+  );
+}
+
+export { parseClaudeSessionHeader, buildClaudeSessionsIndex };
 
 /**
  * Return cached Pi sessions grouped by project path.
@@ -186,7 +221,7 @@ export async function countProviderSessionsForProject(projectPath: unknown = '')
 /**
  * Read raw provider session headers from transcript files.
  */
-async function readProviderSessions(provider: 'codex' | 'pi', projectPath: string, options: LooseRecord = {}): Promise<LooseRecord[]> {
+async function readProviderSessions(provider: 'codex' | 'pi' | 'claude', projectPath: string, options: LooseRecord = {}): Promise<LooseRecord[]> {
   /**
    * PURPOSE: Prefer the SQLite read model; optional provider scans are reserved
    * for explicit repair paths and are disabled by project overview.
@@ -215,12 +250,12 @@ async function readProviderSessions(provider: 'codex' | 'pi', projectPath: strin
     return [];
   }
 
-  const files = provider === 'codex' ? await listCodexSessionFiles() : await listPiSessionFiles();
+  const files = provider === 'codex' ? await listCodexSessionFiles() : provider === 'pi' ? await listPiSessionFiles() : await listClaudeSessionFiles();
   const sessions: LooseRecord[] = [];
   for (const filePath of files) {
     const session = provider === 'codex'
       ? await parseCodexSessionHeader(filePath)
-      : await parsePiSessionHeader(filePath);
+      : provider === 'pi' ? await parsePiSessionHeader(filePath) : await parseClaudeSessionHeader(filePath);
     if (!session || !sessionBelongsToProject(session, projectPath)) {
       continue;
     }
@@ -236,7 +271,7 @@ async function readProviderSessions(provider: 'codex' | 'pi', projectPath: strin
  * sessions for the current project back into the SQLite read model.
  */
 async function scanRecentProviderSessionsForProject(
-  provider: 'codex' | 'pi',
+  provider: 'codex' | 'pi' | 'claude',
   projectPath: string,
   fileLimit: number,
 ): Promise<LooseRecord[]> {
@@ -247,7 +282,7 @@ async function scanRecentProviderSessionsForProject(
   if (fileLimit <= 0) {
     return [];
   }
-  const files = provider === 'codex' ? await listCodexSessionFiles() : await listPiSessionFiles();
+  const files = provider === 'codex' ? await listCodexSessionFiles() : provider === 'pi' ? await listPiSessionFiles() : await listClaudeSessionFiles();
   const recentFiles = await selectRecentJsonlFiles(files, fileLimit);
   const sessions: LooseRecord[] = [];
   for (const filePath of recentFiles) {
@@ -255,7 +290,7 @@ async function scanRecentProviderSessionsForProject(
     try {
       session = provider === 'codex'
         ? await parseCodexSessionHeader(filePath)
-        : await parsePiSessionHeader(filePath);
+        : provider === 'pi' ? await parsePiSessionHeader(filePath) : await parseClaudeSessionHeader(filePath);
     } catch (error) {
       console.warn(`[Projects] Could not inspect recent ${provider} session ${filePath}:`, error);
       continue;

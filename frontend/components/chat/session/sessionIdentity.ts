@@ -40,7 +40,9 @@ export function isCbwRouteSessionId(sessionId?: string | null): boolean {
  */
 function readExplicitSessionProvider(session?: ProjectSession | null): SessionProvider | null {
   const explicitProvider = session?.__provider || session?.provider;
-  return explicitProvider === 'codex' || explicitProvider === 'pi' ? explicitProvider : null;
+  return explicitProvider === 'codex' || explicitProvider === 'pi' || explicitProvider === 'claude'
+    ? explicitProvider
+    : null;
 }
 
 /**
@@ -71,11 +73,17 @@ export function resolveProjectSessionProvider(
   if ((selectedProject.piSessions || []).some((session) => session.id === sessionId)) {
     return 'pi';
   }
+  if ((selectedProject.claudeSessions || []).some((session) => session.id === sessionId)) {
+    return 'claude';
+  }
 
   if (isCbwRouteSessionId(sessionId)) {
     const routeIndex = Number(sessionId.slice(1));
     if ((selectedProject.piSessions || []).some((session) => session.routeIndex === routeIndex)) {
       return 'pi';
+    }
+    if ((selectedProject.claudeSessions || []).some((session) => session.routeIndex === routeIndex)) {
+      return 'claude';
     }
     if ((selectedProject.codexSessions || []).some((session) => session.routeIndex === routeIndex)) {
       return 'codex';

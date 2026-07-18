@@ -9,7 +9,7 @@ import {
 } from '../../projects.js';
 
 export type ProviderSessionBinding = {
-  provider: 'codex' | 'pi';
+  provider: 'codex' | 'pi' | 'claude';
   providerSessionId: string;
   projectName?: string;
   projectPath?: string;
@@ -24,7 +24,7 @@ export async function readProviderSessionBinding(projectName: string, projectPat
     return null;
   }
   return {
-    provider: runtime.provider === 'pi' ? 'pi' : 'codex',
+    provider: runtime.provider === 'pi' ? 'pi' : runtime.provider === 'claude' ? 'claude' : 'codex',
     providerSessionId: String(runtime.providerSessionId),
     projectName,
     projectPath,
@@ -38,7 +38,7 @@ export async function writeProviderSessionBinding(input: {
   projectName?: string;
   projectPath: string;
   routeSessionId: string;
-  provider: 'codex' | 'pi';
+  provider: 'codex' | 'pi' | 'claude';
   providerSessionId: string;
 }): Promise<void> {
   await bindManualSessionProvider(input.projectName || '', input.projectPath, input.routeSessionId, input.providerSessionId);
@@ -51,14 +51,14 @@ export async function resolveProviderSessionBinding(input: {
   projectName?: string;
   projectPath: string;
   routeSessionId: string;
-  provider?: 'codex' | 'pi' | null;
+  provider?: 'codex' | 'pi' | 'claude' | null;
 }): Promise<ProviderSessionBinding> {
   const binding = await readProviderSessionBinding(input.projectName || '', input.projectPath, input.routeSessionId);
   if (binding) {
     return binding;
   }
   return {
-    provider: input.provider === 'pi' ? 'pi' : 'codex',
+    provider: input.provider === 'pi' ? 'pi' : input.provider === 'claude' ? 'claude' : 'codex',
     providerSessionId: '',
     projectName: input.projectName || '',
     projectPath: input.projectPath,

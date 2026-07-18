@@ -13,11 +13,11 @@ export function buildSessionLoadPlan(input: { loadMore?: boolean; offset?: numbe
   return { loadMore, offset, limit, hasKnownTotal: typeof input.total === 'number' && input.total >= 0 };
 }
 
-export function applySessionLoadResult<TMessage>(previous: TMessage[], result: { messages?: TMessage[]; total?: number; nextRawLineOffset?: number }, loadMore = false) {
-  /** 合并 session 加载结果，保留服务端 total 和下一次 raw offset。 */
+export function applySessionLoadResult<TMessage>(previous: TMessage[], result: { messages?: TMessage[]; total?: number; nextMessageOffset?: number; nextRawLineOffset?: number }, loadMore = false) {
+  /** 合并 session 加载结果，优先保留服务端消息分页游标。 */
   const incoming = Array.isArray(result.messages) ? result.messages : [];
   const messages = loadMore ? [...previous, ...incoming] : incoming;
-  return { messages, total: typeof result.total === 'number' ? result.total : messages.length, nextOffset: result.nextRawLineOffset ?? messages.length };
+  return { messages, total: typeof result.total === 'number' ? result.total : messages.length, nextOffset: result.nextMessageOffset ?? result.nextRawLineOffset ?? messages.length };
 }
 
 export function getVisibleWindowMessageKey<TMessage>(message: TMessage, index: number): string {

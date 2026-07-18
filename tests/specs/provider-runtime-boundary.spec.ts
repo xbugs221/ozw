@@ -1,5 +1,5 @@
 /**
- * Sources: 2026-06-16-5-Provider运行边界与AppServer重构, 2026-06-17-20-后端realtime协议与provider-runtime分层, 2026-06-19-30-移除OpenAI单次调用并统一Codex-app-server-steer
+ * Sources: 2026-06-16-5-Provider运行边界与AppServer重构, 2026-06-17-20-后端realtime协议与provider-runtime分层, 2026-06-19-30-移除OpenAI单次调用并统一Codex-app-server-steer, 41-接入Claude-Code会话与tmux-TUI
  *
  * PURPOSE: Verify the backend provider runtime boundary keeps Codex
  * app-server, Pi SDK, route binding, active-turn and live transcript ownership
@@ -179,7 +179,7 @@ async function buildRuntimeSourceAudit(): Promise<RuntimeSourceAudit> {
   return audit;
 }
 
-test('provider runtime boundary modules exist and keep Codex on app-server', async () => {
+test('provider runtime boundary keeps only Codex on app-server and external providers on tmux TUI', async () => {
   assert.ok(EVIDENCE_CONTRACTS.some((entry) => entry.includes('provider-runtime-source-audit')));
   const router = await readRepoFile('backend/domains/provider-runtime/runtime-router.ts');
   const events = await readRepoFile('backend/domains/provider-runtime/provider-runtime-events.ts');
@@ -188,7 +188,10 @@ test('provider runtime boundary modules exist and keep Codex on app-server', asy
 
   assertExports(router, 'sendProviderRuntimeMessage');
   assert.match(router, /sendCodexAppServerMessage/, 'Codex branch must call app-server facade');
-  assert.match(router, /createAgentSession|sendPiRuntimeMessage/, 'Pi branch must remain explicit');
+  assert.match(router, /provider !== ['"]codex['"][\s\S]*accepted: false/, 'runtime facade must reject Pi/Claude SDK or RPC execution');
+  const composer = await readRepoFile('frontend/components/chat/composer/useChatComposerStateRuntime.impl.ts');
+  assert.doesNotMatch(composer, /type:\s*['"]pi-command['"]/, 'browser composer must not send Pi runtime commands');
+  assert.doesNotMatch(composer, /type:\s*['"]claude-command['"]/, 'browser composer must not send Claude runtime commands');
   assertExports(events, 'toProviderSessionStatusEvent');
   assertExports(events, 'toProviderRuntimeErrorEvent');
   assert.doesNotMatch(nativeRuntime, /@openai\/codex-sdk/);

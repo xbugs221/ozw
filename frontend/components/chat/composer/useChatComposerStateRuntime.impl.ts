@@ -841,40 +841,6 @@ export function useChatComposerState({
             runningBehavior,
           },
         });
-      } else if (provider === 'pi') {
-        sendMessage({
-          type: 'pi-command',
-          clientRequestId,
-          command: messageContent,
-          sessionId: effectiveSessionId,
-          ozwSessionId,
-          ozw_session_id: ozwSessionId,
-          startRequestId: clientRequestId,
-          start_request_id: clientRequestId,
-          clientRef: messageContent,
-          client_ref: messageContent,
-          turnAnchorKey,
-          options: {
-            cwd: resolvedProjectPath,
-            projectPath: resolvedProjectPath,
-            projectName: resolvedProjectName,
-            sessionId: effectiveSessionId,
-            ozwSessionId,
-            ozw_session_id: ozwSessionId,
-            clientRequestId,
-            startRequestId: clientRequestId,
-            start_request_id: clientRequestId,
-            clientRef: messageContent,
-            client_ref: messageContent,
-            turnAnchorKey,
-            resume: Boolean(effectiveSessionId),
-            model: piModel,
-            thinkingLevel: piThinkingLevel,
-            permissionMode,
-            attachments: uploadedAttachments,
-            runningBehavior,
-          },
-        });
       }
       // Do NOT re-enable abort here.  Authoritative abortability comes
       // exclusively from provider session-status events carrying an active_turn_id.

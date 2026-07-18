@@ -32,7 +32,7 @@ import {
   extractProjectDirectory,
 } from './project-discovery-read-model.js';
 
-type ProviderName = 'codex' | 'pi';
+type ProviderName = 'codex' | 'pi' | 'claude';
 
 /**
  * Create a user-visible manual session draft before a provider session exists.
@@ -314,7 +314,7 @@ function getSessionRouteStoreDependencies(): SessionRouteStoreDependencies {
  * Ensure manual routes only bind supported provider histories.
  */
 function assertProvider(provider: string): asserts provider is ProviderName {
-  if (provider !== 'codex' && provider !== 'pi') {
-    throw new Error('provider must be "codex" or "pi"');
+  if (provider !== 'codex' && provider !== 'pi' && provider !== 'claude') {
+    throw new Error('provider must be "codex", "pi" or "claude"');
   }
 }

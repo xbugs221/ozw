@@ -6,11 +6,11 @@
 
 - `pnpm exec tsx --test tests/backend/provider-session-index-store.test.ts`
 - `pnpm exec tsx --test tests/specs/provider-session-list-read-model.spec.ts`
-- `pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts`
+- `pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts tests/specs/project-index-backfill-selection.spec.ts`
 
 ## 需求：项目发现必须使用 Provider 的轻量权威索引
 
-`/api/projects` 必须通过轻量数据源发现 Codex、Pi 项目和会话概览，不得为仓库列表全量解析 Provider 历史。
+`/api/projects` 必须通过轻量数据源发现 Codex、Pi、Claude 项目和会话概览，不得为仓库列表全量解析 Provider 历史。
 
 ### 场景：Codex 通过 JSONL 首行发现项目
 
@@ -46,6 +46,14 @@
 - **并且** 对应 session provider 是 `pi`
 - **且** 不需要执行 `pi session list --format json`
 - **并且** 不扫描 snapshot、tool-output 或 session_diff 目录
+
+### 场景：Claude 通过 JSONL 头部发现项目
+
+- **给定** `~/.claude/projects/<project>/<session>.jsonl` 存在可用记录，含 `cwd`、`sessionId` 与时间戳
+- **当** 后台 backfill 构建项目索引
+- **则** 项目概览返回正确的 `claudeSessions`、provider 与 provider session id
+- **并且** 首个可用记录后的坏行或大工具输出不得影响发现
+- **且** Claude HOME 扫描不得位于轻量项目列表请求路径
 
 ### 场景：Provider 后台同步维护 project_index
 
@@ -127,6 +135,14 @@
 - **当** 用户打开该 session
 - **则** 消息详情按 Pi/co read model 加载
 - **并且** 不 fallback 到 Codex JSONL
+
+### 场景：进入 Claude 会话后显式分页读取历史
+
+- **给定** 项目概览已提供 Claude session
+- **当** 用户显式打开记录/消息入口并提供 `limit` 或 cursor
+- **则** 只读取有界的 Claude JSONL 历史，保持 user、thinking、工具调用、工具结果与最终回复顺序
+- **并且** 元数据与 sidechain 不进入可见记录
+- **且** 默认进入 TUI 时不得预读历史
 
 ### 场景：进入 Pi 会话后仍按 Pi 数据源加载
 

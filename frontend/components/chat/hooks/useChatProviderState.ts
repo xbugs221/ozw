@@ -45,7 +45,7 @@ type PiModelOption = {
   thinkingOptions: PiThinkingOption[];
 };
 
-const SUPPORTED_PROVIDERS: SessionProvider[] = ['codex', 'pi'];
+const SUPPORTED_PROVIDERS: SessionProvider[] = ['codex', 'pi', 'claude'];
 const FALLBACK_CODEX_MODEL_OPTIONS: CodexModelOption[] = [];
 const FALLBACK_PI_MODEL_OPTIONS: PiModelOption[] = [];
 const DEFAULT_PI_THINKING_OPTIONS: PiThinkingOption[] = [{ value: 'off', label: 'Off' }];

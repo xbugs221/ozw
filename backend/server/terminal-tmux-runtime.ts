@@ -61,7 +61,7 @@ function parseTmuxRawKey(rawKey: string): {
   routeSessionId: string;
   providerSessionId: string;
 } | null {
-  const match = String(rawKey || '').match(/^(.*)_(codex|pi|plain-shell)_(.*?)(?:_cmd_[A-Za-z0-9+/=_-]+)?$/);
+  const match = String(rawKey || '').match(/^(.*)_(codex|pi|claude|plain-shell)_(.*?)(?:_cmd_[A-Za-z0-9+/=_-]+)?$/);
   if (!match) {
     return null;
   }

@@ -545,6 +545,10 @@ export async function sendNativeMessage(input: {
   providerSessionId?: string;
 }): Promise<{ accepted: boolean; queued?: boolean; providerSessionId?: string }> {
   const { provider, sessionId, projectPath, text, runningBehavior, writer, clientRequestId } = input;
+  if (provider !== 'codex') {
+    /** Pi and Claude execution are external tmux TUI concerns, never SDK/RPC fallbacks. */
+    return { accepted: false };
+  }
   const resolvedProjectPath = projectPath || process.cwd();
   const overlayWriter = withActiveTurnOverlayWriter(writer || null, provider, sessionId, resolvedProjectPath);
   recordProviderActiveTurnUser({

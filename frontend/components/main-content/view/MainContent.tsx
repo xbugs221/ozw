@@ -353,7 +353,7 @@ function MainContent({
      * Keep the browser route on the stable cN session URL while the UI opens
      * the terminal view for that selected session.
      */
-    setActiveTab('shell');
+    setActiveTab('chat');
     onSelectSession(session);
   }, [onSelectSession, setActiveTab]);
 

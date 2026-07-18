@@ -19,6 +19,7 @@ import {
   mergeProjectSummaries,
   projectMatchesOverview,
 } from '../../frontend/hooks/projects/projectRefreshReducer';
+import { resolveSessionProvider } from '../../frontend/utils/session-provider';
 
 type LooseProject = Record<string, any>;
 
@@ -119,6 +120,27 @@ test('project cN route honors provider hint for Pi sessions', () => {
   const hintedPiRoute = resolveRouteSelection(projects, '/projects/demo/c2', 'provider=pi&projectPath=/work/demo');
   assert.equal(hintedPiRoute.session?.id, 'pi-2');
   assert.equal(hintedPiRoute.session?.__provider, 'pi');
+});
+
+test('Claude cN route restores provider ownership without a query hint', () => {
+  /** Claude 索引会先提供 provider 字段；直达或重载 URL 仍必须进入同一 Claude TUI。 */
+  const project = buildProjectFixture();
+  project.claudeSessions = [{
+    id: 'claude-7',
+    routeIndex: 7,
+    title: 'Claude 7',
+    provider: 'claude',
+    projectPath: '/work/demo',
+  }];
+
+  const directRoute = resolveRouteSelection([project] as any[], '/projects/demo/c7');
+  assert.equal(directRoute.session?.id, 'claude-7');
+  assert.equal(directRoute.session?.provider, 'claude');
+  assert.equal(resolveSessionProvider(null, directRoute.session, project), 'claude');
+
+  const hintedRoute = resolveRouteSelection([project] as any[], '/projects/demo/c7', 'provider=claude');
+  assert.equal(hintedRoute.session?.id, 'claude-7');
+  assert.equal(hintedRoute.session?.provider, 'claude');
 });
 
 test('project refresh preserves loaded details and replaces temporary cN selection', () => {

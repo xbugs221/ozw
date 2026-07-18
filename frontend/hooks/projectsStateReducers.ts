@@ -11,6 +11,7 @@ import type { SessionProvider } from '../types/app';
 import { findProjectSessionById, getProjectSessions, isUpdateAdditive, withSessionProjectMetadata } from './projects/projectSessionCollections';
 import { getDirectSessionRouteIndex, normalizePathname, resolveRouteSelection } from './projects/projectRouteSelection';
 import { normalizeComparablePath, serialize } from './projects/projectRefreshReducer';
+import { resolveSessionProvider } from '../utils/session-provider';
 
 type UseProjectsRealtimeReducersArgs = {
   activeSessions: Set<string>;
@@ -176,7 +177,7 @@ export function useProjectRouteSelectionSync({
       const searchParams = new URLSearchParams(locationSearch);
       const hintedProjectPath = searchParams.get('projectPath') || '';
       const rawProvider = searchParams.get('provider');
-      const hintedProvider: SessionProvider = rawProvider === 'pi' ? 'pi' : 'codex';
+      const hintedProvider: SessionProvider = rawProvider === 'pi' ? 'pi' : rawProvider === 'claude' ? 'claude' : 'codex';
       const decodedSessionId = decodeURIComponent(legacySessionMatch[1]);
       const requestedSessionSummary = String(searchParams.get('sessionSummary') || '').trim();
       const matchedProject = projects.find((project) => (
@@ -224,11 +225,7 @@ export function useProjectRouteSelectionSync({
       return;
     }
     if (resolvedSelection.session) {
-      const provider = resolvedSelection.session.__provider || ((resolvedProject.codexSessions || []).some(
-        (session) => session.id === resolvedSelection.session?.id,
-      ) ? 'codex' : (resolvedProject.piSessions || []).some(
-        (session) => session.id === resolvedSelection.session?.id,
-      ) ? 'pi' : 'codex');
+      const provider = resolveSessionProvider(null, resolvedSelection.session, resolvedProject);
       const nextSession = withSessionProjectMetadata(resolvedSelection.session, resolvedProject, provider);
       if (
         selectedSession?.id !== nextSession.id
@@ -260,7 +257,8 @@ export function useProjectRouteSelectionSync({
     if (searchParams.get('projectPath')) return undefined;
     let cancelled = false;
     const decodedSessionId = decodeURIComponent(legacySessionMatch[1]);
-    const hintedProvider: SessionProvider = searchParams.get('provider') === 'pi' ? 'pi' : 'codex';
+    const routeProvider = searchParams.get('provider');
+    const hintedProvider: SessionProvider = routeProvider === 'pi' ? 'pi' : routeProvider === 'claude' ? 'claude' : 'codex';
     const resolveLegacySessionFromOverviews = async () => {
       /** Resolve legacy session URLs whose project is only knowable after overview loading. */
       for (const project of projects) {

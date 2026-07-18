@@ -73,6 +73,7 @@ import {
     refreshMissingProjectPathCache,
     indexProviderSessionFile,
     deleteProviderSessionIndexFile,
+    getClaudeSessions,
 } from '../projects.js';
 import {
     buildProjectOverviewReadModel,
@@ -265,11 +266,11 @@ function isCbwRouteSessionId(sessionId: unknown): boolean {
 /**
  * Accept only providers supported by manual chat turns.
  */
-function normalizeManualProvider(provider: unknown): "codex" | "pi" {
-    if (provider === 'codex' || provider === 'pi') {
+function normalizeManualProvider(provider: unknown): "codex" | "pi" | "claude" {
+    if (provider === 'codex' || provider === 'pi' || provider === 'claude') {
         return provider;
     }
-    throw new Error('provider must be "codex" or "pi"');
+    throw new Error('provider must be "codex", "pi" or "claude"');
 }
 
 /**
@@ -506,6 +507,7 @@ function classifyProjectFile(absolutePath: string, sampleBuffer: Buffer) {
 const PROVIDER_WATCH_PATHS = [
     { provider: 'codex', rootPath: path.join(os.homedir(), '.codex', 'sessions') },
     { provider: 'pi', rootPath: path.join(os.homedir(), '.pi', 'agent', 'sessions') },
+    { provider: 'claude', rootPath: path.join(os.homedir(), '.claude', 'projects') },
 ];
 const WATCHER_IGNORED_PATTERNS = [
     '**/node_modules/**',
@@ -928,7 +930,7 @@ registerBackendHttpRoutes({
     heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList,
     ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget,
     buildProjectOverviewReadModel, attachWorkflowMetadata, attachProjectOverviewWorkflowMetadata: attachIndexedWorkflowMetadata, syncProjectWorkflowOverviewIndex,
-    getCodexSessions, getPiSessions,
+    getCodexSessions, getPiSessions, getClaudeSessions,
     extractProjectDirectory, listProjectWorkflows, summarizeWorkflowForProjectList, getProjectWorkflow,
     createProjectWorkflow, listProjectAdoptableOpenSpecChanges, resumeWorkflowRun, abortWorkflowRun,
     findProjectByName, handleGetSessionMessages, searchChatHistory, renameProject, renameSession,

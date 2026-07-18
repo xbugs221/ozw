@@ -5,7 +5,7 @@
 
 type ChatTuiSessionKeyInput = {
   projectPath: string;
-  provider: 'codex' | 'pi';
+  provider: 'codex' | 'pi' | 'claude';
   routeSessionId?: string | null;
   providerSessionId?: string | null;
 };
