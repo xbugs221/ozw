@@ -8,7 +8,7 @@
 
 ### 1. 检查基础环境
 
-- **Node.js 24.17.0**：以 `.nvmrc` 为准。
+- **Node.js 26.4.0**：推荐版本；最低支持 24.17.0，以 `.nvmrc` 和 `package.json` 为准。
 - **pnpm 11.10.0**：以 `package.json` 的 `packageManager` 字段为准，建议使用 Corepack 固定版本。
 - **oz**：必须安装在服务进程 `PATH` 中。ozw 启动时会检查 `oz flow contract --json`，并通过 `oz list` 发现活跃变更、通过 `oz flow` 执行工作流。
 - **Codex/Pi**：不是服务启动硬依赖；只有使用对应聊天 provider 时，才需要在同一台机器上完成官方安装和登录。
