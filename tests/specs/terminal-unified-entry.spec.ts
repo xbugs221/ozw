@@ -144,6 +144,9 @@ test('tmux 承载所有终端且 close 只 detach', () => {
   assert.match(combinedSource, /has-session|list-sessions/, '后端必须能检测已有 tmux session');
   assert.match(combinedSource, /new-session|new\s+-d|-d\s+-s/, '后端必须能创建后台 tmux session');
   assert.match(combinedSource, /attach-session|attach\s+-t|capture-pane/, '后端必须能重新 attach 或读取 session');
+  assert.match(shellSource, /pane_current_path/, '复连前必须检查 tmux pane 的工作目录');
+  assert.match(shellSource, /!\s*-d[\s\S]{0,40}pane_path/, '失效工作目录必须被识别');
+  assert.match(shellSource, /tmux kill-session/, '失效工作目录对应的 tmux session 必须被清理');
   assert.match(combinedSource, /send-keys|load-buffer|paste-buffer/, '启动命令必须通过 tmux 输入通道注入');
   assert.doesNotMatch(shellSource, /keepSessionAliveOnDisconnect\s*=\s*!isPlainShell/, '普通 shell 和 TUI 不得分叉保活策略');
   assert.doesNotMatch(

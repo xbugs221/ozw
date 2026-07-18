@@ -107,6 +107,41 @@ function buildPortableUserBinPathExport(): string {
 }
 
 /**
+ * 构建受管终端的环境变量。
+ * 业务逻辑：Codex 执行环境可能注入 NO_COLOR；tmux 会在首次创建时固化该变量，
+ * 因此在创建 PTY 前移除它，同时明确保留 Ozw 所需的彩色终端能力。
+ */
+function buildManagedTerminalEnvironment(): NodeJS.ProcessEnv {
+    const environment = { ...process.env };
+    delete environment.NO_COLOR;
+
+    return {
+        ...environment,
+        TERM: 'xterm-256color',
+        COLORTERM: 'truecolor',
+        FORCE_COLOR: '3',
+    };
+}
+
+/**
+ * 文件目的：构建受管 tmux 终端的启动命令。
+ * 业务逻辑：项目目录可能被测试清理或用户删除；先清理工作目录失效的旧 session，
+ * 再创建新 session，避免 shell 启动时调用 getcwd() 失败。
+ */
+function buildManagedTmuxShellCommand(sessionName: string, projectPath: string, shellCommand: string): string {
+    const quotedSessionName = quotePosixShell(sessionName);
+    const quotedProjectPath = quotePosixShell(projectPath);
+    const quotedShellCommand = quotePosixShell(shellCommand);
+
+    return [
+        `if [ ! -d ${quotedProjectPath} ]; then echo "Ozw project directory does not exist: ${quotedProjectPath}" >&2; exit 1; fi`,
+        `if tmux has-session -t ${quotedSessionName} 2>/dev/null; then tmux list-panes -t ${quotedSessionName} -F '#{pane_current_path}' 2>/dev/null | while IFS= read -r pane_path; do if [ -z "$pane_path" ] || [ ! -d "$pane_path" ]; then tmux kill-session -t ${quotedSessionName} 2>/dev/null || true; break; fi; done; fi`,
+        `tmux has-session -t ${quotedSessionName} 2>/dev/null || tmux new-session -d -s ${quotedSessionName} ${quotedShellCommand}`,
+        `tmux attach-session -t ${quotedSessionName}`,
+    ].join('; ');
+}
+
+/**
  * 执行 tmux 生命周期命令，并把“session 不存在”等幂等结果收敛为日志。
  */
 function executeTmuxLifecycleCommand(args: string[], actionLabel: string): void {
@@ -546,13 +581,15 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         }
 
                         if (os.platform() !== 'win32') {
-                            const sessionName = quotePosixShell(activeTmuxSessionName);
-                            const newSessionName = quotePosixShell(tmuxRuntime.sessionName);
-                            const tmuxStartCommand = quotePosixShell(shellCommand);
+                            const sessionName = activeTmuxSessionName;
+                            const managedTmuxCommand = buildManagedTmuxShellCommand(
+                                sessionName,
+                                projectPath,
+                                shellCommand,
+                            );
                             shellCommand = [
                                 'command -v tmux >/dev/null 2>&1 || { echo "Error: tmux is required for persistent terminals. Please install tmux."; exit 127; }',
-                                `tmux has-session -t ${sessionName} 2>/dev/null || tmux new-session -d -s ${newSessionName} ${tmuxStartCommand}`,
-                                `tmux attach-session -t ${sessionName}`,
+                                managedTmuxCommand,
                             ].join(' && ');
                         }
 
@@ -582,12 +619,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             cols: termCols,
                             rows: termRows,
                             cwd: os.homedir(),
-                            env: {
-                                ...process.env,
-                                TERM: 'xterm-256color',
-                                COLORTERM: 'truecolor',
-                                FORCE_COLOR: '3'
-                            }
+                            env: buildManagedTerminalEnvironment(),
                         });
 
                         console.log('🟢 Shell process started with PTY, PID:', shellProcess.pid);
