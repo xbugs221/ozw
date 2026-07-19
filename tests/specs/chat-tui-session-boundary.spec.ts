@@ -17,6 +17,8 @@ type BuildChatTuiSessionKey = (input: {
   providerSessionId?: string | null;
 }) => string;
 
+type GetVirtualCtrlKeyboardInput = (key: string) => string | null;
+
 const REPO_ROOT = process.cwd();
 const TUI_SESSION_KEY_PATH = path.join(
   REPO_ROOT,
@@ -29,6 +31,9 @@ const TUI_SESSION_KEY_PATH = path.join(
 const CHAT_INTERFACE_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'chat', 'view', 'ChatInterface.tsx');
 const SHELL_WEBSOCKET_PATH = path.join(REPO_ROOT, 'backend', 'server', 'shell-websocket.ts');
 const TERMINAL_CONSTANTS_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'constants', 'constants.ts');
+const SHELL_TERMINAL_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'hooks', 'useShellTerminal.ts');
+const MOBILE_KEY_INPUT_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'utils', 'mobileKeyInput.ts');
+const PROJECTS_STATE_PATH = path.join(REPO_ROOT, 'frontend', 'hooks', 'useProjectsState.ts');
 
 /**
  * Read a required production source file for boundary assertions.
@@ -93,6 +98,42 @@ test('聊天页默认 TUI-first，并由消息 Tab 触发渲染快照', () => {
     source,
     /selectedSession[\s\S]{0,240}loadSessionMessages\(/,
     '默认进入会话不应立即把 JSONL 富渲染作为唯一消息视图',
+  );
+});
+
+test('新建会话进入终端而不是渲染标签', () => {
+  /** 路由同步不得覆盖新建会话入口已经选择的 TUI 标签。 */
+  const source = readRequiredSource(PROJECTS_STATE_PATH, '项目会话标签同步');
+  assert.match(
+    source,
+    /Entering a concrete session defaults to its live TUI[\s\S]{0,240}setActiveTab\('shell'\)/,
+    '具体会话在 URL 未指定标签时必须默认进入终端',
+  );
+});
+
+test('新建 Claude/Pi 会话不触发已有会话接管警告', () => {
+  /** 只有具备 provider session 身份的已有会话才需要风险确认。 */
+  const source = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端会话接管风险判定');
+  assert.match(
+    source,
+    /if \(!isPlainShell && hasSession && \(provider === 'claude' \|\| provider === 'pi'\) && !riskConfirmed\)/,
+    'Claude/Pi 风险诊断必须要求 hasSession，不能阻断新建会话',
+  );
+});
+
+test('移动端虚拟 Ctrl 将软键盘字符转换为终端控制字符', async () => {
+  /** 软键盘走 xterm onData，Ctrl+C 必须最终发送 ETX。 */
+  const moduleExports = await import(pathToFileURL(MOBILE_KEY_INPUT_PATH).href) as {
+    getVirtualCtrlKeyboardInput: GetVirtualCtrlKeyboardInput;
+  };
+  assert.equal(moduleExports.getVirtualCtrlKeyboardInput('c'), '\x03', 'Ctrl+C 必须转换为 ETX');
+  assert.equal(moduleExports.getVirtualCtrlKeyboardInput('d'), '\x04', 'Ctrl+D 必须转换为 EOT');
+
+  const source = readRequiredSource(SHELL_TERMINAL_PATH, '移动端终端输入处理');
+  assert.match(
+    source,
+    /nextTerminal\.onData[\s\S]{0,320}virtualCtrlActiveRef\.current[\s\S]{0,180}getVirtualCtrlKeyboardInput\(data\)/,
+    'xterm onData 必须应用虚拟 Ctrl，不能只依赖浏览器 keydown',
   );
 });
 

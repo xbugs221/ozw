@@ -104,7 +104,7 @@ export function useProjectsState({
     if (!selectedSession?.id) return;
     const explicitTab = new URLSearchParams(locationSearch).get('tab');
     if (!explicitTab) {
-      setActiveTab('chat');
+      setActiveTab('shell');
     }
   }, [locationSearch, selectedSession?.id]);
   useEffect(() => {

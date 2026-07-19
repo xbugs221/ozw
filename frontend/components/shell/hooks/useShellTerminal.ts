@@ -240,9 +240,16 @@ export function useShellTerminal({
     setIsInitialized(true);
 
     const dataSubscription = nextTerminal.onData((data) => {
+      /**
+       * Mobile software keyboards emit text through onData instead of browser
+       * keydown events, so apply the locked virtual Ctrl modifier here too.
+       */
+      const virtualCtrlInput = virtualCtrlActiveRef.current
+        ? getVirtualCtrlKeyboardInput(data)
+        : null;
       sendShellMessage({
         type: 'input',
-        data,
+        data: virtualCtrlInput || data,
       });
     });
 

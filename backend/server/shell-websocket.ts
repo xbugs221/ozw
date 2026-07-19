@@ -342,9 +342,9 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     urlDetectionBuffer = '';
                     announcedAuthUrls.clear();
 
-                    if (!isPlainShell && (provider === 'claude' || provider === 'pi') && !riskConfirmed) {
+                    if (!isPlainShell && hasSession && (provider === 'claude' || provider === 'pi') && !riskConfirmed) {
                         const failures = await diagnoseExternalProvider(provider);
-                        if (hasSession && data.externalSessionState !== 'idle') {
+                        if (data.externalSessionState !== 'idle') {
                             failures.push(`session-${data.externalSessionState || 'unknown'}`);
                         }
                         if (failures.length > 0) {
