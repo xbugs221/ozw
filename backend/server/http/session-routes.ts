@@ -10,6 +10,8 @@ import type {
     ProjectInvalidationEvent,
     ProjectLike,
 } from './route-deps.js';
+import type Database from 'better-sqlite3';
+import { sessionAttentionDb } from '../../session-attention-store.js';
 
 export interface SessionRouteDeps {
     app: HttpRouteApp;
@@ -19,6 +21,8 @@ export interface SessionRouteDeps {
     heavyReadCoalescer: HeavyReadCoalescer;
     renameSession: (projectName: string, sessionId: string, summary: string, projectPath: string) => Promise<unknown>;
     updateSessionUiState: (projectName: string, sessionId: string, provider: string, state: { favorite: boolean; pending: boolean; hidden: boolean }, projectPath: string) => Promise<unknown>;
+    resolveSessionProviderId: (projectName: string, sessionId: string, provider: string, projectPath: string) => Promise<string>;
+    db: Database.Database;
     getSessionModelState: (projectPath: string, sessionId: string) => Promise<unknown>;
     updateSessionModelState: (projectPath: string, sessionId: string, state: { model: string; reasoningEffort: string; thinkingLevel: string; thinkingMode: string }) => Promise<unknown>;
     broadcastSessionModelStateUpdated: (event: {
@@ -41,7 +45,7 @@ export interface SessionRouteDeps {
  * 注册会话相关 HTTP 路由。
  */
 export function registerSessionRoutes(deps: SessionRouteDeps): void {
-    const { app, authenticateToken, handleGetSessionMessages, searchChatHistory, heavyReadCoalescer, renameSession, updateSessionUiState, getSessionModelState, updateSessionModelState, broadcastSessionModelStateUpdated, normalizeManualProvider, createManualSessionDraft, finalizeManualSessionRoute, deleteSession, extractProjectDirectory, broadcastProjectListInvalidated } = deps;
+    const { app, authenticateToken, db, handleGetSessionMessages, searchChatHistory, heavyReadCoalescer, renameSession, updateSessionUiState, resolveSessionProviderId, getSessionModelState, updateSessionModelState, broadcastSessionModelStateUpdated, normalizeManualProvider, createManualSessionDraft, finalizeManualSessionRoute, deleteSession, extractProjectDirectory, broadcastProjectListInvalidated } = deps;
 
 const listLegacySessionsHandler = async (_req: any, res: any) => {
     res.status(410).json({ error: 'Claude sessions are no longer supported' });
@@ -91,6 +95,15 @@ const updateSessionUiStateHandler = async (req: any, res: any) => {
             pending: req.body?.pending === true,
             hidden: req.body?.hidden === true,
         }, projectPath);
+        if (req.body?.pendingExplicit === true) {
+            const providerSessionId = await resolveSessionProviderId(
+                req.params.projectName,
+                req.params.sessionId,
+                provider,
+                projectPath,
+            );
+            sessionAttentionDb.setManualPending(db, provider, providerSessionId, req.body?.pending === true);
+        }
         void broadcastProjectListInvalidated({
             reason: 'session-ui-state',
             changedProjectPath: projectPath || await extractProjectDirectory(req.params.projectName),

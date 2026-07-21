@@ -157,7 +157,10 @@ test('render snapshot uses viewport budget and only pages inside the reserve zon
   assert.match(chatInterface, /loadOlderRenderSnapshotHistory/);
   assert.match(chatInterface, /container\.scrollTop <= container\.clientHeight/);
   assert.match(chatInterface, /captureSessionScrollSnapshot/);
-  assert.match(chatInterface, /restoreSessionScrollTop/);
+  assert.match(chatInterface, /renderSnapshotUserInteractionRevisionRef/);
+  assert.match(chatInterface, /scrollRestoreRevision === renderSnapshotUserInteractionRevisionRef\.current/);
+  assert.match(chatInterface, /onWheel=\{\(event\) => handleRenderedSnapshotWheel/);
+  assert.match(chatInterface, /onTouchMove=\{handleRenderedSnapshotUserInteraction\}/);
   assert.match(chatInterface, /onTranscriptScroll=\{handleRenderedSnapshotScroll\}/);
   assert.doesNotMatch(chatInterface, /ignoreRenderedSnapshotHistoryScroll/);
   assert.match(chatInterface, /scrollContainerRef=\{renderedSnapshotScrollContainerRef\}/);

@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS provider_session_index (
     message_count INTEGER,
     message_count_known INTEGER DEFAULT 0,
     file_mtime_ms REAL DEFAULT 0,
+    activity_revision INTEGER NOT NULL DEFAULT 1,
     indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (provider, session_id)
 );
@@ -81,6 +82,21 @@ CREATE INDEX IF NOT EXISTS idx_provider_session_project_recent
     ON provider_session_index(provider, normalized_project_path, last_activity DESC);
 CREATE INDEX IF NOT EXISTS idx_provider_session_file
     ON provider_session_index(provider, file_path);
+
+-- Explicit user acknowledgement cursor for the cross-project attention board.
+CREATE TABLE IF NOT EXISTS session_attention_ack (
+    provider TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    handled_revision INTEGER NOT NULL DEFAULT 0,
+    manual_pending INTEGER NOT NULL DEFAULT 0,
+    legacy_pending_migrated INTEGER NOT NULL DEFAULT 0,
+    handled_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (provider, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_session_attention_recent
+    ON provider_session_index(last_activity DESC);
 
 -- Project sidebar read model for fast DB-backed /api/projects.
 CREATE TABLE IF NOT EXISTS project_index (

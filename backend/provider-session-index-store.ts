@@ -41,6 +41,7 @@ type ProviderSessionIndexRow = {
   last_activity: string;
   message_count: number | null;
   message_count_known: number;
+  manual_pending?: number;
 };
 
 const schemaReadyDbs = new WeakSet<object>();
@@ -120,6 +121,7 @@ function ensureProviderSessionIndexSchema(db: any): void {
       message_count INTEGER,
       message_count_known INTEGER DEFAULT 0,
       file_mtime_ms REAL DEFAULT 0,
+      activity_revision INTEGER NOT NULL DEFAULT 1,
       indexed_at TEXT DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (provider, session_id)
     );
@@ -127,6 +129,16 @@ function ensureProviderSessionIndexSchema(db: any): void {
       ON provider_session_index(provider, normalized_project_path, last_activity DESC);
     CREATE INDEX IF NOT EXISTS idx_provider_session_file
       ON provider_session_index(provider, file_path);
+    CREATE TABLE IF NOT EXISTS session_attention_ack (
+      provider TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      handled_revision INTEGER NOT NULL DEFAULT 0,
+      manual_pending INTEGER NOT NULL DEFAULT 0,
+      legacy_pending_migrated INTEGER NOT NULL DEFAULT 0,
+      handled_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (provider, session_id)
+    );
   `);
   const columns = db.prepare('PRAGMA table_info(provider_session_index)').all() as Array<{ name: string }>;
   const columnNames = new Set(columns.map((column) => column.name));
@@ -135,6 +147,17 @@ function ensureProviderSessionIndexSchema(db: any): void {
   }
   if (!columnNames.has('route_title')) {
     db.exec('ALTER TABLE provider_session_index ADD COLUMN route_title TEXT');
+  }
+  if (!columnNames.has('activity_revision')) {
+    db.exec('ALTER TABLE provider_session_index ADD COLUMN activity_revision INTEGER NOT NULL DEFAULT 1');
+  }
+  const ackColumns = db.prepare('PRAGMA table_info(session_attention_ack)').all() as Array<{ name: string }>;
+  if (!ackColumns.some((column) => column.name === 'legacy_pending_migrated')) {
+    db.exec(`
+      ALTER TABLE session_attention_ack
+        ADD COLUMN legacy_pending_migrated INTEGER NOT NULL DEFAULT 0;
+      UPDATE session_attention_ack SET legacy_pending_migrated = 1;
+    `);
   }
   schemaReadyDbs.add(db);
 }
@@ -169,6 +192,7 @@ function rowToSession(row: ProviderSessionIndexRow): Record<string, unknown> {
     filePath: row.file_path,
     provider: row.provider,
     __provider: row.provider,
+    pending: Number(row.manual_pending || 0) === 1,
   };
 }
 
@@ -210,8 +234,9 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
       message_count,
       message_count_known,
       file_mtime_ms,
+      activity_revision,
       indexed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
     ON CONFLICT(provider, session_id) DO UPDATE SET
       source_session_id = excluded.source_session_id,
       origin = COALESCE(excluded.origin, provider_session_index.origin),
@@ -228,6 +253,11 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
       last_activity = excluded.last_activity,
       message_count = excluded.message_count,
       message_count_known = excluded.message_count_known,
+      activity_revision = CASE
+        WHEN excluded.file_mtime_ms <> provider_session_index.file_mtime_ms
+          THEN provider_session_index.activity_revision + 1
+        ELSE provider_session_index.activity_revision
+      END,
       file_mtime_ms = excluded.file_mtime_ms,
       indexed_at = CURRENT_TIMESTAMP
   `).run(
@@ -266,25 +296,28 @@ function listProviderSessionsForProject(db: any, provider: string, projectPath: 
   }
   const rows = db.prepare(`
     SELECT
-      provider,
-      session_id,
-      source_session_id,
-      origin,
-      project_path,
-      summary,
-      title,
-      route_title,
-      model,
-      thread,
-      session_file_name,
-      file_path,
-      created_at,
-      last_activity,
-      message_count,
-      message_count_known
-    FROM provider_session_index
-    WHERE provider = ? AND normalized_project_path = ?
-    ORDER BY last_activity DESC
+      p.provider,
+      p.session_id,
+      p.source_session_id,
+      p.origin,
+      p.project_path,
+      p.summary,
+      p.title,
+      p.route_title,
+      p.model,
+      p.thread,
+      p.session_file_name,
+      p.file_path,
+      p.created_at,
+      p.last_activity,
+      p.message_count,
+      p.message_count_known,
+      COALESCE(a.manual_pending, 0) AS manual_pending
+    FROM provider_session_index p
+    LEFT JOIN session_attention_ack a
+      ON a.provider = p.provider AND a.session_id = p.session_id
+    WHERE p.provider = ? AND p.normalized_project_path = ?
+    ORDER BY p.last_activity DESC
     LIMIT ?
   `).all(provider, normalizedProjectPath, limit) as ProviderSessionIndexRow[];
   return rows.map(rowToSession);
@@ -360,6 +393,7 @@ function deleteProviderSessionFile(db: any, provider: string, filePath: string):
 }
 
 const providerSessionIndexDb = {
+  ensureSchema: ensureProviderSessionIndexSchema,
   upsert: upsertProviderSessionIndex,
   listForProject: listProviderSessionsForProject,
   getProjectPathForFile: getProviderSessionProjectPathForFile,

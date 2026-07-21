@@ -60,6 +60,44 @@ function getSessionActivityTimeMs(session: LooseRecord): number {
 }
 
 /**
+ * 判断路由标题是否仍是新建手动会话时生成的占位值。
+ */
+function isGeneratedManualRouteTitle(value: unknown, routeSession: LooseRecord): boolean {
+  /**
+   * PURPOSE: Distinguish generated cN labels from user renames so provider
+   * transcript titles can repair TUI sessions without overwriting custom names.
+   */
+  const title = String(value || '').trim();
+  const routeIndex = Number(routeSession?.routeIndex);
+  if (!title) {
+    return true;
+  }
+  if (title === 'New Session') {
+    return true;
+  }
+  return Number.isInteger(routeIndex) && routeIndex > 0 && (
+    title === `会话${routeIndex}` || title === `c${routeIndex}`
+  );
+}
+
+/**
+ * 保留自定义路由标题，但让 Provider 首条用户消息替换生成占位值。
+ */
+function mergeSessionTitle(
+  providerValue: unknown,
+  routeValue: unknown,
+  routeSession: LooseRecord,
+): unknown {
+  /**
+   * PURPOSE: Route metadata owns explicit renames; provider transcripts own the
+   * title when terminal-created routes never left their generated placeholder.
+   */
+  return isGeneratedManualRouteTitle(routeValue, routeSession)
+    ? (providerValue || routeValue)
+    : routeValue;
+}
+
+/**
  * Merge one persisted cN route with the authoritative provider header.
  */
 function mergeRoutedProviderSession(providerSession: LooseRecord, routeSession: LooseRecord): LooseRecord {
@@ -71,6 +109,9 @@ function mergeRoutedProviderSession(providerSession: LooseRecord, routeSession: 
   return {
     ...providerSession,
     ...routeSession,
+    title: mergeSessionTitle(providerSession.title, routeSession.title, routeSession),
+    routeTitle: mergeSessionTitle(providerSession.routeTitle, routeSession.routeTitle, routeSession),
+    summary: mergeSessionTitle(providerSession.summary, routeSession.summary, routeSession),
     origin: providerSession.origin === 'workflow'
       ? 'workflow'
       : (routeSession.origin || providerSession.origin),

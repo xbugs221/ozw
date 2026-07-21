@@ -153,7 +153,7 @@ type UseProjectRouteSelectionSyncArgs = {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
   selectedWorkflow: ProjectWorkflow | null;
-  setSelectedProject: (project: Project) => void;
+  setSelectedProject: (project: Project | null) => void;
   setSelectedSession: (session: ProjectSession | null) => void;
   setSelectedWorkflow: (workflow: ProjectWorkflow | null) => void;
 };
@@ -213,6 +213,7 @@ export function useProjectRouteSelectionSync({
     const resolvedProject = resolvedSelection.project;
     if (!resolvedProject) {
       if (normalizePathname(locationPathname) === '/') {
+        if (selectedProject) setSelectedProject(null);
         if (selectedWorkflow) setSelectedWorkflow(null);
         if (selectedSession) setSelectedSession(null);
       }

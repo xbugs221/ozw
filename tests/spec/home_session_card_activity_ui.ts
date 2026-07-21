@@ -187,23 +187,35 @@ test('project-home cards expose business sort choices while sidebar stays naviga
   assert.match(sidebarProjectItemSource, /\{fullProjectLabel\}/);
 });
 
-test('project-home manual sessions collapse after ten cards and show request-prefix titles', async () => {
+test('project-home manual sessions collapse after five rows and keep request-prefix labels', async () => {
   /**
    * The project homepage should stay scannable for busy repos: render the first
-   * ten manual session cards, fold the rest behind an explicit button, and use
-   * the first-request prefix as the visible card title.
+   * five manual session rows, fold the rest behind an explicit button, and keep
+   * the first-request prefix as the accessible row label.
    */
   const overviewSource = await readFile(
     new URL('../../frontend/components/main-content/project-overview/ProjectOverviewPanelRuntime.impl.tsx', import.meta.url),
     'utf8',
   );
 
-  assert.match(overviewSource, /DEFAULT_VISIBLE_MANUAL_SESSION_CARDS = 10/);
+  assert.match(overviewSource, /DEFAULT_VISIBLE_MANUAL_SESSION_CARDS = 5/);
   assert.match(overviewSource, /visibleSessions\.slice\(0, DEFAULT_VISIBLE_MANUAL_SESSION_CARDS\)/);
   assert.match(overviewSource, /显示更多手动会话/);
   assert.match(overviewSource, /收起手动会话/);
-  assert.match(overviewSource, /getManualSessionCardTitle\(sessionView\.sessionName\)/);
-  assert.match(overviewSource, /Array\.from\(normalizedName\)\.slice\(0, 20\)\.join\(''\)/);
+  assert.match(overviewSource, /getManualSessionCardTitle\(session, sessionView\.sessionName\)/);
+  assert.match(overviewSource, /className="flex flex-col gap-2"/);
+  assert.match(overviewSource, /aria-label=\{sessionCardTitle\}/);
+  assert.match(overviewSource, /justify-between gap-3/);
+  assert.match(overviewSource, /session\.label, session\.title, session\.routeTitle, session\.summary, session\.name/);
+  assert.match(overviewSource, /preferredTitle\?\.trim\(\) \|\| fallbackName\.trim\(\) \|\| fallbackName/);
+  assert.match(overviewSource, /className="min-w-0 flex-1 truncate text-sm text-foreground"/);
+  assert.match(overviewSource, /title=\{sessionCardTitle\}/);
+  assert.doesNotMatch(overviewSource, /Array\.from\(normalizedName\)\.slice\(0, 20\)/);
+  const timePosition = overviewSource.indexOf('data-slot="manual-session-time"');
+  const titlePosition = overviewSource.indexOf('data-slot="manual-session-title"');
+  const routeNumberPosition = overviewSource.indexOf('data-slot="manual-session-route-number"');
+  assert.ok(timePosition > 0 && timePosition < titlePosition);
+  assert.ok(titlePosition < routeNumberPosition);
 });
 
 test('manual session cards share compact route number metadata', async () => {
@@ -224,7 +236,6 @@ test('manual session cards share compact route number metadata', async () => {
   assert.equal(getSessionRouteNumber({ id: 'codex-provider-id' }), null);
   assert.match(overviewSource, /getSessionRouteNumber\(session\)/);
   assert.match(workspaceNavSource, /getSessionRouteNumber\(session\)/);
-  assert.match(overviewSource, /<SessionProviderLogo[\s\S]*className="h-3\.5 w-3\.5 shrink-0 text-muted-foreground"/);
   assert.match(workspaceNavSource, /<SessionProviderLogo[\s\S]*className="h-3\.5 w-3\.5 shrink-0 text-muted-foreground"/);
 });
 

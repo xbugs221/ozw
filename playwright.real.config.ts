@@ -9,6 +9,7 @@ export default defineConfig({
   testMatch: [
     'manual-session-identity-real.spec.ts',
     'oz-flow-session-render-real.spec.ts',
+    'render-history-scroll-interaction-real.spec.ts',
   ],
   timeout: 30_000,
   fullyParallel: false,

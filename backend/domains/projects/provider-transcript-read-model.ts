@@ -119,6 +119,7 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
   const firstUserTitle = firstUserMessage ? summarizeText(firstUserMessage) : '';
   const firstUserRouteTitle = firstUserMessage ? summarizeText(firstUserMessage, 20, false) : '';
   const fallbackTitle = firstUserTitle || 'Codex Session';
+  const stat = await fs.stat(filePath).catch(() => null);
   return {
     id: thread,
     provider: 'codex',
@@ -134,6 +135,7 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     messageCount,
     messageCountKnown: true,
     filePath,
+    fileMtimeMs: stat?.mtimeMs || 0,
     sessionFileName,
     sourceSessionId,
     origin: origin || undefined,
@@ -194,6 +196,7 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
   const id = String(firstRecord.id || sessionFileName.replace(/\.jsonl$/, ''));
   const timestamp = String(firstRecord.timestamp || lastTimestamp || new Date().toISOString());
   const activityTimestamp = lastTimestamp || timestamp;
+  const stat = await fs.stat(filePath).catch(() => null);
   return {
     id,
     provider: 'pi',
@@ -207,6 +210,7 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
     messageCount,
     messageCountKnown: true,
     filePath,
+    fileMtimeMs: stat?.mtimeMs || 0,
     sessionFileName,
   };
 }
@@ -220,10 +224,11 @@ export async function parseClaudeSessionHeader(filePath = ''): Promise<LooseReco
   if (!first) return null;
   const stat = await fs.stat(filePath).catch(() => null);
   const timestamp = String(first.timestamp || (stat ? new Date(stat.mtimeMs).toISOString() : new Date().toISOString()));
+  const lastActivity = stat ? new Date(stat.mtimeMs).toISOString() : timestamp;
   const sessionId = String(first.sessionId);
   const firstContent = typeof first.message?.content === 'string' ? first.message.content : '';
   const title = firstContent.trim().slice(0, 80) || 'Claude Session';
-  return { id: sessionId, provider: 'claude', __provider: 'claude', sourceSessionId: sessionId, cwd: String(first.cwd), projectPath: String(first.cwd), createdAt: timestamp, lastActivity: timestamp, updated_at: timestamp, summary: title, title, routeTitle: title, messageCount: null, messageCountKnown: false, filePath, sessionFileName: path.basename(filePath) };
+  return { id: sessionId, provider: 'claude', __provider: 'claude', sourceSessionId: sessionId, cwd: String(first.cwd), projectPath: String(first.cwd), createdAt: timestamp, lastActivity, updated_at: lastActivity, summary: title, title, routeTitle: title, messageCount: null, messageCountKnown: false, filePath, fileMtimeMs: stat?.mtimeMs || 0, sessionFileName: path.basename(filePath) };
 }
 
 

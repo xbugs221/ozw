@@ -271,8 +271,10 @@ function ChatInterface({
   const renderSnapshotSearchFailureTargetRef = useRef<string | null>(null);
   const renderSnapshotGenerationRef = useRef(0);
   const renderSnapshotHistoryRawLineBoundaryRef = useRef<number | null>(null);
+  const renderSnapshotUserInteractionRevisionRef = useRef(0);
   const lastHandledRenderSnapshotRequestIdRef = useRef(0);
   const pendingRenderSnapshotScrollRestoreRef = useRef<ReturnType<typeof captureSessionScrollSnapshot>>(null);
+  const pendingRenderSnapshotScrollRestoreRevisionRef = useRef<number | null>(null);
   const [workflowTurnOutcomes, setWorkflowTurnOutcomes] = useState<Record<string, 'completed' | 'failed'>>({});
   const [isFollowingLatest, setIsFollowingLatest] = useState(false);
   const [searchHighlightRetry, setSearchHighlightRetry] = useState(0);
@@ -387,6 +389,8 @@ function ChatInterface({
     renderSnapshotCalibrationCountsRef.current.clear();
     renderSnapshotSearchFailureTargetRef.current = null;
     pendingRenderSnapshotScrollRestoreRef.current = null;
+    pendingRenderSnapshotScrollRestoreRevisionRef.current = null;
+    renderSnapshotUserInteractionRevisionRef.current = 0;
     setRenderSnapshotState(createInitialRenderSnapshotState({ tuiSessionKey: chatTuiSessionKey }));
   }, [chatTuiSessionKey]);
 
@@ -772,8 +776,14 @@ function ChatInterface({
     if (!snapshot || !container) {
       return;
     }
-    container.scrollTop = snapshot.top;
+    if (
+      pendingRenderSnapshotScrollRestoreRevisionRef.current
+      === renderSnapshotUserInteractionRevisionRef.current
+    ) {
+      container.scrollTop = snapshot.top;
+    }
     pendingRenderSnapshotScrollRestoreRef.current = null;
+    pendingRenderSnapshotScrollRestoreRevisionRef.current = null;
   }, [renderSnapshotState.historyRevision]);
 
   const loadOlderRenderSnapshotHistory = useCallback(async (container: HTMLDivElement) => {
@@ -791,6 +801,7 @@ function ChatInterface({
     const baselineScrollHeight = container.scrollHeight;
     const targetAddedHeight = Math.max(1, container.clientHeight);
     const logicalPageScrollSnapshot = captureSessionScrollSnapshot(container);
+    const logicalPageInteractionRevision = renderSnapshotUserInteractionRevisionRef.current;
     let nextOffset = current.nextHistoryOffset;
     let hasMoreRawHistory: boolean = current.hasMoreHistory;
     let bufferedMessages = [...renderSnapshotBufferedOlderRef.current];
@@ -828,7 +839,9 @@ function ChatInterface({
         if (logicalPage.length === 0) break;
 
         const scrollSnapshot = captureSessionScrollSnapshot(container);
+        const scrollRestoreRevision = renderSnapshotUserInteractionRevisionRef.current;
         pendingRenderSnapshotScrollRestoreRef.current = scrollSnapshot;
+        pendingRenderSnapshotScrollRestoreRevisionRef.current = scrollRestoreRevision;
         setRenderSnapshotState((previous) => ({
           ...prependRenderSnapshotHistory(previous, {
             messages: logicalPage,
@@ -839,10 +852,15 @@ function ChatInterface({
         }));
         await waitForRenderSnapshotLayout();
         if (generation !== renderSnapshotGenerationRef.current) return;
-        if (scrollSnapshot) {
+        if (
+          scrollSnapshot
+          && scrollRestoreRevision === renderSnapshotUserInteractionRevisionRef.current
+        ) {
           await waitForStableRenderSnapshotHeight(container, scrollSnapshot.height);
           if (generation !== renderSnapshotGenerationRef.current) return;
-          container.scrollTop = scrollSnapshot.top;
+          if (scrollRestoreRevision === renderSnapshotUserInteractionRevisionRef.current) {
+            container.scrollTop = scrollSnapshot.top;
+          }
         }
       }
 
@@ -855,10 +873,15 @@ function ChatInterface({
         }),
         isLoadingHistory: false,
       }));
-      if (logicalPageScrollSnapshot) {
+      if (
+        logicalPageScrollSnapshot
+        && logicalPageInteractionRevision === renderSnapshotUserInteractionRevisionRef.current
+      ) {
         await waitForStableRenderSnapshotHeight(container, logicalPageScrollSnapshot.height);
         if (generation !== renderSnapshotGenerationRef.current) return;
-        container.scrollTop = logicalPageScrollSnapshot.top;
+        if (logicalPageInteractionRevision === renderSnapshotUserInteractionRevisionRef.current) {
+          container.scrollTop = logicalPageScrollSnapshot.top;
+        }
       }
     } catch (error) {
       console.error('Error loading older render snapshot history:', error);
@@ -886,6 +909,7 @@ function ChatInterface({
 
   const handleRenderedSnapshotWheel = useCallback((container: HTMLDivElement, deltaY: number) => {
     /** Treat an upward wheel inside the reserve as explicit user paging intent. */
+    renderSnapshotUserInteractionRevisionRef.current += 1;
     if (
       renderSnapshotBudgetPreparingRef.current
       || renderSnapshotLoadingRef.current
@@ -897,6 +921,18 @@ function ChatInterface({
     renderSnapshotTopLoadLockRef.current = true;
     void loadOlderRenderSnapshotHistory(container);
   }, [loadOlderRenderSnapshotHistory]);
+
+  const handleRenderedSnapshotUserInteraction = useCallback(() => {
+    /** Invalidate any stale scroll restore as soon as the reader acts again. */
+    renderSnapshotUserInteractionRevisionRef.current += 1;
+  }, []);
+
+  const handleRenderedSnapshotKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    /** Only navigation keys express a new transcript scroll intent. */
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+      handleRenderedSnapshotUserInteraction();
+    }
+  }, [handleRenderedSnapshotUserInteraction]);
 
   useEffect(() => {
     /** Refill the two-page budget when the Render viewport grows. */
@@ -1722,6 +1758,10 @@ function ChatInterface({
             scrollContainerRef={renderedSnapshotScrollContainerRef}
             onTranscriptScroll={handleRenderedSnapshotScroll}
             onWheel={(event) => handleRenderedSnapshotWheel(event.currentTarget, event.deltaY)}
+            onTouchStart={handleRenderedSnapshotUserInteraction}
+            onTouchMove={handleRenderedSnapshotUserInteraction}
+            onKeyDown={handleRenderedSnapshotKeyDown}
+            onPointerDown={handleRenderedSnapshotUserInteraction}
             isLoadingSessionMessages={false}
             sessionMessagesError={sessionMessagesError}
             chatMessages={renderSnapshotState.snapshotMessages as any[]}

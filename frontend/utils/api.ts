@@ -107,6 +107,18 @@ export const api = {
 
   // Protected endpoints
   projects: (): Promise<Response> => authenticatedFetch('/api/projects'),
+  sessionAttention: (limit = 100): Promise<Response> =>
+    authenticatedFetch(`/api/session-attention?limit=${Math.min(100, Math.max(1, Math.floor(limit)))}`),
+  markSessionAttentionHandled: (items: Array<{ provider: string; sessionId: string; observedRevision: number }>): Promise<Response> =>
+    authenticatedFetch('/api/session-attention/handled', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  setSessionAttentionPending: (provider: string, sessionId: string, pending: boolean): Promise<Response> =>
+    authenticatedFetch(`/api/session-attention/${encodeRouteSegment(provider)}/${encodeRouteSegment(sessionId)}/pending`, {
+      method: 'PUT',
+      body: JSON.stringify({ pending }),
+    }),
   projectOverview: (projectName: string, projectPath?: string): Promise<Response> => {
     const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
     return authenticatedFetch(`${projectApiPath(projectName)}/overview${query}`);

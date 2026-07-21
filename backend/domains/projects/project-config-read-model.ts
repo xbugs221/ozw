@@ -300,7 +300,7 @@ export async function updateSessionUiState(
   const projectPath = projectPathOverride || await resolveProjectPathForConfigName(projectName);
   const config = await loadProjectConfig(projectPath);
   const normalizedProvider = provider || 'codex';
-  const nextUi = normalizeSessionUiState(uiState);
+  const nextUi = normalizeSessionUiState({ ...uiState, pending: false });
   const record = findProjectChatRecord(config, sessionId, normalizedProvider);
   if (record?.scope === 'chat') {
     config.chat[record.routeIndex] = {
@@ -318,6 +318,22 @@ export async function updateSessionUiState(
   }
   await saveProjectConfig(config, projectPath);
   return nextUi;
+}
+
+/**
+ * Resolve a public cN or native session id to the provider identity persisted in SQLite.
+ */
+export async function resolveSessionProviderId(
+  projectName = '',
+  sessionId = '',
+  provider = 'codex',
+  projectPathOverride = '',
+): Promise<string> {
+  /** PURPOSE: Reuse project chat bindings before writing the cross-project attention cursor. */
+  const projectPath = projectPathOverride || await resolveProjectPathForConfigName(projectName);
+  const config = await loadProjectConfig(projectPath);
+  const record = findProjectChatRecord(config, sessionId, provider || 'codex');
+  return String(record?.record?.providerSessionId || record?.record?.sessionId || sessionId || '').trim();
 }
 
 /**

@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 import type {
   Dispatch,
   KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
   RefObject,
   SetStateAction,
   TouchEvent as ReactTouchEvent,
@@ -62,6 +63,7 @@ interface ChatMessagesPaneProps {
   onTouchStart?: (event: ReactTouchEvent<HTMLDivElement>) => void;
   onTouchMove?: (event: ReactTouchEvent<HTMLDivElement>) => void;
   onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  onPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
   isLoadingSessionMessages: boolean;
   sessionMessagesError: string | null;
   chatMessages: ChatMessage[];
@@ -106,6 +108,7 @@ export default function ChatMessagesPane({
   onTouchStart,
   onTouchMove,
   onKeyDown,
+  onPointerDown,
   isLoadingSessionMessages,
   sessionMessagesError,
   chatMessages,
@@ -182,6 +185,7 @@ export default function ChatMessagesPane({
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onKeyDown={onKeyDown}
+      onPointerDown={onPointerDown}
       tabIndex={0}
       className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-0 py-3 sm:p-4"
     >

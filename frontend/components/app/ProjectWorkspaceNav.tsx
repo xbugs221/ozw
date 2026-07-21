@@ -239,6 +239,7 @@ export default function ProjectWorkspaceNav({
       provider: session.__provider,
       favorite: session.favorite === true,
       pending: session.pending !== true,
+      pendingExplicit: true,
       hidden: session.hidden === true,
     });
     await refreshProject();

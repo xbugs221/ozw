@@ -53,6 +53,7 @@ import {
     getCodexSessionMessages,
     searchChatHistory,
     renameProject,
+    resolveSessionProviderId,
     updateSessionUiState,
     getSessionModelState,
     updateSessionModelState,
@@ -104,7 +105,7 @@ import projectsRoutes, { WORKSPACES_ROOT, validateWorkspacePath } from '../route
 import cliAuthRoutes, { checkCodexCredentials } from '../routes/cli-auth.js';
 import userRoutes from '../routes/user.js';
 import codexRoutes from '../routes/codex.js';
-import { initializeDatabase } from '../database/db.js';
+import { db, initializeDatabase } from '../database/db.js';
 import { validateApiKey, authenticateToken } from '../middleware/auth.js';
 import {
     buildMutationResponse,
@@ -923,7 +924,7 @@ registerStaticAssets({ app, express, path, PKG_ROOT });
 // Frontend now uses window.location for WebSocket URLs
 
 registerBackendHttpRoutes({
-    app, authenticateToken, path, fs, fsPromises, WORKSPACES_ROOT, validateWorkspacePath,
+    app, authenticateToken, db, path, fs, fsPromises, WORKSPACES_ROOT, validateWorkspacePath,
     resolveProjectRootWithHint, resolveReadableProjectPath, resolveProjectPath, buildMutationResponse,
     joinProjectChildPath, sanitizeEntryName, sanitizeUploadRelativePath, createDirectoryArchive,
     sendDownload, withLoggedFallback, classifyProjectFile, TEXT_SAMPLE_BYTES, mime,
@@ -934,7 +935,7 @@ registerBackendHttpRoutes({
     extractProjectDirectory, listProjectWorkflows, summarizeWorkflowForProjectList, getProjectWorkflow,
     createProjectWorkflow, listProjectAdoptableOpenSpecChanges, resumeWorkflowRun, abortWorkflowRun,
     findProjectByName, handleGetSessionMessages, searchChatHistory, renameProject, renameSession,
-    updateSessionUiState, getSessionModelState, updateSessionModelState, broadcastSessionModelStateUpdated,
+    updateSessionUiState, resolveSessionProviderId, getSessionModelState, updateSessionModelState, broadcastSessionModelStateUpdated,
     normalizeManualProvider, createManualSessionDraft, finalizeManualSessionRoute, getUsageRemaining,
     deleteSession, broadcastProjectListInvalidated, deleteProject, addProjectManually, fetch,
     CHAT_UPLOAD_ROOT, sanitizeFilename, persistChatUploads, os, getCodexSessionTokenUsage,

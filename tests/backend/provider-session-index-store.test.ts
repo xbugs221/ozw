@@ -131,3 +131,38 @@ test('provider session index locates Claude transcript by session identity', () 
     db.close();
   }
 });
+
+test('provider session index only advances activity revision when file fingerprint changes', () => {
+  /** PURPOSE: Repeated watcher and startup backfill reads must not create false pending activity. */
+  const db = new Database(':memory:');
+  try {
+    const baseRecord = {
+      provider: 'codex',
+      id: 'codex-revision-session',
+      projectPath: '/tmp/ozw-provider-index-revision',
+      title: 'revision session',
+      filePath: '/tmp/codex-revision-session.jsonl',
+      createdAt: '2026-07-21T00:00:00.000Z',
+      lastActivity: '2026-07-21T00:00:01.000Z',
+      fileMtimeMs: 1_750_000_000_001,
+    };
+    providerSessionIndexDb.upsert(db, baseRecord);
+    providerSessionIndexDb.upsert(db, baseRecord);
+    assert.equal(
+      db.prepare('SELECT activity_revision FROM provider_session_index').get().activity_revision,
+      1,
+    );
+
+    providerSessionIndexDb.upsert(db, {
+      ...baseRecord,
+      lastActivity: '2026-07-21T00:00:02.000Z',
+      fileMtimeMs: 1_750_000_000_002,
+    });
+    assert.equal(
+      db.prepare('SELECT activity_revision FROM provider_session_index').get().activity_revision,
+      2,
+    );
+  } finally {
+    db.close();
+  }
+});

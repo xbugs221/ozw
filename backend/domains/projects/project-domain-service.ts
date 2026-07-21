@@ -95,5 +95,6 @@ export {
   renameSession,
 } from './project-rename-service.js';
 export {
+  resolveSessionProviderId,
   updateSessionUiState,
 } from './project-config-read-model.js';

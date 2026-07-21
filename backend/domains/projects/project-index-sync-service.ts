@@ -26,6 +26,7 @@ import {
   parseClaudeSessionHeader,
 } from './provider-transcript-read-model.js';
 import { providerSessionIndexDb } from '../../provider-session-index-store.js';
+import { sessionAttentionDb } from '../../session-attention-store.js';
 import { selectProviderBackfillFiles } from './project-index-backfill-selection.js';
 
 const BACKFILL_FILE_LIMIT = (() => {
@@ -274,6 +275,24 @@ function upsertProviderSessionIndexFromHeader(provider: 'codex' | 'pi' | 'claude
 }
 
 /**
+ * Migrate a legacy project-chat pending flag into the SQLite attention cursor.
+ */
+async function migrateLegacyPendingSession(provider: 'codex' | 'pi' | 'claude', session: LooseRecord | null | undefined): Promise<void> {
+  /** PURPOSE: Preserve existing user intent once, while all subsequent writes use the database boundary. */
+  const projectPath = String(session?.projectPath || session?.cwd || '').trim();
+  const sessionId = String(session?.id || '').trim();
+  if (!projectPath || !sessionId) return;
+  const config = await loadProjectConfig(projectPath);
+  const chatRecords = Object.values(isPlainRecord(config.chat) ? config.chat : {}).filter(isPlainRecord);
+  const legacyPending = chatRecords.some((record) => (
+    String(record.provider || 'codex') === provider
+    && (String(record.providerSessionId || '') === sessionId || String(record.sessionId || '') === sessionId)
+    && record.ui?.pending === true
+  ));
+  sessionAttentionDb.migrateLegacyPending(db, provider, sessionId, legacyPending);
+}
+
+/**
  * Upsert manually configured projects into the DB read model.
  */
 async function backfillManualProjects(config: LooseRecord): Promise<number> {
@@ -334,6 +353,7 @@ export async function backfillProjectIndex(): Promise<{ manualCount: number; pro
         ? await parseCodexSessionHeader(filePath)
         : provider === 'pi' ? await parsePiSessionHeader(filePath) : await parseClaudeSessionHeader(filePath);
       upsertProviderSessionIndexFromHeader(provider, session);
+      await migrateLegacyPendingSession(provider, session);
       const projectPath = await upsertProjectIndexFromProviderSession(session);
       if (projectPath) {
         providerCount += 1;

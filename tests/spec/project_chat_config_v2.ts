@@ -170,7 +170,7 @@ test('Scenario: v2 会话 UI 状态按 provider 和项目路径写入并回读',
     const persisted = await readProjectConf(projectPath);
     assert.deepEqual(persisted.chat['1'].ui, { favorite: true, hidden: true });
     assert.equal(persisted.chat['1'].provider, 'codex');
-    assert.deepEqual(persisted.chat['2'].ui, { pending: true });
+    assert.deepEqual(persisted.chat['2'].ui, {}, 'pending 已迁移到 SQLite，不再写入项目配置');
     assert.equal(persisted.chat['2'].provider, 'pi');
     assert.equal('sessionUiStateByPath' in persisted, false);
   });

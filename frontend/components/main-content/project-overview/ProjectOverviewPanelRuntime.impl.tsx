@@ -33,7 +33,6 @@ import {
   type WorkflowOverviewGroup,
 } from '../../../utils/workflowGroups';
 import { isWorkflowOwnedSession } from '../../../utils/workflowSessions';
-import SessionProviderLogo from '../../llm-logo-provider/SessionProviderLogo';
 import SessionActionIconMenu from '../../session-actions/SessionActionIconMenu';
 import WorkflowStageProgress from '../../workflow/WorkflowStageProgress';
 import WorkflowActionDialog from '../../workflow/WorkflowActionDialog';
@@ -51,7 +50,7 @@ import {
 
 const ITEM_ACTION_LONG_PRESS_MS = 450;
 const DEFAULT_VISIBLE_WORKFLOW_GROUPS = 1;
-const DEFAULT_VISIBLE_MANUAL_SESSION_CARDS = 10;
+const DEFAULT_VISIBLE_MANUAL_SESSION_CARDS = 5;
 type WorkflowCardSortMode = 'created' | 'updated' | 'title' | 'provider';
 
 const normalizeActionSessionProvider = (provider: unknown): SessionProvider => (
@@ -132,11 +131,16 @@ function getResolvedSessionSelectionKey(
 }
 
 /**
- * Keep manual session card titles focused on the user's initial request.
+ * Preserve the complete manual-session title so the row can use all available width.
  */
-function getManualSessionCardTitle(sessionName: string): string {
-  const normalizedName = sessionName.trim();
-  return Array.from(normalizedName).slice(0, 20).join('') || sessionName;
+function getManualSessionCardTitle(session: ProjectSession, fallbackName: string): string {
+  /**
+   * PURPOSE: Project overview rows prefer the full title over the compact
+   * routeTitle; CSS truncation should be the only width-dependent shortening.
+   */
+  const preferredTitle = [session.label, session.title, session.routeTitle, session.summary, session.name]
+    .find((value) => typeof value === 'string' && value.trim()) as string | undefined;
+  return preferredTitle?.trim() || fallbackName.trim() || fallbackName;
 }
 
 /**
@@ -818,7 +822,7 @@ export default function ProjectOverviewPanel({
         hidden: nextState.hidden,
       },
     }));
-    void api.updateSessionUiState(sessionProjectName, sessionId, nextState);
+    void api.updateSessionUiState(sessionProjectName, sessionId, { ...nextState, pendingExplicit: true });
     closeActionMenu();
   };
 
@@ -897,6 +901,7 @@ export default function ProjectOverviewPanel({
           projectPath: projectConfigPath,
           favorite: nextState.favorite ?? session.favorite === true,
           pending: nextState.pending ?? session.pending === true,
+          ...(nextState.pending !== undefined ? { pendingExplicit: true } : {}),
           hidden: nextState.hidden ?? session.hidden === true,
         },
       );
@@ -1210,15 +1215,16 @@ export default function ProjectOverviewPanel({
                   )}
                 </div>
               )}
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+              <div className="flex flex-col gap-2">
                 {visibleSessions.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-border px-4 py-6 text-sm text-muted-foreground sm:col-span-2 lg:col-span-4 xl:col-span-5">
+                  <div className="rounded-md border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
                     {t('sessions.noSessions')}
                   </div>
                 ) : (
                   displayedSessions.map((session) => {
                     const sessionView = createSessionViewModel(session, currentTime, t);
-                    const sessionCardTitle = getManualSessionCardTitle(sessionView.sessionName);
+                    const sessionCardTitle = getManualSessionCardTitle(session, sessionView.sessionName);
+                    const routeNumber = getSessionRouteNumber(session);
                     const isSelected = selectedSession?.id === session.id;
                     const isBatchSelected = selectedSessionKeys.has(getResolvedSessionSelectionKey(session, project.name));
                     const sessionProjectName = session.__projectName || project.name;
@@ -1270,50 +1276,45 @@ export default function ProjectOverviewPanel({
                         <button
                           type="button"
                           aria-pressed={isSessionSelectionMode ? isBatchSelected : undefined}
+                          aria-label={sessionCardTitle}
                           data-testid="project-overview-session-card"
                           data-provider={session.__provider}
                           className={[
-                            'flex h-full w-full min-w-0 flex-col items-start gap-1.5 px-3 py-2.5 text-left',
+                            'flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left',
                             isSessionSelectionMode ? 'pl-10' : '',
                           ].join(' ')}
                           onClick={(event) => handleSessionCardClick(event, session)}
                         >
-                          <span className="w-full min-w-0 truncate text-sm font-medium text-foreground">
-                            {sessionCardTitle}
+                          <span
+                            data-slot="manual-session-time"
+                            className="shrink-0 text-xs text-muted-foreground"
+                          >
+                            {sessionView.sessionTime
+                              ? formatTimeAgo(sessionView.sessionTime, currentTime, t)
+                              : '未知时间'}
                           </span>
-                          <div className="flex w-full min-w-0 items-center gap-1.5 text-[11px] leading-none text-muted-foreground">
+                          <span className="flex min-w-0 flex-1 items-center gap-2">
                             {hasUnreadActivity && (
                               <span
                                 className="inline-flex h-2 w-2 shrink-0 rounded-full bg-yellow-400 shadow-sm"
                                 title="有未读新消息"
                               />
                             )}
-                            {(() => {
-                              const routeNumber = getSessionRouteNumber(session);
-                              return routeNumber ? (
-                                <span className="shrink-0 font-medium text-muted-foreground">
-                                  #{routeNumber}
-                                </span>
-                              ) : null;
-                            })()}
-                            <span className="min-w-0 truncate">
-                              {sessionView.sessionTime
-                                ? formatTimeAgo(sessionView.sessionTime, currentTime, t)
-                                : '未知时间'}
+                            <span
+                              data-slot="manual-session-title"
+                              className="min-w-0 flex-1 truncate text-sm text-foreground"
+                              title={sessionCardTitle}
+                            >
+                              {sessionCardTitle}
                             </span>
-                            <SessionProviderLogo
-                              provider={session.__provider}
-                              model={session.model || null}
-                              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                            />
-                            {session.favorite === true && (
-                              <Star className="h-3 w-3 shrink-0 fill-current text-yellow-500" />
-                            )}
-                            {session.pending === true && (
-                              <Clock className="h-3 w-3 shrink-0 text-amber-500" />
-                            )}
-                          </div>
-                      </button>
+                          </span>
+                          <span
+                            data-slot="manual-session-route-number"
+                            className="shrink-0 text-sm font-medium text-foreground"
+                          >
+                            {routeNumber ? `#${routeNumber}` : '未编号'}
+                          </span>
+                        </button>
                     </div>
                   );
                 })

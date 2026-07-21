@@ -303,11 +303,6 @@ export function useProjectsState({
       setSelectedProject(mergeProjectSummary(selectedProject, refreshedProject));
     }
   }, [projects, selectedProject]);
-  useEffect(() => {
-    if (!isLoadingProjects && projects.length === 1 && !selectedProject && locationPathname === '/') {
-      setSelectedProject(projects[0]);
-    }
-  }, [isLoadingProjects, locationPathname, projects, selectedProject]);
   useProjectsRealtimeReducers({
     activeSessions,
     fetchProjectOverview,

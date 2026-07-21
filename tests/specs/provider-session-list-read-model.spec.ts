@@ -218,6 +218,73 @@ test('Provider 权威来源覆盖旧 cN 路由的空来源并隐藏子代理', (
   assert.deepEqual(output.map((session) => session.id), ['top-level-parent']);
 });
 
+test('终端手动会话的 Provider 首条请求替换 cN 占位标题', () => {
+  /**
+   * PURPOSE: Reproduce a Codex TUI route that was bound after creation but did
+   * not pass through the WebSocket chat command title update.
+   */
+  const firstRequest = '前端的手动会话列表请改成纵向平铺，并保留会话标题';
+  const output = buildProviderSessionListReadModel({
+    provider: 'codex',
+    providerSessions: [{
+      id: 'provider-session-479',
+      title: firstRequest,
+      routeTitle: Array.from(firstRequest).slice(0, 20).join(''),
+      summary: 'Codex Session',
+      lastActivity: '2026-07-21T07:28:34.034Z',
+    }],
+    manualDrafts: [{
+      id: 'provider-session-479',
+      routeIndex: 479,
+      provider: 'codex',
+      providerSessionId: 'provider-session-479',
+      origin: 'manual',
+      title: '会话479',
+      routeTitle: '会话479',
+      summary: '会话479',
+    }],
+    excludeWorkflowChildSessions: true,
+    includeHidden: true,
+  });
+
+  assert.equal(output.length, 1);
+  assert.equal(output[0].title, firstRequest);
+  assert.equal(output[0].routeTitle, Array.from(firstRequest).slice(0, 20).join(''));
+  assert.equal(output[0].summary, 'Codex Session');
+  assert.equal(output[0].routeIndex, 479);
+});
+
+test('终端手动会话保留用户自定义标题', () => {
+  /**
+   * PURPOSE: Provider title repair must never replace a route title explicitly
+   * chosen by the user.
+   */
+  const output = buildProviderSessionListReadModel({
+    provider: 'codex',
+    providerSessions: [{
+      id: 'provider-session-custom',
+      title: 'Provider 首条请求',
+      routeTitle: 'Provider 首条请求',
+      summary: 'Codex Session',
+    }],
+    manualDrafts: [{
+      id: 'provider-session-custom',
+      routeIndex: 480,
+      provider: 'codex',
+      providerSessionId: 'provider-session-custom',
+      title: '我设置的标题',
+      routeTitle: '我设置的标题',
+      summary: '我设置的标题',
+    }],
+    excludeWorkflowChildSessions: true,
+    includeHidden: true,
+  });
+
+  assert.equal(output[0].title, '我设置的标题');
+  assert.equal(output[0].routeTitle, '我设置的标题');
+  assert.equal(output[0].summary, '我设置的标题');
+});
+
 test('projects.ts 调用 Provider 会话列表 read model 而不是内联核心过滤规则', async () => {
   /**
    * 业务场景：后续修复项目首页会话展示时，开发者能先改项目域小模块和小测试，

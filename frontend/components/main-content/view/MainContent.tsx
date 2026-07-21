@@ -10,6 +10,7 @@ import FileTree from '../../file-tree/view/FileTree';
 import { FileTreeDockViewModeControls } from '../../file-tree/view/FileTreeViewModeControls';
 import StandaloneShell from '../../standalone-shell/view/StandaloneShell';
 import ErrorBoundary from '../../ui/ErrorBoundary';
+import SessionAttentionBoard from '../../session-attention/SessionAttentionBoard';
 
 import MainContentHeader from './subcomponents/MainContentHeader';
 import MainContentStateView from './subcomponents/MainContentStateView';
@@ -464,10 +465,6 @@ function MainContent({
   }
 
   if (!selectedProject) {
-    if (activeTab !== 'chat') {
-      return <MainContentStateView mode="empty" isMobile={isMobile} isSidebarOpen={isSidebarOpen} onMenuClick={onMenuClick} />;
-    }
-
     return (
       <div className="h-full flex flex-col">
         <MainContentHeader
@@ -492,31 +489,7 @@ function MainContent({
         />
 
         <div className="flex-1 min-h-0 overflow-hidden">
-          <ErrorBoundary showDetails>
-            <ChatInterface
-              selectedProject={selectedProject}
-              selectedSession={selectedSession}
-              ws={ws}
-              sendMessage={sendMessage}
-              latestMessage={latestMessage}
-              messageHistory={messageHistory}
-              onFileOpen={handleFileOpen}
-              onInputFocusChange={onInputFocusChange}
-              onSessionActive={onSessionActive}
-              onSessionInactive={onSessionInactive}
-              onReplaceTemporarySession={onReplaceTemporarySession}
-              onNavigateToSession={onNavigateToSession}
-              onNewSession={onNewSession}
-              onShowSettings={onShowSettings}
-              autoExpandTools={autoExpandTools}
-              showRawParameters={showRawParameters}
-              showThinking={showThinking}
-              autoScrollToBottom={autoScrollToBottom}
-              externalMessageUpdate={externalMessageUpdate}
-              renderSnapshotRequestId={renderSnapshotRequestId}
-              onRenderSnapshotLoadingChange={setIsRenderingSnapshot}
-            />
-          </ErrorBoundary>
+          <SessionAttentionBoard onNavigateToSession={onNavigateToSession} invalidationMessage={latestMessage} />
         </div>
       </div>
     );

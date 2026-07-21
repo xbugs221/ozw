@@ -198,8 +198,6 @@ export function createProviderWatcherController(deps: any) {
                     if (!sessionChange.projectPath && deletedProjectPath) {
                         sessionChange.projectPath = deletedProjectPath;
                     }
-                    broadcastSessionChanged(sessionChange);
-
                     try {
                         if (eventType === 'unlink') {
                             await deleteProviderSessionIndexFile(provider, filePath);
@@ -226,6 +224,8 @@ export function createProviderWatcherController(deps: any) {
                     } catch (indexError: any) {
                         console.warn('[WARN] Provider session index sync failed:', indexError?.message || indexError);
                     }
+                    // 索引事务完成后再通知前端，避免看板失效重读早于 SQLite 写入。
+                    broadcastSessionChanged(sessionChange);
                     // 只发 scoped 事件；transcript 追加不触发全局项目列表刷新
 
                 } catch (error: any) {
