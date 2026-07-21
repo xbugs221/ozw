@@ -111,9 +111,7 @@ export default function AppContent() {
     activeSessions,
   });
 
-  const isProjectScopedRoute = location.pathname !== '/';
-  const shouldInlineMobileSidebar = isMobile && !selectedProject && !isProjectScopedRoute;
-  const isMobileSidebarOpen = isMobile && (shouldInlineMobileSidebar || sidebarOpen);
+  const isMobileSidebarOpen = isMobile && sidebarOpen;
   const isSidebarOpen = isMobile ? isMobileSidebarOpen : sidebarVisible;
   const handleMenuClick = useCallback(() => {
     if (isMobile) {
@@ -386,10 +384,6 @@ export default function AppContent() {
       {!isMobile && sidebarVisible ? (
         <div className="h-full flex-shrink-0 border-r border-border/50">
           <Sidebar {...sidebarSharedProps} onCollapseSidebar={handleDesktopSidebarCollapse} />
-        </div>
-      ) : shouldInlineMobileSidebar ? (
-        <div className="h-full flex-shrink-0 border-r border-border/50">
-          <Sidebar {...sidebarSharedProps} />
         </div>
       ) : sidebarOpen ? (
         <div
