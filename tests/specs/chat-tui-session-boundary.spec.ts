@@ -173,6 +173,45 @@ test('Pi route-backed TUI 使用 providerSessionId 恢复而不是 cN 路由 id'
   );
 });
 
+test('新建 Pi/Claude TUI 预分配 provider session id 并绑定 cN 路由', () => {
+  /** Render 快照依赖 cN -> provider JSONL 身份，不能等 TUI 结束后再猜测。 */
+  const shellSource = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket TUI relay');
+
+  assert.match(
+    shellSource,
+    /\(provider === 'pi' \|\| provider === 'claude'\)[\s\S]{0,800}newProviderSessionId = randomUUID\(\)/,
+    'Pi/Claude 新建 TUI 必须在 CLI 启动前分配 provider session id',
+  );
+  assert.match(
+    shellSource,
+    /newProviderSessionId = randomUUID\(\)[\s\S]{0,900}finalizeManualSessionRoute\(/,
+    '预分配的 provider session id 必须持久绑定到 cN 路由',
+  );
+  assert.match(
+    shellSource,
+    /createCommand[\s\S]{0,220}--session-id\s+\$\{quotePosixShell\(newSessionId\)\}/,
+    'Pi/Claude CLI 必须使用预分配 id 创建 JSONL 会话',
+  );
+});
+
+test('Claude TUI 启动和恢复都会加载可配置 provider 环境文件', () => {
+  /** zsh-abbr 的 sde 只是输入展开，后端必须 source 它指向的文件。 */
+  const shellSource = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket Claude 环境');
+
+  assert.match(shellSource, /process\.env\.OZW_CLAUDE_ENV_FILE/, 'Claude 环境文件必须支持显式配置');
+  assert.match(
+    shellSource,
+    /environmentSetup = provider === 'claude'[\s\S]{0,700}runProviderProbe\('claude auth status/,
+    'Claude 风险探测也必须在同一 provider 环境中执行',
+  );
+  assert.match(
+    shellSource,
+    /claudeEnvironmentSetup[\s\S]{0,360}providerCommand/,
+    'Claude 环境必须在 provider 命令之前加载，且同时覆盖新建和恢复',
+  );
+  assert.match(shellSource, /\. \$\{quotedEnvironmentFile\}/, 'Claude 环境文件必须通过 POSIX source 语义加载');
+});
+
 test('非 plain-shell 的 TUI WebSocket 断开后继续保留 PTY 会话', () => {
   const source = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket PTY 保活');
 

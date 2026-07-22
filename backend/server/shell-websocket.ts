@@ -61,9 +61,10 @@ function buildProviderShellCommand(input: {
     projectPath: string;
     hasSession: boolean;
     resumeSessionId?: string | null;
+    newSessionId?: string | null;
     codexCommandArgs?: string[] | null;
 }): string {
-    const { os, provider, projectPath, hasSession, resumeSessionId, codexCommandArgs } = input;
+    const { os, provider, projectPath, hasSession, resumeSessionId, newSessionId, codexCommandArgs } = input;
     const cliName = provider === 'pi' ? 'pi' : provider === 'claude' ? 'claude' : 'codex';
     const plannedCodexCommand = provider === 'codex' && codexCommandArgs
         ? `codex${codexCommandArgs.length ? ` ${codexCommandArgs.map(quotePosixShell).join(' ')}` : ''}`
@@ -74,14 +75,25 @@ function buildProviderShellCommand(input: {
             ? `${cliName} --resume ${quotePosixShell(String(resumeSessionId || ''))}`
             : `${cliName} resume ${quotePosixShell(String(resumeSessionId || ''))}`);
     if (os.platform() === 'win32') {
-        if (hasSession && resumeSessionId) {
-            return `Set-Location -Path "${projectPath}"; ${resumeCommand}; powershell.exe -NoExit`;
-        }
-        return `Set-Location -Path "${projectPath}"; ${cliName}; powershell.exe -NoExit`;
+        const createCommand = newSessionId && provider !== 'codex'
+            ? `${cliName} --session-id ${newSessionId}`
+            : cliName;
+        const providerCommand = plannedCodexCommand || (hasSession && resumeSessionId ? resumeCommand : createCommand);
+        return `Set-Location -Path "${projectPath}"; ${providerCommand}; powershell.exe -NoExit`;
     }
 
-    const providerCommand = plannedCodexCommand || (hasSession && resumeSessionId ? resumeCommand : cliName);
-    return `cd ${quotePosixShell(projectPath)} && exec "\${SHELL:-/bin/bash}" -lic ${quotePosixShell(`${buildPortableUserBinPathExport()}; { ${providerCommand}; }; exec "\${SHELL:-/bin/bash}" -l`)}`;
+    const createCommand = newSessionId && provider !== 'codex'
+        ? `${cliName} --session-id ${quotePosixShell(newSessionId)}`
+        : cliName;
+    const providerCommand = plannedCodexCommand || (hasSession && resumeSessionId ? resumeCommand : createCommand);
+    const claudeEnvironmentSetup = provider === 'claude' ? buildClaudeEnvironmentSetup() : '';
+    const interactiveCommand = [
+        buildPortableUserBinPathExport(),
+        claudeEnvironmentSetup,
+        `{ ${providerCommand}; }`,
+        `exec "\${SHELL:-/bin/bash}" -l`,
+    ].filter(Boolean).join('; ');
+    return `cd ${quotePosixShell(projectPath)} && exec "\${SHELL:-/bin/bash}" -lic ${quotePosixShell(interactiveCommand)}`;
 }
 
 /**
@@ -89,6 +101,20 @@ function buildProviderShellCommand(input: {
  */
 function quotePosixShell(value: string): string {
     return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Load the optional Claude provider environment before starting or resuming
+ * Claude Code. zsh-abbr entries are editor expansions rather than executable
+ * shell commands, so callers configure the file that the abbreviation sources.
+ */
+function buildClaudeEnvironmentSetup(): string {
+    const environmentFile = String(process.env.OZW_CLAUDE_ENV_FILE || '').trim();
+    if (!environmentFile) {
+        return '';
+    }
+    const quotedEnvironmentFile = quotePosixShell(environmentFile);
+    return `[ -f ${quotedEnvironmentFile} ] || { echo "Ozw Claude environment file does not exist: ${quotedEnvironmentFile}" >&2; exit 1; }; . ${quotedEnvironmentFile}`;
 }
 
 /**
@@ -123,11 +149,15 @@ function runExternalProviderProbe(command: string): Promise<boolean> {
  */
 async function diagnoseExternalProvider(provider: 'pi' | 'claude'): Promise<string[]> {
     const cliName = provider === 'pi' ? 'pi' : 'claude';
+    const environmentSetup = provider === 'claude' ? buildClaudeEnvironmentSetup() : '';
+    const runProviderProbe = (command: string) => runExternalProviderProbe(
+        [environmentSetup, command].filter(Boolean).join('; '),
+    );
     const [cliAvailable, versionReadable, authenticationReady] = await Promise.all([
-        runExternalProviderProbe(`command -v ${cliName} >/dev/null 2>&1`),
-        runExternalProviderProbe(`${cliName} --version >/dev/null 2>&1`),
+        runProviderProbe(`command -v ${cliName} >/dev/null 2>&1`),
+        runProviderProbe(`${cliName} --version >/dev/null 2>&1`),
         provider === 'claude'
-            ? runExternalProviderProbe('claude auth status >/dev/null 2>&1')
+            ? runProviderProbe('claude auth status >/dev/null 2>&1')
             : Promise.resolve(false),
     ]);
     const failures: string[] = [];
@@ -604,6 +634,39 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             }
                             codexCommandArgs = codexCommandArgs || attachPlan?.commandArgs || null;
                         }
+                        let newProviderSessionId: string | null = null;
+                        if (
+                            !isPlainShell
+                            && (provider === 'pi' || provider === 'claude')
+                            && routeSessionId
+                            && !providerSessionId
+                            && !managedTmuxExists
+                        ) {
+                            /**
+                             * Allocate the provider id before the TUI starts so the cN
+                             * route can render JSONL immediately after the first turn.
+                             */
+                            newProviderSessionId = randomUUID();
+                            await writeProviderSessionBinding({
+                                projectName,
+                                projectPath,
+                                routeSessionId,
+                                provider,
+                                providerSessionId: newProviderSessionId,
+                            });
+                            const finalized = await finalizeManualSessionRoute(
+                                projectName,
+                                routeSessionId,
+                                newProviderSessionId,
+                                provider,
+                                projectPath,
+                            );
+                            if (!finalized) {
+                                throw new Error(`Could not bind ${provider} session ${routeSessionId}`);
+                            }
+                            providerSessionId = newProviderSessionId;
+                            resumeSessionId = newProviderSessionId;
+                        }
                         if (isPlainShell) {
                             // Plain shell mode - open an interactive shell by default, or run the provided command.
                             if (os.platform() === 'win32') {
@@ -622,6 +685,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                                 projectPath,
                                 hasSession,
                                 resumeSessionId,
+                                newSessionId: newProviderSessionId,
                                 codexCommandArgs,
                             });
                         } else {
