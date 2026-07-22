@@ -90,9 +90,11 @@ export const resolveRouteSelection = (
       if (session) return { project, workflow: null, session };
     }
     const cNMatch = legacySessionId.match(/^c(\d+)$/);
-    if ((legacySessionId.startsWith('codex-') || cNMatch !== null) && projects[0]) {
+    const legacySearchParams = new URLSearchParams(search);
+    const legacyProvider = legacySearchParams.get('provider');
+    if ((legacySessionId.startsWith('codex-') || cNMatch !== null || legacyProvider === 'hermes') && projects[0]) {
       const routeIndex = cNMatch ? Number(cNMatch[1]) : undefined;
-      const searchParams = new URLSearchParams(search);
+      const searchParams = legacySearchParams;
       const projectPathParam = searchParams.get('projectPath') || '';
       const providerParam = searchParams.get('provider') || 'codex';
       const resolvedProject = projectPathParam
@@ -199,6 +201,9 @@ export const resolveRouteSelection = (
     const session = (childSession || projectSession)
       ? (() => {
           const sessionProvider = resolveSessionProvider(childSession, projectSession, matchedProject);
+          // A workflow payload is external state. Do not turn an unknown
+          // provider into a Codex chat route merely to keep navigation alive.
+          if (!sessionProvider) return null;
           const baseSession = projectSession || {
             id: childSession?.id || runnerProcess?.sessionId || `${workflow.id}-${childAddress}`,
             title: childSession?.title,

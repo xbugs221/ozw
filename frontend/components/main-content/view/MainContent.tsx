@@ -76,6 +76,7 @@ function MainContent({
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom } = preferences;
   const [isRenderingSnapshot, setIsRenderingSnapshot] = React.useState(false);
+  const readOnlyProviderCollection = selectedProject?.readOnlyProviderCollection === true;
   const projectSessions = selectedProject ? getAllSessions(selectedProject, {}, true) : [];
   const [revealDirectoryRequest, setRevealDirectoryRequest] = React.useState<{ path: string; requestId: number } | null>(null);
   const terminalCounterRef = React.useRef(1);
@@ -282,6 +283,7 @@ function MainContent({
   const handleSetActiveTab = React.useCallback(
     (value: React.SetStateAction<AppTab>) => {
       const nextTab = typeof value === 'function' ? value(activeTab) : value;
+      if (readOnlyProviderCollection && nextTab !== 'overview' && nextTab !== 'chat') return;
 
       if (nextTab === 'overview') {
         if (selectedProject && (selectedSession || selectedWorkflow)) {
@@ -329,7 +331,7 @@ function MainContent({
 
       setActiveTab(nextTab);
     },
-    [activeTab, isMobile, layout.rightDock.activePanel, layout.rightDock.collapsed, layout.lowerPanel.activePanel, layout.lowerPanel.collapsed, onRenderSnapshotRequest, onSelectProjectOverview, onSelectSession, projectSessions, selectedProject, selectedSession, selectedWorkflow, setRightDock, setLowerPanel, setActiveTab],
+    [activeTab, isMobile, layout.rightDock.activePanel, layout.rightDock.collapsed, layout.lowerPanel.activePanel, layout.lowerPanel.collapsed, onRenderSnapshotRequest, onSelectProjectOverview, onSelectSession, projectSessions, readOnlyProviderCollection, selectedProject, selectedSession, selectedWorkflow, setRightDock, setLowerPanel, setActiveTab],
   );
 
   const openFilesDock = React.useCallback((directoryPath?: string) => {
@@ -337,6 +339,7 @@ function MainContent({
      * Open the file browser from artifact links without changing desktop main
      * content away from chat/workflow. Mobile keeps the single-view files tab.
      */
+    if (readOnlyProviderCollection) return;
     if (isMobile) {
       setActiveTab('files');
     } else {
@@ -347,7 +350,7 @@ function MainContent({
     if (directoryPath) {
       setRevealDirectoryRequest({ path: directoryPath, requestId: Date.now() });
     }
-  }, [isMobile, setActiveTab, setRightDock]);
+  }, [isMobile, readOnlyProviderCollection, setActiveTab, setRightDock]);
 
   const handleOpenSessionTerminal = React.useCallback((session: ProjectSession) => {
     /**
@@ -371,6 +374,7 @@ function MainContent({
       leadingContent={headerLeadingContent}
       onRefresh={onRefresh}
       isRenderingSnapshot={isRenderingSnapshot}
+      readOnlyProviderCollection={readOnlyProviderCollection}
       dockLayout={isMobile ? undefined : {
         rightDockActive: layout.rightDock.activePanel,
         rightDockCollapsed: layout.rightDock.collapsed,
@@ -601,13 +605,14 @@ function MainContent({
             selectedSession={selectedSession}
             selectedWorkflow={selectedWorkflow}
             sessions={getAllSessions(selectedProject, {}, true)}
+            displayMode={readOnlyProviderCollection ? 'sessions' : 'all'}
             onNewSession={onNewSession}
             onSelectSession={onSelectSession}
             onOpenSessionTerminal={handleOpenSessionTerminal}
             onSelectWorkflow={onSelectWorkflow}
           />
         </div>
-        <EditorSidebar
+        {!readOnlyProviderCollection && <EditorSidebar
           editingFile={editingFile}
           isMobile={isMobile}
           editorExpanded={editorExpanded}
@@ -619,7 +624,7 @@ function MainContent({
           onToggleEditorExpand={handleToggleEditorExpand}
           projectPath={selectedProject.path}
           fillSpace={layout.rightDock.activePanel === 'files'}
-        />
+        />}
       </>
     );
 
@@ -627,7 +632,7 @@ function MainContent({
       return renderMobileShell(overviewCenterContent);
     }
 
-    const overviewRightDockContent = layout.rightDock.activePanel === 'files' ? (
+    const overviewRightDockContent = !readOnlyProviderCollection && layout.rightDock.activePanel === 'files' ? (
       <FileTree
         selectedProject={selectedProject}
         onFileOpen={handleFileOpen}
@@ -636,7 +641,7 @@ function MainContent({
       />
     ) : null;
 
-    const overviewLowerPanelContent = layout.lowerPanel.activePanel === 'terminal' || layout.rightDock.split?.bottomPanel === 'terminal' ? (
+    const overviewLowerPanelContent = !readOnlyProviderCollection && (layout.lowerPanel.activePanel === 'terminal' || layout.rightDock.split?.bottomPanel === 'terminal') ? (
       renderTerminalDockContent()
     ) : null;
 
@@ -654,6 +659,7 @@ function MainContent({
           leadingContent={headerLeadingContent}
           onRefresh={onRefresh}
           isRenderingSnapshot={isRenderingSnapshot}
+          readOnlyProviderCollection={readOnlyProviderCollection}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
@@ -691,7 +697,7 @@ function MainContent({
   const centerContent = (
     <>
       <div className={`flex flex-col min-h-0 min-w-0 overflow-hidden ${editorExpanded ? 'hidden' : ''} flex-1`}>
-        {activeTab === 'shell' ? (
+        {activeTab === 'shell' && !readOnlyProviderCollection ? (
           renderTerminalMainView()
         ) : (
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
@@ -726,7 +732,7 @@ function MainContent({
         <div className={`h-full overflow-hidden ${activeTab === 'preview' ? 'block' : 'hidden'}`} />
       </div>
 
-      <EditorSidebar
+      {!readOnlyProviderCollection && <EditorSidebar
         editingFile={editingFile}
         isMobile={isMobile}
         editorExpanded={editorExpanded}
@@ -738,11 +744,11 @@ function MainContent({
         onToggleEditorExpand={handleToggleEditorExpand}
         projectPath={selectedProject.path}
         fillSpace={layout.rightDock.activePanel === 'files'}
-      />
+      />}
     </>
   );
 
-  const rightDockContent = layout.rightDock.activePanel === 'files' ? (
+  const rightDockContent = !readOnlyProviderCollection && layout.rightDock.activePanel === 'files' ? (
     <FileTree
       selectedProject={selectedProject}
       onFileOpen={handleFileOpen}
@@ -751,7 +757,7 @@ function MainContent({
     />
   ) : null;
 
-  const lowerPanelContent = layout.lowerPanel.activePanel === 'terminal' ? (
+  const lowerPanelContent = !readOnlyProviderCollection && layout.lowerPanel.activePanel === 'terminal' ? (
     renderTerminalDockContent()
   ) : layout.rightDock.split?.bottomPanel === 'terminal' ? (
     renderTerminalDockContent()
@@ -775,6 +781,7 @@ function MainContent({
         leadingContent={headerLeadingContent}
         onRefresh={onRefresh}
         isRenderingSnapshot={isRenderingSnapshot}
+        readOnlyProviderCollection={readOnlyProviderCollection}
         dockLayout={{
           rightDockActive: layout.rightDock.activePanel,
           rightDockCollapsed: layout.rightDock.collapsed,

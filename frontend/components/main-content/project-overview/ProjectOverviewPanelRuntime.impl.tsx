@@ -25,6 +25,7 @@ import {
 import { formatTimeAgo } from '../../../utils/dateUtils';
 import { getSessionActivityTime } from '../../../utils/sessionActivityTime';
 import { api } from '../../../utils/api';
+import { getProviderCapabilities } from '../../../utils/providerCapabilities';
 import { getSessionRouteNumber } from '../../../utils/sessionCardDisplay';
 import {
   buildWorkflowOverviewGroups,
@@ -54,7 +55,7 @@ const DEFAULT_VISIBLE_MANUAL_SESSION_CARDS = 5;
 type WorkflowCardSortMode = 'created' | 'updated' | 'title' | 'provider';
 
 const normalizeActionSessionProvider = (provider: unknown): SessionProvider => (
-  provider === 'pi' ? 'pi' : provider === 'claude' ? 'claude' : 'codex'
+  provider === 'pi' ? 'pi' : provider === 'claude' ? 'claude' : provider === 'hermes' ? 'hermes' : 'codex'
 );
 
 const CARD_SORT_OPTIONS: Array<{ value: SessionCardSortMode; label: string }> = [
@@ -380,6 +381,8 @@ export default function ProjectOverviewPanel({
   const [workflowSortMode, setWorkflowSortMode] = useState<WorkflowCardSortMode>('created');
   const [optimisticSessionUiState, setOptimisticSessionUiState] = useState<Record<string, Pick<ProjectSession, 'favorite' | 'pending' | 'hidden'>>>({});
   const projectConfigPath = project.fullPath || project.path || '';
+  const readOnlyProviderCollection = project.readOnlyProviderCollection === true;
+  const hermesDiagnosticFailures = (project.hermesDiagnostics || []).filter((item) => item.status !== 'ready');
   const workflowEntries = [...(project.workflows || [])]
     .sort((workflowA, workflowB) => compareWorkflowBySortMode(workflowA, workflowB, workflowSortMode));
   const workflows = workflowEntries;
@@ -405,8 +408,8 @@ export default function ProjectOverviewPanel({
     })
     .sort((sessionA, sessionB) => compareSessionsByCardSortMode(sessionA, sessionB, sessionSortMode, t));
   const visibleSessions = sessionEntries
-    .filter((session) => showHiddenItems || session.hidden !== true);
-  const hiddenSessionCount = sessionEntries.filter((session) => session.hidden === true).length;
+    .filter((session) => showHiddenItems || (session.hidden !== true && session.archived !== true));
+  const hiddenSessionCount = sessionEntries.filter((session) => session.hidden === true || session.archived === true).length;
   const [workflowExpanded, setWorkflowExpanded] = useState(() => displayMode === 'all' || displayMode === 'workflows');
   const [showAllWorkflowGroups, setShowAllWorkflowGroups] = useState(false);
   const [showAllManualSessionCards, setShowAllManualSessionCards] = useState(false);
@@ -545,11 +548,14 @@ export default function ProjectOverviewPanel({
     callback();
   };
 
+  const mutableDisplayedSessions = displayedSessions.filter((session) => (
+    getProviderCapabilities(session.__provider)?.deleteSession === true
+  ));
   const selectedSessions = sessionEntries.filter((session) => selectedSessionKeys.has(
     getResolvedSessionSelectionKey(session, project.name),
-  ));
-  const allVisibleSessionsSelected = displayedSessions.length > 0
-    && displayedSessions.every((session) => selectedSessionKeys.has(getResolvedSessionSelectionKey(session, project.name)));
+  ) && getProviderCapabilities(session.__provider)?.deleteSession === true);
+  const allVisibleSessionsSelected = mutableDisplayedSessions.length > 0
+    && mutableDisplayedSessions.every((session) => selectedSessionKeys.has(getResolvedSessionSelectionKey(session, project.name)));
   const allSelectedSessionsFavorite = selectedSessions.length > 0
     && selectedSessions.every((session) => session.favorite === true);
   const allSelectedSessionsPending = selectedSessions.length > 0
@@ -610,9 +616,9 @@ export default function ProjectOverviewPanel({
     setSelectedSessionKeys((current) => {
       const next = new Set(current);
       if (allVisibleSessionsSelected) {
-        displayedSessions.forEach((session) => next.delete(getResolvedSessionSelectionKey(session, project.name)));
+        mutableDisplayedSessions.forEach((session) => next.delete(getResolvedSessionSelectionKey(session, project.name)));
       } else {
-        displayedSessions.forEach((session) => next.add(getResolvedSessionSelectionKey(session, project.name)));
+        mutableDisplayedSessions.forEach((session) => next.add(getResolvedSessionSelectionKey(session, project.name)));
       }
       return next;
     });
@@ -643,6 +649,7 @@ export default function ProjectOverviewPanel({
      */
     handleProtectedClick(() => {
       if (isSessionSelectionMode) {
+        if (session.__provider === 'hermes') return;
         toggleSessionSelection(session, event);
         return;
       }
@@ -683,6 +690,7 @@ export default function ProjectOverviewPanel({
     sessionTitle: string,
     provider: SessionProvider,
   ) => {
+    if (!getProviderCapabilities(provider)?.deleteSession) return;
     closeActionMenu();
     if (!window.confirm(`确定删除“${sessionTitle}”吗？此操作无法撤销。`)) {
       return;
@@ -739,6 +747,7 @@ export default function ProjectOverviewPanel({
     provider: SessionProvider,
     currentTitle: string,
   ) => {
+    if (!getProviderCapabilities(provider)?.renameSession) return;
     const nextTitle = window.prompt('请输入新的会话名称', currentTitle);
     if (nextTitle == null) {
       return;
@@ -926,7 +935,7 @@ export default function ProjectOverviewPanel({
       && (session.__projectName || project.name) === actionMenu.sessionProjectName
     )) || null
     : null;
-  const showWorkflowSection = displayMode === 'all' || displayMode === 'workflows';
+  const showWorkflowSection = !readOnlyProviderCollection && (displayMode === 'all' || displayMode === 'workflows');
   const showSessionSection = displayMode === 'all' || displayMode === 'sessions';
   const visibleBatchGroups = showAllWorkflowGroups
     ? batchGroups
@@ -936,6 +945,15 @@ export default function ProjectOverviewPanel({
   return (
     <div data-testid="project-workspace-overview" className="h-full min-h-0 overflow-y-auto">
       <div className="flex w-full min-w-0 flex-col p-3 sm:p-4 md:p-6">
+        {hermesDiagnosticFailures.length > 0 && (
+          <div data-testid="hermes-profile-diagnostics" className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-foreground">
+            {hermesDiagnosticFailures.map((item) => (
+              <div key={`${item.scope || 'unknown'}:${item.status || 'error'}`}>
+                Hermes profile {item.scope || 'unknown'}: {item.status || 'error'}{item.message ? ` — ${item.message}` : ''}
+              </div>
+            ))}
+          </div>
+        )}
         {showWorkflowSection && (
         <ProjectOverviewWorkflowGroups>
         <section
@@ -1046,7 +1064,7 @@ export default function ProjectOverviewPanel({
             >
               {sessionExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
               <div>
-                <h3 className="text-base font-semibold text-foreground">手动会话</h3>
+                <h3 className="text-base font-semibold text-foreground">{readOnlyProviderCollection ? '未归属 Hermes 会话' : '手动会话'}</h3>
                 <p className="text-sm text-muted-foreground">{visibleSessions.length} 个可直接进入的会话</p>
               </div>
             </button>
@@ -1062,8 +1080,9 @@ export default function ProjectOverviewPanel({
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
-                <Button
+                {!readOnlyProviderCollection && <Button
                   className="h-9 gap-2 self-start"
+                  data-testid="project-new-session-button"
                   onClick={() => {
                     setSessionCreateError('');
                     setProviderPickerOpen((value) => !value);
@@ -1071,8 +1090,8 @@ export default function ProjectOverviewPanel({
                 >
                   <MessageSquarePlus className="h-4 w-4" />
                   {t('sessions.newSession')}
-                </Button>
-                <Button
+                </Button>}
+                {!readOnlyProviderCollection && <Button
                   type="button"
                   variant={isSessionSelectionMode ? 'secondary' : 'outline'}
                   className="h-9"
@@ -1080,7 +1099,7 @@ export default function ProjectOverviewPanel({
                   onClick={isSessionSelectionMode ? exitSessionSelectionMode : enableSessionSelectionMode}
                 >
                   {isSessionSelectionMode ? '退出选择' : '多选'}
-                </Button>
+                </Button>}
               </div>
               {providerPickerOpen && (
                 <div
@@ -1252,6 +1271,7 @@ export default function ProjectOverviewPanel({
                           session.hidden === true ? 'opacity-60' : '',
                         ].join(' ')}
                         onContextMenu={(event) => {
+                          if (session.__provider === 'hermes') return;
                           event.preventDefault();
                           openActionMenu({
                             isOpen: true,
@@ -1260,9 +1280,9 @@ export default function ProjectOverviewPanel({
                             y: event.clientY,
                           });
                         }}
-                        {...bindLongPress(sessionActionState)}
+                        {...(session.__provider === 'hermes' ? {} : bindLongPress(sessionActionState))}
                       >
-                        {isSessionSelectionMode && (
+                        {isSessionSelectionMode && getProviderCapabilities(session.__provider)?.deleteSession && (
                           <span
                             className={[
                               'absolute left-3 top-3 z-10 flex h-4 w-4 items-center justify-center rounded border text-[10px]',

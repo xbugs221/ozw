@@ -74,6 +74,7 @@ export type MainContentHeaderProps = {
   dockLayout?: DockLayoutControl;
   onRefresh?: () => Promise<void> | void;
   isRenderingSnapshot?: boolean;
+  readOnlyProviderCollection?: boolean;
 };
 
 export type MainContentStateViewProps = {

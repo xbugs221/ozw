@@ -15,6 +15,7 @@ interface ContextCommandContentProps {
   variant?: 'default' | 'execute' | 'execute-file' | 'search' | 'shell-command';
   resultId?: string;
   formatPath?: (filePath: string) => string;
+  defaultOutputOpen?: boolean;
 }
 
 export interface ContextCodeCardProps {
@@ -27,6 +28,7 @@ export interface ContextCodeCardProps {
   showLanguage?: boolean;
   wrapCode?: boolean;
   singleLineUntilWrap?: boolean;
+  defaultOutputOpen?: boolean;
 }
 
 /**
@@ -56,10 +58,11 @@ export const ContextCodeCard: React.FC<ContextCodeCardProps> = ({
   showLanguage = true,
   wrapCode = false,
   singleLineUntilWrap = false,
+  defaultOutputOpen = false,
 }) => {
   const [copied, setCopied] = React.useState(false);
   const [showControls, setShowControls] = React.useState(false);
-  const [outputOpen, setOutputOpen] = React.useState(false);
+  const [outputOpen, setOutputOpen] = React.useState(defaultOutputOpen);
   const { isDarkMode } = useTheme();
   const displayLanguage = language || 'text';
   const syntaxLanguage = normalizeSyntaxLanguage(displayLanguage);
@@ -190,7 +193,7 @@ export const ContextCodeCard: React.FC<ContextCodeCardProps> = ({
 /**
  * Keep context-mode inputs focused on the command/code while hiding secondary query noise.
  */
-export const ContextCommandContent: React.FC<ContextCommandContentProps> = ({ payload, variant = 'default', resultId, formatPath }) => {
+export const ContextCommandContent: React.FC<ContextCommandContentProps> = ({ payload, variant = 'default', resultId, formatPath, defaultOutputOpen = false }) => {
   const hasIntent = payload.intent.trim().length > 0;
   const hasCode = payload.code.trim().length > 0;
   const hasQueries = payload.queries.length > 0;
@@ -250,6 +253,7 @@ export const ContextCommandContent: React.FC<ContextCommandContentProps> = ({ pa
           metadata={visibleMetadata}
           showLanguage={!(isShellCommand || (isExecute && isShellLanguage))}
           singleLineUntilWrap={isShellCommand || isExecute || isExecuteFile}
+          defaultOutputOpen={defaultOutputOpen}
         />
       )}
 

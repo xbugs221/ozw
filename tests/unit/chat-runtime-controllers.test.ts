@@ -4,7 +4,7 @@
  */
 import { expect, it } from 'vitest';
 import { buildSessionLoadPlan, applySessionLoadResult, buildVisibleMessageWindow } from '../../frontend/components/chat/session/chatSessionLifecycleController.ts';
-import { loadSessionMessagesInPages } from '../../frontend/components/chat/session/sessionBulkMessageLoader.ts';
+import { canContinueSessionHistory, loadSessionMessagesInPages } from '../../frontend/components/chat/session/sessionBulkMessageLoader.ts';
 import { buildSubmitRequest, resolveSubmitDisabledReason, createPendingUserMessage } from '../../frontend/components/chat/composer/composerSubmitRuntime.ts';
 import { routeChatRealtimeEvent, applyRealtimeSessionEvent } from '../../frontend/components/chat/realtime/chatRealtimeEventRouter.ts';
 import { appendStreamingChunk, finalizeStreamingMessage } from '../../frontend/components/chat/realtime/streamingMessageController.ts';
@@ -70,6 +70,28 @@ it('sessionBulkMessageLoader crosses an empty display page when the raw cursor a
 
   expect(offsets).toEqual([0, 50, 100]);
   expect(result.messages).toEqual(['oldest-visible', 'newest-visible']);
+});
+
+it('Hermes pagination stops when rewind exhausts the server cursor despite a stale snapshot total', async () => {
+  const cursors: Array<string | null | undefined> = [];
+  const result = await loadSessionMessagesInPages({
+    sessionMessages: async (_projectName, _sessionId, _limit, _offset, _provider, _afterLine, afterCursor) => {
+      cursors.push(afterCursor);
+      const page = afterCursor
+        ? { messages: [], total: 120, hasMore: false, nextMessageOffset: 50, nextCursor: null }
+        : { messages: ['newest-page'], total: 120, hasMore: true, nextMessageOffset: 50, nextCursor: 'opaque-page-2' };
+      return new Response(JSON.stringify(page), { status: 200 });
+    },
+    projectName: 'history-scroll',
+    sessionId: 'default~rewind',
+    provider: 'hermes',
+    pageSize: 50,
+  });
+
+  expect(cursors).toEqual([null, 'opaque-page-2']);
+  expect(result.messages).toEqual(['newest-page']);
+  expect(canContinueSessionHistory({ provider: 'hermes', hasMore: false, nextCursor: null })).toBe(false);
+  expect(canContinueSessionHistory({ provider: 'hermes', hasMore: true, nextCursor: null })).toBe(false);
 });
 
 it('composerSubmitRuntime blocks empty sends and builds pending messages', () => {

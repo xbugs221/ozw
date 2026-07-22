@@ -23,7 +23,7 @@ let goRunnerWatcherDebounceTimer: NodeJS.Timeout | null = null;
  * 创建 provider 与 workflow watcher 控制器。
  */
 export function createProviderWatcherController(deps: any) {
-    const { PROVIDER_WATCH_PATHS, WATCHER_IGNORED_PATTERNS, clearProjectDirectoryCache, deleteProviderSessionIndexFile, getProviderSessionProjectPathForFile, countProviderSessionsForProject, indexProviderSessionFile, upsertProjectIndexFromProviderSession, hideProviderProjectIndex, resolveProviderSessionChange, broadcastSessionChanged, broadcastWorkflowChanged, broadcastProjectListInvalidated, attachWorkflowMetadata, syncProjectWorkflowOverviewIndex, getProjects, ensureGoRunnerWatchersForProjects } = deps;
+    const { PROVIDER_WATCH_PATHS, WATCHER_IGNORED_PATTERNS, clearProjectDirectoryCache, deleteProviderSessionIndexFile, getProviderSessionProjectPathForFile, countProviderSessionsForProject, indexProviderSessionFile, upsertProjectIndexFromProviderSession, hideProviderProjectIndex, reconcileHermesSessionIndex, resolveProviderSessionChange, broadcastSessionChanged, broadcastWorkflowChanged, broadcastProjectListInvalidated, attachWorkflowMetadata, syncProjectWorkflowOverviewIndex, getProjects, ensureGoRunnerWatchersForProjects } = deps;
     /**
      * Close all provider filesystem watchers and clear any pending debounce work.
      */
@@ -179,6 +179,14 @@ export function createProviderWatcherController(deps: any) {
                 projectsWatcherDebounceTimers.delete(debounceKey);
                 try {
                     clearProjectDirectoryCache();
+                    if (provider === 'hermes') {
+                        const hermesFile = path.basename(filePath).toLowerCase();
+                        if (hermesFile === 'state.db' || hermesFile === 'state.db-wal' || hermesFile === 'state.db-shm') {
+                            await reconcileHermesSessionIndex();
+                            void broadcastProjectListInvalidated({ reason: 'hermes-sqlite-change', changedProjectPath: '' });
+                        }
+                        return;
+                    }
                     if (!filePath.toLowerCase().endsWith('.jsonl')) {
                         return;
                     }

@@ -5,6 +5,8 @@
 
 type LooseRecord = Record<string, any>;
 
+import { listHermesSessionsForProject } from './hermes-session-read-model.js';
+
 export type ProjectOverviewReadModelDependencies = {
   summarizeProjectForList(project?: LooseRecord): LooseRecord;
   attachWorkflowMetadata(projects: LooseRecord[]): Promise<LooseRecord[]>;
@@ -63,6 +65,7 @@ export function summarizeProjectForList(project: LooseRecord = {}): LooseRecord 
     codexSessions,
     piSessions,
     claudeSessions,
+    hermesSessions,
     workflows,
     batches,
     ...summary
@@ -71,6 +74,7 @@ export function summarizeProjectForList(project: LooseRecord = {}): LooseRecord 
   void codexSessions;
   void piSessions;
   void claudeSessions;
+  void hermesSessions;
   void workflows;
   void batches;
   return summary;
@@ -111,6 +115,7 @@ export async function buildProjectOverviewReadModel(
   const claudeSessions = typeof dependencies.getClaudeSessions === 'function'
     ? await dependencies.getClaudeSessions(projectPath, { limit: 10, skipProviderScan: true })
     : [];
+  const hermesResult = await listHermesSessionsForProject(projectPath, { limit: 10 });
 
   return {
     ...dependencies.summarizeProjectForList(project),
@@ -119,6 +124,8 @@ export async function buildProjectOverviewReadModel(
     codexSessions,
     piSessions,
     claudeSessions,
+    hermesSessions: hermesResult.sessions,
+    hermesDiagnostics: hermesResult.diagnostics,
     workflows: workflowProject.workflows || [],
     batches: workflowProject.batches || [],
     hasUnreadActivity: workflowProject.hasUnreadActivity === true,

@@ -80,6 +80,7 @@ import {
     buildProjectOverviewReadModel,
     summarizeProjectForList,
 } from '../domains/projects/project-overview-read-model.js';
+import { listUnscopedHermesSessions } from '../domains/projects/hermes-session-read-model.js';
 import { resolveProviderSessionChange } from '../provider-session-change.js';
 import {
     sendNativeMessage,
@@ -157,6 +158,7 @@ import { createProviderWatcherController } from './provider-watchers.js';
 import {
     backfillProjectIndex,
     hideProviderProjectIndex,
+    reconcileHermesSessionIndex,
     upsertProjectIndexFromProviderSession,
 } from '../domains/projects/project-index-sync-service.js';
 import { createBroadcastRegistry } from './realtime/broadcast-registry.js';
@@ -509,6 +511,7 @@ const PROVIDER_WATCH_PATHS = [
     { provider: 'codex', rootPath: path.join(os.homedir(), '.codex', 'sessions') },
     { provider: 'pi', rootPath: path.join(os.homedir(), '.pi', 'agent', 'sessions') },
     { provider: 'claude', rootPath: path.join(os.homedir(), '.claude', 'projects') },
+    { provider: 'hermes', rootPath: process.env.HERMES_HOME || path.join(os.homedir(), '.hermes') },
 ];
 const WATCHER_IGNORED_PATTERNS = [
     '**/node_modules/**',
@@ -731,6 +734,7 @@ const providerWatcherController = createProviderWatcherController({
     getProviderSessionProjectPathForFile,
     countProviderSessionsForProject,
     upsertProjectIndexFromProviderSession,
+    reconcileHermesSessionIndex,
     hideProviderProjectIndex,
     resolveProviderSessionChange,
     broadcastSessionChanged,
@@ -938,6 +942,7 @@ registerBackendHttpRoutes({
     updateSessionUiState, resolveSessionProviderId, getSessionModelState, updateSessionModelState, broadcastSessionModelStateUpdated,
     normalizeManualProvider, createManualSessionDraft, finalizeManualSessionRoute, getUsageRemaining,
     deleteSession, broadcastProjectListInvalidated, deleteProject, addProjectManually, fetch,
+    listUnscopedHermesSessions,
     CHAT_UPLOAD_ROOT, sanitizeFilename, persistChatUploads, os, getCodexSessionTokenUsage,
     installMode, PKG_ROOT, spawn,
     buildRuntimeReadinessReport, checkCodexCredentials, getCodexModelCatalog, getPiModelCatalog, resolveCodexCliPath,

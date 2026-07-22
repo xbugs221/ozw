@@ -40,7 +40,7 @@ export function isCbwRouteSessionId(sessionId?: string | null): boolean {
  */
 function readExplicitSessionProvider(session?: ProjectSession | null): SessionProvider | null {
   const explicitProvider = session?.__provider || session?.provider;
-  return explicitProvider === 'codex' || explicitProvider === 'pi' || explicitProvider === 'claude'
+  return explicitProvider === 'codex' || explicitProvider === 'pi' || explicitProvider === 'claude' || explicitProvider === 'hermes'
     ? explicitProvider
     : null;
 }
@@ -58,6 +58,16 @@ export function resolveProjectSessionProvider(
     return null;
   }
 
+  // The hydrated project bucket is the ownership authority. A selected-session
+  // object can retain stale metadata across project refresh/navigation; letting
+  // that stale value win previously turned a Hermes scoped id into Codex.
+  if (selectedProject) {
+    if ((selectedProject.codexSessions || []).some((session) => session.id === sessionId)) return 'codex';
+    if ((selectedProject.piSessions || []).some((session) => session.id === sessionId)) return 'pi';
+    if ((selectedProject.claudeSessions || []).some((session) => session.id === sessionId)) return 'claude';
+    if ((selectedProject.hermesSessions || []).some((session) => session.id === sessionId)) return 'hermes';
+  }
+
   const explicitProvider = readExplicitSessionProvider(selectedSession);
   if (explicitProvider) {
     return explicitProvider;
@@ -65,16 +75,6 @@ export function resolveProjectSessionProvider(
 
   if (!selectedProject) {
     return null;
-  }
-
-  if ((selectedProject.codexSessions || []).some((session) => session.id === sessionId)) {
-    return 'codex';
-  }
-  if ((selectedProject.piSessions || []).some((session) => session.id === sessionId)) {
-    return 'pi';
-  }
-  if ((selectedProject.claudeSessions || []).some((session) => session.id === sessionId)) {
-    return 'claude';
   }
 
   if (isCbwRouteSessionId(sessionId)) {

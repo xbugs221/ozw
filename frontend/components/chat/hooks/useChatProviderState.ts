@@ -9,6 +9,7 @@ import type { ProjectSession, SessionProvider } from '../../../types/app';
 
 interface UseChatProviderStateArgs {
   selectedSession: ProjectSession | null;
+  disableModelCatalogs?: boolean;
 }
 
 type CodexReasoningOption = {
@@ -45,7 +46,7 @@ type PiModelOption = {
   thinkingOptions: PiThinkingOption[];
 };
 
-const SUPPORTED_PROVIDERS: SessionProvider[] = ['codex', 'pi', 'claude'];
+const SUPPORTED_PROVIDERS: SessionProvider[] = ['codex', 'pi', 'claude', 'hermes'];
 const FALLBACK_CODEX_MODEL_OPTIONS: CodexModelOption[] = [];
 const FALLBACK_PI_MODEL_OPTIONS: PiModelOption[] = [];
 const DEFAULT_PI_THINKING_OPTIONS: PiThinkingOption[] = [{ value: 'off', label: 'Off' }];
@@ -169,7 +170,7 @@ function getStoredCodexModel(modelOptions: CodexModelOption[]): string {
   return storedModel;
 }
 
-export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
+export function useChatProviderState({ selectedSession, disableModelCatalogs = false }: UseChatProviderStateArgs) {
   const [provider, setProviderState] = useState<SessionProvider>(() => getStoredProvider());
   const permissionMode: PermissionMode = 'bypassPermissions';
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
@@ -236,6 +237,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   }, []);
 
   useEffect(() => {
+    if (disableModelCatalogs) return undefined;
     let isCancelled = false;
 
     async function loadPiModelCatalog() {
@@ -287,9 +289,10 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [disableModelCatalogs]);
 
   useEffect(() => {
+    if (disableModelCatalogs) return undefined;
     let isCancelled = false;
 
     async function loadCodexModelCatalog() {
@@ -327,7 +330,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [disableModelCatalogs]);
 
   useEffect(() => {
     const sessionModel = typeof selectedSession?.model === 'string' ? selectedSession.model.trim() : '';

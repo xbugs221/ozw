@@ -392,6 +392,17 @@ function deleteProviderSessionFile(db: any, provider: string, filePath: string):
     .run(provider, String(filePath || ''));
 }
 
+/** Remove provider rows that are absent from a complete provider snapshot. */
+function deleteProviderSessionsMissingFromSnapshot(db: any, provider: string, sessionIds: string[]): number {
+  ensureProviderSessionIndexSchema(db);
+  const ids = [...new Set(sessionIds.map((value) => String(value || '').trim()).filter(Boolean))];
+  if (ids.length === 0) {
+    return Number(db.prepare('DELETE FROM provider_session_index WHERE provider = ?').run(provider).changes || 0);
+  }
+  const placeholders = ids.map(() => '?').join(', ');
+  return Number(db.prepare(`DELETE FROM provider_session_index WHERE provider = ? AND session_id NOT IN (${placeholders})`).run(provider, ...ids).changes || 0);
+}
+
 const providerSessionIndexDb = {
   ensureSchema: ensureProviderSessionIndexSchema,
   upsert: upsertProviderSessionIndex,
@@ -400,6 +411,7 @@ const providerSessionIndexDb = {
   getFilePath: getProviderSessionFilePath,
   countForProject: countProviderSessionsForProject,
   deleteFile: deleteProviderSessionFile,
+  deleteMissingFromSnapshot: deleteProviderSessionsMissingFromSnapshot,
 };
 
 export {

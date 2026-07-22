@@ -2,7 +2,7 @@
  * PURPOSE: Define shared application read-model types used by project,
  * workflow, and session UI components.
  */
-export type SessionProvider = 'codex' | 'pi' | 'claude';
+export type SessionProvider = 'codex' | 'pi' | 'claude' | 'hermes';
 
 export type AppTab = 'overview' | 'chat' | 'files' | 'shell' | 'preview';
 
@@ -345,6 +345,9 @@ export interface Project {
   codexSessions?: ProjectSession[];
   piSessions?: ProjectSession[];
   claudeSessions?: ProjectSession[];
+  hermesSessions?: ProjectSession[];
+  hermesDiagnostics?: Array<{ scope?: string; status?: string; schemaVersion?: number; message?: string }>;
+  readOnlyProviderCollection?: boolean;
   workflows?: ProjectWorkflow[];
   batches?: WorkflowBatchInfo[];
   sessionMeta?: ProjectSessionMeta;

@@ -91,8 +91,12 @@ test('project overview synchronizes workflow index before building cards', async
     async extractProjectDirectory() {
       return projectPath;
     },
-    async renameProject() {},
-    async deleteProject() {},
+    async renameProject() {
+      calls.push(['rename']);
+    },
+    async deleteProject() {
+      calls.push(['delete']);
+    },
     async addProjectManually() {
       return {};
     },
@@ -115,4 +119,20 @@ test('project overview synchronizes workflow index before building cards', async
     ['build', projectPath],
   ]);
   assert.deepEqual(response.payload.workflows, [{ id: 'run-active', runState: 'running' }]);
+
+  const renameResponse = createResponseRecorder();
+  await routes.get('PUT /api/projects/:projectName/rename')({
+    params: { projectName: 'hermes-unscoped' },
+    body: { displayName: 'mutable' },
+  }, renameResponse);
+  assert.equal(renameResponse.statusCode, 405);
+
+  const deleteResponse = createResponseRecorder();
+  await routes.get('DELETE /api/projects/:projectName')({
+    params: { projectName: 'hermes-unscoped' },
+    query: {},
+    body: {},
+  }, deleteResponse);
+  assert.equal(deleteResponse.statusCode, 405);
+  assert.equal(calls.some(([operation]) => operation === 'rename' || operation === 'delete'), false);
 });

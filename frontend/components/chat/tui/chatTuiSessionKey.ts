@@ -3,9 +3,11 @@
  * Business purpose: Codex and Pi terminals must reconnect to the right provider session without sharing PTY state.
  */
 
+import type { SessionProvider } from '../../../types/app';
+
 type ChatTuiSessionKeyInput = {
   projectPath: string;
-  provider: 'codex' | 'pi' | 'claude';
+  provider: SessionProvider;
   routeSessionId?: string | null;
   providerSessionId?: string | null;
 };

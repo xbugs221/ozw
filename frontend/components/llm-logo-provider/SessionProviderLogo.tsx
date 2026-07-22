@@ -28,6 +28,10 @@ export default function SessionProviderLogo({
     );
   }
 
+  if (provider === 'hermes') {
+    return <span className={`${className} inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 text-[0.55em] font-bold`} aria-label="Hermes provider">H</span>;
+  }
+
   const modelLabel = (model || '').toLowerCase();
   if (modelLabel.includes('kimi')) {
     return <KimiLogo className={className} />;

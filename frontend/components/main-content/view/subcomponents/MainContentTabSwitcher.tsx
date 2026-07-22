@@ -18,6 +18,7 @@ type MainContentTabSwitcherProps = {
   compact?: boolean;
   dockLayout?: DockLayoutControl;
   isRenderingSnapshot?: boolean;
+  readOnlyProviderCollection?: boolean;
 };
 
 type TabDefinition = {
@@ -39,10 +40,13 @@ export default function MainContentTabSwitcher({
   compact = false,
   dockLayout,
   isRenderingSnapshot = false,
+  readOnlyProviderCollection = false,
 }: MainContentTabSwitcherProps) {
   const { t } = useTranslation();
 
-  const tabs = BASE_TABS;
+  const tabs = readOnlyProviderCollection
+    ? BASE_TABS.filter((tab) => tab.id === 'overview' || tab.id === 'chat')
+    : BASE_TABS;
 
   const isTabActive = (tabId: AppTab): boolean => {
     /**

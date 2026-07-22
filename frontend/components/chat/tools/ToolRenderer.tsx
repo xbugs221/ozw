@@ -79,7 +79,8 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
   rawToolInput,
   isSubagentContainer,
   isLiveTool = false,
-  subagentState
+  subagentState,
+  autoExpandTools = false,
 }) => {
   // Route subagent containers to dedicated component
   if (isSubagentContainer) {
@@ -191,6 +192,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
           variant={contentProps.variant}
           formatPath={formatProjectPath}
           resultId={mode === 'input' && enableResultAnchor && toolId ? `tool-result-${toolId}` : undefined}
+          defaultOutputOpen={autoExpandTools}
         />
       );
     }
@@ -333,6 +335,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
               payload={contentProps.payload}
               variant={contentProps.variant}
               formatPath={formatProjectPath}
+              defaultOutputOpen={autoExpandTools}
             />
         );
         break;

@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import type { AppTab, Project, ProjectSession, ProjectWorkflow } from '../../../../types/app';
 import { api } from '../../../../utils/api';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
+import { getProviderCapabilities, normalizeSessionProvider } from '../../../../utils/providerCapabilities';
 
 const Check = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>;
 const Edit3 = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>;
@@ -123,6 +124,11 @@ export default function MainContentTitle({
   const showMessagePlaceholder = activeTab === 'chat' && !selectedSession && !selectedWorkflow;
   const resumeId = getSessionResumeId(selectedSession);
   const sessionTitle = selectedSession ? getSessionTitle(selectedSession) : '';
+  const routeProvider = typeof window === 'undefined'
+    ? null
+    : normalizeSessionProvider(new URLSearchParams(window.location.search).get('provider'));
+  const effectiveSessionProvider = routeProvider || selectedSession?.__provider || selectedSession?.provider;
+  const canRenameSession = Boolean(getProviderCapabilities(effectiveSessionProvider)?.renameSession);
   const [sessionIdCopied, setSessionIdCopied] = useState(false);
   const [overrideSessionTitle, setOverrideSessionTitle] = useState('');
   const [isRenamingSession, setIsRenamingSession] = useState(false);
@@ -164,7 +170,7 @@ export default function MainContentTitle({
     /**
      * Rename the currently open provider session without leaving the chat view.
      */
-    if (!selectedProject || !selectedSession || isRenamingSession) {
+    if (!selectedProject || !selectedSession || isRenamingSession || !canRenameSession) {
       return;
     }
 
@@ -206,7 +212,7 @@ export default function MainContentTitle({
               <h2 className="min-w-0 text-sm font-semibold text-foreground whitespace-nowrap overflow-x-auto scrollbar-hide leading-tight">
                 {overrideSessionTitle || sessionTitle}
               </h2>
-              {selectedProject && (
+              {selectedProject && canRenameSession && (
                 <button
                   type="button"
                   className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent/70 hover:text-foreground disabled:opacity-40"
@@ -214,6 +220,7 @@ export default function MainContentTitle({
                   disabled={isRenamingSession}
                   aria-label="重命名当前会话"
                   title="重命名当前会话"
+                  data-testid="session-rename-button"
                 >
                   <Edit3 className="h-3.5 w-3.5" />
                 </button>

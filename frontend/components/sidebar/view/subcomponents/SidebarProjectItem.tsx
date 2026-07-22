@@ -45,8 +45,9 @@ export default function SidebarProjectItem({
   onDeleteProject,
   t,
 }: SidebarProjectItemProps) {
+  const readOnlyProviderCollection = project.readOnlyProviderCollection === true;
   const isSelected = selectedProject?.name === project.name;
-  const isEditing = editingProject === project.name;
+  const isEditing = !readOnlyProviderCollection && editingProject === project.name;
   const hasProjectActivity = project.hasUnreadActivity === true;
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -69,6 +70,9 @@ export default function SidebarProjectItem({
     .replace(/^-+|-+$/g, '')}`;
 
   const saveProjectName = () => {
+    if (readOnlyProviderCollection) {
+      return;
+    }
     onSaveProjectName(project.name);
   };
 
@@ -137,11 +141,17 @@ export default function SidebarProjectItem({
 
   const handleStartEditingProject = () => {
     closeProjectActionMenu();
+    if (readOnlyProviderCollection) {
+      return;
+    }
     onStartEditingProject(project);
   };
 
   const handleDeleteProject = () => {
     closeProjectActionMenu();
+    if (readOnlyProviderCollection) {
+      return;
+    }
     onDeleteProject(project);
   };
 
@@ -149,7 +159,10 @@ export default function SidebarProjectItem({
    * On desktop, project actions live behind the native right-click gesture.
    */
   const handleDesktopContextMenu = (event: React.MouseEvent<HTMLElement>) => {
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+    if (
+      readOnlyProviderCollection
+      || (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches)
+    ) {
       return;
     }
 
@@ -162,7 +175,7 @@ export default function SidebarProjectItem({
    * On mobile, a long press reveals project actions without selecting the project.
    */
   const handleMobileTouchStart = (event: React.TouchEvent<HTMLElement>) => {
-    if (isEditing) {
+    if (readOnlyProviderCollection || isEditing) {
       return;
     }
 
@@ -361,7 +374,7 @@ export default function SidebarProjectItem({
           </div>
         </Button>
 
-        {projectActionMenu.isOpen && !isEditing && (
+        {projectActionMenu.isOpen && !isEditing && !readOnlyProviderCollection && (
           <div
             ref={actionMenuRef}
             className="fixed z-[80] min-w-[140px] rounded-md border border-border bg-popover p-1 shadow-lg"

@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import type { MutableRefObject } from 'react';
 
 import { isTemporarySessionId, type PendingViewSession } from '../session/sessionIdentity';
+import { isHermesScopedSessionId } from '../../../utils/providerCapabilities';
 
 type StatusProvider = 'codex' | 'pi';
 
@@ -17,6 +18,7 @@ type UseChatStatusReconcileArgs = {
   selectedProjectPath?: string;
   selectedSessionId?: string | null;
   selectedSessionProjectPath?: string;
+  selectedSessionProviderScope?: string | null;
   selectedSessionRouteIndex?: number | string | null;
   statusReconcileKeyRef: MutableRefObject<string | null>;
   sendMessage: (message: Record<string, unknown>) => void;
@@ -46,6 +48,7 @@ export function useChatStatusReconcile({
   selectedProjectPath = '',
   selectedSessionId,
   selectedSessionProjectPath = '',
+  selectedSessionProviderScope = null,
   selectedSessionRouteIndex,
   statusReconcileKeyRef,
   sendMessage,
@@ -60,7 +63,9 @@ export function useChatStatusReconcile({
       return;
     }
 
-    if (effectiveProvider === 'claude') {
+    if (isHermesScopedSessionId(statusSessionId)) return;
+
+    if (effectiveProvider === 'claude' || effectiveProvider === 'hermes' || selectedSessionProviderScope) {
       /** Claude 由 tmux TUI 承载，不存在 OZW native runtime 状态可协调。 */
       return;
     }
@@ -94,6 +99,7 @@ export function useChatStatusReconcile({
     selectedProjectPath,
     selectedSessionId,
     selectedSessionProjectPath,
+    selectedSessionProviderScope,
     selectedSessionRouteIndex,
     sendMessage,
     statusReconcileKeyRef,

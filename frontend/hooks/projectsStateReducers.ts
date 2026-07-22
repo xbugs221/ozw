@@ -12,6 +12,16 @@ import { findProjectSessionById, getProjectSessions, isUpdateAdditive, withSessi
 import { getDirectSessionRouteIndex, normalizePathname, resolveRouteSelection } from './projects/projectRouteSelection';
 import { normalizeComparablePath, serialize } from './projects/projectRefreshReducer';
 import { resolveSessionProvider } from '../utils/session-provider';
+import { normalizeSessionProvider } from '../utils/providerCapabilities';
+
+/**
+ * Legacy /session URLs may omit provider for historic Codex links, but a
+ * supplied provider must be a known provider. This keeps compatibility for
+ * unqualified Codex URLs without treating an invalid value as Codex.
+ */
+export function resolveLegacyRouteProvider(rawProvider: string | null): SessionProvider | null {
+  return rawProvider === null ? 'codex' : normalizeSessionProvider(rawProvider);
+}
 
 type UseProjectsRealtimeReducersArgs = {
   activeSessions: Set<string>;
@@ -177,7 +187,12 @@ export function useProjectRouteSelectionSync({
       const searchParams = new URLSearchParams(locationSearch);
       const hintedProjectPath = searchParams.get('projectPath') || '';
       const rawProvider = searchParams.get('provider');
-      const hintedProvider: SessionProvider = rawProvider === 'pi' ? 'pi' : rawProvider === 'claude' ? 'claude' : 'codex';
+      const hintedProvider = resolveLegacyRouteProvider(rawProvider);
+      if (!hintedProvider) {
+        if (selectedSession) setSelectedSession(null);
+        if (selectedWorkflow) setSelectedWorkflow(null);
+        return;
+      }
       const decodedSessionId = decodeURIComponent(legacySessionMatch[1]);
       const requestedSessionSummary = String(searchParams.get('sessionSummary') || '').trim();
       const matchedProject = projects.find((project) => (
@@ -227,6 +242,14 @@ export function useProjectRouteSelectionSync({
     }
     if (resolvedSelection.session) {
       const provider = resolveSessionProvider(null, resolvedSelection.session, resolvedProject);
+      // Route state with no verified provider must not be hydrated as Codex.
+      // This is intentionally a safe no-selection state, not a compatibility
+      // fallback, because a later project refresh can provide verified ownership.
+      if (!provider) {
+        if (selectedSession) setSelectedSession(null);
+        if (selectedWorkflow) setSelectedWorkflow(null);
+        return;
+      }
       const nextSession = withSessionProjectMetadata(resolvedSelection.session, resolvedProject, provider);
       if (
         selectedSession?.id !== nextSession.id
@@ -259,7 +282,8 @@ export function useProjectRouteSelectionSync({
     let cancelled = false;
     const decodedSessionId = decodeURIComponent(legacySessionMatch[1]);
     const routeProvider = searchParams.get('provider');
-    const hintedProvider: SessionProvider = routeProvider === 'pi' ? 'pi' : routeProvider === 'claude' ? 'claude' : 'codex';
+    const hintedProvider = resolveLegacyRouteProvider(routeProvider);
+    if (!hintedProvider) return undefined;
     const resolveLegacySessionFromOverviews = async () => {
       /** Resolve legacy session URLs whose project is only knowable after overview loading. */
       for (const project of projects) {

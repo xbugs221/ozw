@@ -289,7 +289,10 @@ export function Markdown({ children, className, selectedProject, onFileOpen }: M
   });
 
   useEffect(() => {
-    if (!selectedProject?.name || !onFileOpen) {
+    // Provider-only collections (for example the Hermes unscoped inbox) have
+    // no workspace root. File-link discovery would request their synthetic
+    // project name from the files API and produce a 404 console error.
+    if (!selectedProject?.name || !onFileOpen || selectedProject.readOnlyProviderCollection === true) {
       setOpenableFileState({ projectKey: '', files: new Set() });
       return;
     }
@@ -321,7 +324,7 @@ export function Markdown({ children, className, selectedProject, onFileOpen }: M
 
     void loadOpenableFiles();
     return () => abortController.abort();
-  }, [onFileOpen, projectKey, selectedProject?.name, selectedProject?.path, selectedProject?.fullPath]);
+  }, [onFileOpen, projectKey, selectedProject?.name, selectedProject?.path, selectedProject?.fullPath, selectedProject?.readOnlyProviderCollection]);
 
   const markdownComponents = useMemo(
     () => createMarkdownComponents(

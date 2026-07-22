@@ -183,7 +183,7 @@ export const api = {
     }
     if (typeof afterLine === 'number') {
       params.append('afterLine', String(afterLine));
-    } else if (limit !== null && !afterCursor) {
+    } else if (limit !== null && (!afterCursor || provider === 'hermes')) {
       params.append('limit', String(limit));
       params.append('offset', String(offset));
     }

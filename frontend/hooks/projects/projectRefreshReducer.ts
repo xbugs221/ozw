@@ -53,6 +53,7 @@ export function mergeProjectSummary(project: Project, summary: Project): Project
     codexSessions: project.codexSessions,
     piSessions: project.piSessions,
     claudeSessions: project.claudeSessions,
+    hermesSessions: project.hermesSessions,
     workflows: project.workflows,
     batches: project.batches,
     hasUnreadActivity: project.hasUnreadActivity ?? summary.hasUnreadActivity,

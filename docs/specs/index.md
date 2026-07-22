@@ -11,7 +11,7 @@
 ## Provider 与 runtime
 
 - 规格：`provider-indexing.md`、`provider-runtime-events.md`、`runtime-dependencies.md`、`provider-live-non-streaming-render.md`、`historical-provider-wording-assets.md`
-- 测试入口：`pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts`、`pnpm exec tsx --test tests/specs/provider-live-non-streaming-render.spec.ts`、`pnpm exec tsx --test tests/backend/runtime-dependencies.test.ts`
+- 测试入口：`pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts`、`pnpm exec tsx --test tests/specs/provider-live-non-streaming-render.spec.ts`、`pnpm exec tsx --test tests/specs/hermes-readonly-provider.spec.ts`、`pnpm exec tsx --test tests/backend/runtime-dependencies.test.ts`
 - 源码 owner：`backend/`、`frontend/`、`tests/specs/`
 
 ## Workflow

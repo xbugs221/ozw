@@ -40,19 +40,35 @@ export interface ProjectRouteDeps {
     deleteProject: (projectName: string, force: boolean, projectPath?: string) => Promise<unknown>;
     addProjectManually: (projectPath: string) => Promise<ProjectLike>;
     broadcastProjectListInvalidated: (event: ProjectInvalidationEvent) => unknown;
+    listUnscopedHermesSessions: () => Promise<{ sessions: unknown[]; diagnostics: unknown[] }>;
 }
 
 /**
  * 注册项目相关 HTTP 路由。
  */
 export function registerProjectRoutes(deps: ProjectRouteDeps): void {
-    const { app, authenticateToken, heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList, ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget, buildProjectOverviewReadModel, attachWorkflowMetadata, attachProjectOverviewWorkflowMetadata, syncProjectWorkflowOverviewIndex, getCodexSessions, getPiSessions, getClaudeSessions, extractProjectDirectory, renameProject, deleteProject, addProjectManually, broadcastProjectListInvalidated } = deps;
+    const { app, authenticateToken, heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList, ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget, buildProjectOverviewReadModel, attachWorkflowMetadata, attachProjectOverviewWorkflowMetadata, syncProjectWorkflowOverviewIndex, getCodexSessions, getPiSessions, getClaudeSessions, extractProjectDirectory, renameProject, deleteProject, addProjectManually, broadcastProjectListInvalidated, listUnscopedHermesSessions } = deps;
 
 const listProjectsHandler = async (req: any, res: any) => {
     try {
         const projectSummaries = await heavyReadCoalescer.run('projects:list', async () => {
             const projects = await getProjects(broadcastProgress, { lightweightList: true });
-            return projects.map(summarizeProjectForList);
+            const unscoped = await listUnscopedHermesSessions();
+            const summaries = projects.map(summarizeProjectForList);
+            if (unscoped.sessions.length > 0) {
+                summaries.push({
+                    name: 'hermes-unscoped',
+                    displayName: '未归属 Hermes 会话',
+                    path: '',
+                    fullPath: '',
+                    routePath: '/hermes-unscoped',
+                    source: 'hermes-unscoped',
+                    readOnlyProviderCollection: true,
+                    sessions: [],
+                    sessionMeta: { hasMore: false, total: unscoped.sessions.length },
+                });
+            }
+            return summaries;
         });
         res.json(projectSummaries);
 
@@ -68,6 +84,23 @@ const getProjectOverviewHandler = async (req: any, res: any) => {
     try {
         const scopeProjectPath = typeof req.query?.projectPath === 'string' ? req.query.projectPath.trim() : '';
         const overview = await heavyReadCoalescer.run(`projects:overview:${scopeProjectPath || req.params.projectName}`, async () => {
+            if (req.params.projectName === 'hermes-unscoped') {
+                const unscoped = await listUnscopedHermesSessions();
+                return {
+                    name: 'hermes-unscoped',
+                    displayName: '未归属 Hermes 会话',
+                    path: '',
+                    fullPath: '',
+                    routePath: '/hermes-unscoped',
+                    source: 'hermes-unscoped',
+                    readOnlyProviderCollection: true,
+                    sessions: [], codexSessions: [], piSessions: [], claudeSessions: [],
+                    hermesSessions: unscoped.sessions,
+                    hermesDiagnostics: unscoped.diagnostics,
+                    workflows: [], batches: [],
+                    sessionMeta: { hasMore: false, total: unscoped.sessions.length },
+                };
+            }
             const project = await resolveProjectOverviewTarget(
                 String(req.params.projectName || ''),
                 req.query?.projectPath,
@@ -106,6 +139,9 @@ const getProjectOverviewHandler = async (req: any, res: any) => {
 // Rename project endpoint
 const renameProjectHandler = async (req: any, res: any) => {
     try {
+        if (req.params.projectName === 'hermes-unscoped') {
+            return res.status(405).json({ error: 'Read-only provider collections cannot be renamed' });
+        }
         const { displayName, projectPath } = req.body;
         const oldProjectPath = await extractProjectDirectory(req.params.projectName);
         await renameProject(req.params.projectName, displayName, projectPath);
@@ -121,6 +157,9 @@ const renameProjectHandler = async (req: any, res: any) => {
 const deleteProjectHandler = async (req: any, res: any) => {
     try {
         const { projectName } = req.params;
+        if (projectName === 'hermes-unscoped') {
+            return res.status(405).json({ error: 'Read-only provider collections cannot be deleted' });
+        }
         const force = req.query.force === 'true';
         const projectPath = typeof req.body?.projectPath === 'string' ? req.body.projectPath.trim() : '';
         const deletedProjectPath = projectPath || await extractProjectDirectory(projectName);
@@ -153,6 +192,13 @@ const createProjectHandler = async (req: any, res: any) => {
 
 
     app.get('/api/projects', authenticateToken, listProjectsHandler);
+    app.get('/api/hermes/unscoped-sessions', authenticateToken, async (_req: any, res: any) => {
+        try {
+            res.json(await listUnscopedHermesSessions());
+        } catch (error: any) {
+            res.status(500).json({ error: error.message });
+        }
+    });
     app.get('/api/projects/:projectName/overview', authenticateToken, getProjectOverviewHandler);
     app.put('/api/projects/:projectName/rename', authenticateToken, renameProjectHandler);
     app.delete('/api/projects/:projectName', authenticateToken, deleteProjectHandler);

@@ -12,6 +12,7 @@ import type {
 } from 'react';
 
 import { api, authenticatedFetch } from '../../../utils/api';
+import { getProviderCapabilities, isHermesScopedSessionId } from '../../../utils/providerCapabilities';
 import type { ChatMessage } from '../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 import { safeLocalStorage } from '../utils/chatStorage';
@@ -45,7 +46,7 @@ import {
   resolveSessionMessageRawLineCursor,
   SESSION_MESSAGES_PER_PAGE,
 } from './sessionMessageLoader';
-import { loadSessionMessagesInPages } from './sessionBulkMessageLoader';
+import { canContinueSessionHistory, loadSessionMessagesInPages } from './sessionBulkMessageLoader';
 import {
   getSessionRecoveryStorageKey,
   trimSessionRecoveryMessages,
@@ -79,6 +80,7 @@ const HISTORY_PREFETCH_UNLOCK_DISTANCE_PX = 100;
 export interface UseChatSessionStateArgs {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
+  providerHint?: SessionProvider | null;
   sendMessage: (message: unknown) => void;
   isFollowingLatest?: boolean;
   isRealtimeConnected?: boolean;
@@ -126,6 +128,7 @@ export function isInsideHistoryPrefetchZone(container: Pick<HTMLDivElement, 'scr
 export function useChatSessionState({
   selectedProject,
   selectedSession,
+  providerHint = null,
   sendMessage,
   isFollowingLatest = false,
   isRealtimeConnected = false,
@@ -205,6 +208,8 @@ export function useChatSessionState({
   const latestRawLineCursorRef = useRef<number | null>(null);
   /** Opaque provider cursor for byte-and-part incremental delivery. */
   const latestAppendCursorRef = useRef<string | null>(null);
+  /** Stable keyset cursor for loading older Hermes rows. */
+  const oldestHistoryCursorRef = useRef<string | null>(null);
   if (sessionMessagesStateRef.current !== sessionMessages) {
     sessionMessagesStateRef.current = sessionMessages;
     sessionMessagesRef.current = sessionMessages;
@@ -257,6 +262,7 @@ export function useChatSessionState({
           tokenUsage: null as Record<string, unknown> | null,
           error: null as string | null,
           appendCursor: null as string | null,
+          nextCursor: null as string | null,
           nextMessageOffset: null as number | null,
           nextRawLineOffset: null as number | null,
           historySnapshotRawLineOffset: null as number | null,
@@ -291,6 +297,7 @@ export function useChatSessionState({
           tokenUsage: (data?.tokenUsage || null) as Record<string, unknown> | null,
           error: null as string | null,
           appendCursor: (typeof data?.appendCursor === 'string' && data.appendCursor) ? data.appendCursor : null,
+          nextCursor: (typeof data?.nextCursor === 'string' && data.nextCursor) ? data.nextCursor : null,
           nextMessageOffset: Number.isFinite(Number(data?.nextMessageOffset)) ? Number(data.nextMessageOffset) : null,
           nextRawLineOffset: Number.isFinite(Number(data?.nextRawLineOffset)) ? Number(data.nextRawLineOffset) : null,
           historySnapshotRawLineOffset: Number.isFinite(Number(data?.historySnapshotRawLineOffset)) ? Number(data.historySnapshotRawLineOffset) : null,
@@ -304,6 +311,7 @@ export function useChatSessionState({
           tokenUsage: null as Record<string, unknown> | null,
           error: error instanceof Error ? error.message : 'Failed to load session messages',
           appendCursor: null as string | null,
+          nextCursor: null as string | null,
           nextMessageOffset: null as number | null,
           nextRawLineOffset: null as number | null,
           historySnapshotRawLineOffset: null as number | null,
@@ -328,6 +336,9 @@ export function useChatSessionState({
         const requestWindow = loadMore
           ? createOlderSessionMessageWindow(currentOffset)
           : createInitialSessionMessageWindow();
+        const requestedHistoryCursor = provider === 'hermes' && loadMore
+          ? oldestHistoryCursorRef.current
+          : requestWindow.afterCursor;
         const result = await fetchSessionMessages(
           projectName,
           sessionId,
@@ -335,7 +346,7 @@ export function useChatSessionState({
           requestWindow.offset,
           provider,
           requestWindow.afterLine,
-          requestWindow.afterCursor,
+          requestedHistoryCursor,
           projectPath,
           loadMore ? historySnapshotRawLineOffsetRef.current : null,
         );
@@ -345,6 +356,9 @@ export function useChatSessionState({
         }
         if (result.appendCursor !== null) {
           latestAppendCursorRef.current = result.appendCursor;
+        }
+        if (provider === 'hermes') {
+          oldestHistoryCursorRef.current = result.nextCursor;
         }
         if (isInitialLoad && result.tokenUsage) {
           setTokenBudget(result.tokenUsage);
@@ -357,13 +371,23 @@ export function useChatSessionState({
         if (result.total > 0 || result.hasMore) {
           const loadedCount = result.messages.length;
           const nextOffset = result.nextMessageOffset ?? result.nextRawLineOffset ?? (currentOffset + loadedCount);
-          setHasMoreMessages(result.total > 0 ? result.total > nextOffset : result.hasMore);
+          const moreAvailable = provider === 'hermes'
+            ? canContinueSessionHistory({
+              provider,
+              hasMore: result.hasMore,
+              nextCursor: result.nextCursor,
+              currentCursor: requestedHistoryCursor,
+            })
+            : (result.total > 0 ? result.total > nextOffset : result.hasMore);
+          hasMoreMessagesRef.current = moreAvailable;
+          setHasMoreMessages(moreAvailable);
           setTotalMessages(result.total > 0 ? result.total : loadedCount);
           messagesOffsetRef.current = nextOffset;
           return result.messages;
         }
 
         const messages = result.messages;
+        hasMoreMessagesRef.current = false;
         setHasMoreMessages(false);
         setTotalMessages(messages.length);
         messagesOffsetRef.current = result.nextMessageOffset ?? result.nextRawLineOffset ?? messages.length;
@@ -434,6 +458,7 @@ export function useChatSessionState({
     setHistorySnapshotRawLineOffset(null);
     latestRawLineCursorRef.current = null;
     latestAppendCursorRef.current = null;
+    oldestHistoryCursorRef.current = null;
     setHasMoreMessages(false);
     setTotalMessages(0);
     setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
@@ -557,7 +582,7 @@ export function useChatSessionState({
         return false;
       }
 
-      const sessionProvider = resolveSessionProvider(selectedProject, selectedSession) || 'codex';
+      const sessionProvider = resolveSessionProvider(selectedProject, selectedSession) || providerHint || 'codex';
       const sessionProjectName = getSessionProjectName(selectedProject, selectedSession);
       const sessionProjectPath = selectedSession.projectPath || selectedProject.fullPath || selectedProject.path || '';
 
@@ -592,12 +617,10 @@ export function useChatSessionState({
         );
 
         if (uniqueMoreMessages.length === 0) {
-          setHasMoreMessages(totalMessagesRef.current > messagesOffsetRef.current);
           return false;
         }
 
         pendingScrollRestoreRef.current = scrollSnapshot;
-        setHasMoreMessages(totalMessagesRef.current > messagesOffsetRef.current);
         const nextSessionMessages = dedupeSessionMessagesByIdentity([
           ...uniqueMoreMessages,
           ...sessionMessagesRef.current,
@@ -611,7 +634,7 @@ export function useChatSessionState({
         isLoadingMoreRef.current = false;
       }
     },
-    [hasMoreMessages, isLoadingMoreMessages, loadSessionMessages, selectedProject, selectedSession],
+    [hasMoreMessages, isLoadingMoreMessages, loadSessionMessages, providerHint, selectedProject, selectedSession],
   );
 
   const handleScroll = useCallback(async () => {
@@ -814,7 +837,7 @@ export function useChatSessionState({
           return;
         }
 
-        const sessionProvider = resolveSessionProvider(curProject, curSession) || 'codex';
+        const sessionProvider = resolveSessionProvider(curProject, curSession) || providerHint || 'codex';
         const sessionProjectName = getSessionProjectName(curProject, curSession);
         const sessionProjectPath = curSession.projectPath || curProject.fullPath || curProject.path || '';
         isLoadingSessionRef.current = true;
@@ -864,6 +887,7 @@ export function useChatSessionState({
           setHistorySnapshotRawLineOffset(null);
           latestRawLineCursorRef.current = null;
           latestAppendCursorRef.current = null;
+          oldestHistoryCursorRef.current = null;
           setHasMoreMessages(false);
           setTotalMessages(0);
           setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
@@ -882,7 +906,7 @@ export function useChatSessionState({
           // Always send check-session-status via sendMessage (which handles queuing
           // when WebSocket is temporarily disconnected) instead of gating on the ws
           // object which may be stale in the useMemo closure.
-          if (sessionProvider !== 'claude') {
+          if (getProviderCapabilities(sessionProvider)?.checkRuntimeStatus && !isHermesScopedSessionId(curSession.id)) {
             sendMessage({
               type: 'check-session-status',
               sessionId: curSession.id,
@@ -896,10 +920,11 @@ export function useChatSessionState({
           setHistorySnapshotRawLineOffset(null);
           latestRawLineCursorRef.current = null;
           latestAppendCursorRef.current = null;
+          oldestHistoryCursorRef.current = null;
           setHasMoreMessages(false);
           setTotalMessages(0);
 
-          if (sessionProvider !== 'claude') {
+          if (getProviderCapabilities(sessionProvider)?.checkRuntimeStatus && !isHermesScopedSessionId(curSession.id)) {
             sendMessage({
               type: 'check-session-status',
               sessionId: curSession.id,
@@ -954,6 +979,7 @@ export function useChatSessionState({
         setHistorySnapshotRawLineOffset(null);
         latestRawLineCursorRef.current = null;
         latestAppendCursorRef.current = null;
+        oldestHistoryCursorRef.current = null;
         setHasMoreMessages(false);
         setTotalMessages(0);
         setFrozenTailMessageKey(null);
@@ -977,6 +1003,7 @@ export function useChatSessionState({
     isSystemSessionChange,
     loadSessionMessages,
     pendingViewSessionRef,
+    providerHint,
     resetStreamingState,
     sendMessage,
   ]);
@@ -995,7 +1022,7 @@ export function useChatSessionState({
       const knownRawLineCursor = latestRawLineCursorRef.current ?? (knownTotal > 0 ? knownTotal : null);
       const sessionLoadId = getSessionLoadId(curSession);
       const isCoSession = /^c\d+$/.test(String(sessionLoadId || ''));
-      const sessionProvider = resolveSessionProvider(curProject, curSession) || 'codex';
+      const sessionProvider = resolveSessionProvider(curProject, curSession) || providerHint || 'codex';
       const sessionProjectPath = curSession.projectPath || curProject.fullPath || curProject.path || '';
       const knownAppendCursor = sessionProvider === 'claude' ? latestAppendCursorRef.current : null;
 
@@ -1126,7 +1153,7 @@ export function useChatSessionState({
 
       // hasMore 取决于用户已加载的历史头部是否还有更早内容
       const totalLoaded = sessionMessagesRef.current.length;
-      if (newTotal > totalLoaded) {
+      if (sessionProvider !== 'hermes' && newTotal > totalLoaded) {
         setHasMoreMessages(true);
       }
 
@@ -1137,7 +1164,7 @@ export function useChatSessionState({
     } catch (error) {
       console.error('Error appending messages from external update:', error);
     }
-  }, [advanceLatestRawLineCursor, fetchSessionMessages]);
+  }, [advanceLatestRawLineCursor, fetchSessionMessages, providerHint]);
 
   useEffect(() => {
     refreshLatestMessagesRef.current = appendLatestSessionMessages;
@@ -1178,7 +1205,7 @@ export function useChatSessionState({
     const activeSessionKey = selectedSessionViewKey ?? (activeSessionId
       ? [
         getSessionProjectName(selectedProject, selectedSession),
-        resolveSessionProvider(selectedProject, selectedSession) || 'codex',
+        resolveSessionProvider(selectedProject, selectedSession) || providerHint || 'codex',
         activeSessionId,
       ].join(':')
       : null);
@@ -1215,6 +1242,7 @@ export function useChatSessionState({
     selectedProject,
     selectedSession,
     selectedSessionViewKey,
+    providerHint,
   ]);
 
   useEffect(() => {
@@ -1346,7 +1374,7 @@ export function useChatSessionState({
     if (!selectedSession || !selectedProject) return;
     if (isLoadingAllMessagesRef.current) return;
     const { reveal = false, silent = false } = options;
-    const sessionProvider = resolveSessionProvider(selectedProject, selectedSession) || 'codex';
+    const sessionProvider = resolveSessionProvider(selectedProject, selectedSession) || providerHint || 'codex';
     const sessionContext = resolveSessionRoutingContext(selectedProject, selectedSession, sessionProvider);
     const sessionProjectName = sessionContext.projectName || getSessionProjectName(selectedProject, selectedSession);
     const sessionProjectPath = sessionContext.projectPath;
@@ -1383,6 +1411,8 @@ export function useChatSessionState({
         pendingScrollRestoreRef.current = scrollSnapshot;
 
         setSessionMessages(normalizedAllMessages);
+        hasMoreMessagesRef.current = false;
+        oldestHistoryCursorRef.current = null;
         setHasMoreMessages(false);
         setTotalMessages(total || normalizedAllMessages.length);
         messagesOffsetRef.current = normalizedAllMessages.length;
@@ -1414,7 +1444,7 @@ export function useChatSessionState({
         setIsLoadingAllMessages(false);
       }
     }
-  }, [advanceLatestRawLineCursor, selectedSession, selectedProject, currentSessionId]);
+  }, [advanceLatestRawLineCursor, selectedSession, selectedProject, currentSessionId, providerHint]);
 
   const loadMessagesUntilTarget = useCallback(async ({ messageKey }: LoadMessagesUntilTargetOptions) => {
     /**
@@ -1431,7 +1461,7 @@ export function useChatSessionState({
       return false;
     }
 
-    const sessionProvider = resolveSessionProvider(selectedProject, selectedSession) || 'codex';
+    const sessionProvider = resolveSessionProvider(selectedProject, selectedSession) || providerHint || 'codex';
     const sessionProjectName = getSessionProjectName(selectedProject, selectedSession);
     const sessionProjectPath = selectedSession.projectPath || selectedProject.fullPath || selectedProject.path || '';
     const requestSessionId = selectedSession.id;
@@ -1443,15 +1473,22 @@ export function useChatSessionState({
 
     try {
       for (let attempts = 0; attempts < 100; attempts += 1) {
-        if (!hasMoreMessagesRef.current && totalMessagesRef.current <= messagesOffsetRef.current) {
+        const cannotContinue = sessionProvider === 'hermes'
+          ? (!hasMoreMessagesRef.current || !oldestHistoryCursorRef.current)
+          : (!hasMoreMessagesRef.current && totalMessagesRef.current <= messagesOffsetRef.current);
+        if (cannotContinue) {
           allMessagesLoadedRef.current = true;
           setAllMessagesLoaded(true);
+          hasMoreMessagesRef.current = false;
           setHasMoreMessages(false);
           return false;
         }
 
         const currentOffset = messagesOffsetRef.current;
         const requestWindow = createOlderSessionMessageWindow(currentOffset);
+        const requestedHistoryCursor = sessionProvider === 'hermes'
+          ? oldestHistoryCursorRef.current
+          : requestWindow.afterCursor;
         const result = await fetchSessionMessages(
           sessionProjectName,
           requestSessionId,
@@ -1459,7 +1496,7 @@ export function useChatSessionState({
           requestWindow.offset,
           sessionProvider,
           requestWindow.afterLine,
-          requestWindow.afterCursor,
+          requestedHistoryCursor,
           sessionProjectPath,
           historySnapshotRawLineOffsetRef.current,
         );
@@ -1467,10 +1504,14 @@ export function useChatSessionState({
         if (currentSessionId !== requestSessionId || result.error) {
           return false;
         }
+        if (sessionProvider === 'hermes') {
+          oldestHistoryCursorRef.current = result.nextCursor;
+        }
 
         const loadedCount = result.messages.length;
         const nextOffset = result.nextMessageOffset ?? result.nextRawLineOffset ?? (currentOffset + loadedCount);
         if (nextOffset <= currentOffset) {
+          hasMoreMessagesRef.current = false;
           setHasMoreMessages(false);
           allMessagesLoadedRef.current = true;
           setAllMessagesLoaded(true);
@@ -1479,9 +1520,14 @@ export function useChatSessionState({
 
         messagesOffsetRef.current = nextOffset;
         setTotalMessages(result.total > 0 ? result.total : messagesOffsetRef.current);
-        const moreAvailable = result.total > 0
-          ? result.total > messagesOffsetRef.current
-          : result.hasMore;
+        const moreAvailable = sessionProvider === 'hermes'
+          ? canContinueSessionHistory({
+            provider: sessionProvider,
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor,
+            currentCursor: requestedHistoryCursor,
+          })
+          : (result.total > 0 ? result.total > messagesOffsetRef.current : result.hasMore);
         hasMoreMessagesRef.current = moreAvailable;
         setHasMoreMessages(moreAvailable);
 
@@ -1521,6 +1567,7 @@ export function useChatSessionState({
   }, [
     currentSessionId,
     fetchSessionMessages,
+    providerHint,
     revealLoadedMessage,
     selectedProject,
     selectedSession,

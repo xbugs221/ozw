@@ -20,6 +20,7 @@ import {
   projectMatchesOverview,
 } from '../../frontend/hooks/projects/projectRefreshReducer';
 import { resolveSessionProvider } from '../../frontend/utils/session-provider';
+import { resolveLegacyRouteProvider } from '../../frontend/hooks/projectsStateReducers';
 
 type LooseProject = Record<string, any>;
 
@@ -99,6 +100,21 @@ test('project routes keep project session and provider ownership stable', () => 
   assert.equal(shouldPollWorkflowPlanningSession(project.workflows[0]), true);
 });
 
+test('Hermes legacy reload selects the cwd project when a stale git root was discarded by projection', () => {
+  const projects = [
+    { name: 'wrong', path: '/tmp/wrong', fullPath: '/tmp/wrong' },
+    { name: 'correct', path: '/tmp/correct', fullPath: '/tmp/correct' },
+  ] as any[];
+  const route = resolveRouteSelection(
+    projects,
+    '/session/team%257Eblue~scope-session',
+    'provider=hermes&projectPath=%2Ftmp%2Fcorrect',
+  );
+  assert.equal(route.project?.name, 'correct');
+  assert.equal(route.session?.projectPath, '/tmp/correct');
+  assert.equal(route.session?.__provider, 'hermes');
+});
+
 test('project cN route honors provider hint for Pi sessions', () => {
   /**
    * Pi 页面带 provider=pi 时，刷新或重进 cN URL 不能被同编号 Codex 会话抢占。
@@ -141,6 +157,25 @@ test('Claude cN route restores provider ownership without a query hint', () => {
   const hintedRoute = resolveRouteSelection([project] as any[], '/projects/demo/c7', 'provider=claude');
   assert.equal(hintedRoute.session?.id, 'claude-7');
   assert.equal(hintedRoute.session?.provider, 'claude');
+});
+
+test('unknown session providers fail closed instead of becoming Codex', () => {
+  /** Untrusted route/workflow data must never gain Codex capabilities by default. */
+  assert.equal(
+    resolveSessionProvider(null, { id: 'untrusted-session', provider: 'not-a-provider' }, null),
+    null,
+  );
+  assert.equal(
+    resolveSessionProvider({ id: 'untrusted-child', provider: 'not-a-provider' }, null, null),
+    null,
+  );
+});
+
+test('legacy session URLs preserve Hermes and reject an invalid provider', () => {
+  /** Provider-bearing legacy URLs are external input, unlike unqualified Codex history URLs. */
+  assert.equal(resolveLegacyRouteProvider('hermes'), 'hermes');
+  assert.equal(resolveLegacyRouteProvider('not-a-provider'), null);
+  assert.equal(resolveLegacyRouteProvider(null), 'codex');
 });
 
 test('project refresh preserves loaded details and replaces temporary cN selection', () => {

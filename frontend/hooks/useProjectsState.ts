@@ -55,7 +55,7 @@ function buildSessionNavigationUrl(
   /**
    * 为项目会话生成导航 URL；无 cN 绑定的 provider 历史会话回退到兼容路由。
    */
-  const provider: SessionProvider = session.__provider === 'pi' ? 'pi' : session.__provider === 'claude' ? 'claude' : 'codex';
+  const provider: SessionProvider = session.__provider === 'pi' ? 'pi' : session.__provider === 'claude' ? 'claude' : session.__provider === 'hermes' ? 'hermes' : 'codex';
   const projectPath = session.projectPath || project.fullPath || project.path || '';
 
   if (hasStableSessionRoute(session)) {
@@ -102,11 +102,12 @@ export function useProjectsState({
   useEffect(() => {
     /** Entering a concrete session defaults to its live TUI unless the URL explicitly selects another tab. */
     if (!selectedSession?.id) return;
-    const explicitTab = new URLSearchParams(locationSearch).get('tab');
+    const routeParams = new URLSearchParams(locationSearch);
+    const explicitTab = routeParams.get('tab');
     if (!explicitTab) {
-      setActiveTab('shell');
+      setActiveTab(selectedSession.__provider === 'hermes' || routeParams.get('provider') === 'hermes' ? 'chat' : 'shell');
     }
-  }, [locationSearch, selectedSession?.id]);
+  }, [locationSearch, selectedSession?.__provider, selectedSession?.id]);
   useEffect(() => {
     /**
      * 让项目主页和会话消息成为两个独立入口，避免项目路由继续高亮消息 Tab。
@@ -368,7 +369,7 @@ export function useProjectsState({
     (session: ProjectSession) => {
       setSelectedSession(session);
       setSelectedWorkflow(null);
-      setActiveTab('shell');
+      setActiveTab(session.__provider === 'hermes' ? 'chat' : 'shell');
       const sessionProjectName = session.__projectName || selectedProject?.name || '';
       const sessionProjectPath = session.projectPath || selectedProject?.fullPath || selectedProject?.path || '';
       const sessionProject = {

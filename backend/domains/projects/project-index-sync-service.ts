@@ -28,6 +28,7 @@ import {
 import { providerSessionIndexDb } from '../../provider-session-index-store.js';
 import { sessionAttentionDb } from '../../session-attention-store.js';
 import { selectProviderBackfillFiles } from './project-index-backfill-selection.js';
+import { listHermesSessions } from './hermes-session-read-model.js';
 
 const BACKFILL_FILE_LIMIT = (() => {
   const parsed = Number.parseInt(process.env.PROJECT_INDEX_BACKFILL_FILE_LIMIT || '', 10);
@@ -362,7 +363,42 @@ export async function backfillProjectIndex(): Promise<{ manualCount: number; pro
       console.warn(`[ProjectIndex] Could not backfill ${provider} file ${filePath}:`, error);
     }
   }
+  providerCount += await reconcileHermesSessionIndex();
   const reconcileResult = await reconcileProjectIndex(config);
   console.info(`[ProjectIndex] Backfill complete: manual=${manualCount}, provider=${providerCount}, hidden=${reconcileResult.hiddenCount}`);
   return { manualCount, providerCount, hiddenCount: reconcileResult.hiddenCount };
+}
+
+/**
+ * Reconcile the complete allowlisted Hermes header snapshot into ozw's
+ * provider/project indexes. Hermes SQLite watcher events call this same path,
+ * so WAL changes update discovery instead of merely broadcasting stale data.
+ */
+export async function reconcileHermesSessionIndex(): Promise<number> {
+  const result = await listHermesSessions({ includeHidden: true });
+  const snapshotIds: string[] = [];
+  let projectCount = 0;
+  for (const session of result.sessions) {
+    snapshotIds.push(String(session.id));
+    const projectPath = String(session.projectPath || '').trim();
+    if (!projectPath) continue;
+    providerSessionIndexDb.upsert(db, {
+      provider: 'hermes',
+      id: String(session.id),
+      sourceSessionId: String(session.providerSessionId || ''),
+      projectPath,
+      summary: String(session.title || 'Hermes Session'),
+      title: String(session.title || 'Hermes Session'),
+      model: String(session.model || ''),
+      filePath: `hermes-profile:${String(session.providerScope || 'default')}`,
+      createdAt: session.createdAt || session.created_at || null,
+      lastActivity: session.updated_at || session.createdAt || null,
+      messageCount: typeof session.messageCount === 'number' ? session.messageCount : null,
+      messageCountKnown: true,
+    });
+    if (await upsertProjectIndexFromProviderSession(session)) projectCount += 1;
+  }
+  providerSessionIndexDb.deleteMissingFromSnapshot(db, 'hermes', snapshotIds);
+  await reconcileProjectIndex();
+  return projectCount;
 }

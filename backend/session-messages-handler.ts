@@ -11,9 +11,10 @@ import {
   getProviderLiveTranscriptSnapshot,
 } from './domains/provider-runtime/live-transcript-store.js';
 import { filterRenderableMessages, type ChatMessageLike } from '../shared/provider-runtime-transcript.js';
+import { decodeHermesScopedId, getHermesSessionMessages } from './domains/projects/hermes-session-read-model.js';
 
 type MessageRecord = Record<string, any>;
-type ProviderName = "codex" | "pi" | "claude";
+type ProviderName = "codex" | "pi" | "claude" | "hermes";
 type SessionMessagesRequest = { params: { projectName: string; sessionId: string }; query: Record<string, any> };
 type SessionMessagesResponse = { json(data: unknown): unknown; status(code: number): SessionMessagesResponse };
 type SessionMessageReader = (sessionId: string, limit?: number | null, offset?: number, afterLine?: number | null, historySnapshotRawLineOffset?: number | null, afterCursor?: string | null) => Promise<any>;
@@ -329,11 +330,37 @@ export async function handleGetSessionMessages(req: SessionMessagesRequest, res:
         const parsedAfterCursor = typeof afterCursor === 'string' && afterCursor ? afterCursor : null;
         const isIncrementalRead = parsedAfterLine !== null || parsedAfterCursor !== null;
 
-        let resolvedProvider: ProviderName | null = provider === 'codex' ? 'codex' : provider === 'pi' ? 'pi' : provider === 'claude' ? 'claude' : null;
+        let resolvedProvider: ProviderName | null = provider === 'codex' ? 'codex' : provider === 'pi' ? 'pi' : provider === 'claude' ? 'claude' : provider === 'hermes' ? 'hermes' : null;
         let projectPath = '';
         const readCodexMessages = getCodexSessionMessages as SessionMessageReader;
         const readPiMessages = getPiSessionMessages as SessionMessageReader;
         const readClaudeMessages = getClaudeSessionMessages as SessionMessageReader;
+
+        if (resolvedProvider === 'hermes') {
+            const identity = decodeHermesScopedId(sessionId);
+            if (!identity) return res.status(400).json({ error: 'Invalid scoped Hermes session id' });
+            let hermesResult;
+            try {
+                hermesResult = await getHermesSessionMessages(
+                    identity,
+                    { limit: parsedLimit || 1000, cursor: parsedAfterCursor },
+                );
+            } catch (error) {
+                if ((error as Error).message === 'Invalid Hermes history cursor') {
+                    return res.status(400).json({ error: 'Invalid Hermes history cursor' });
+                }
+                throw error;
+            }
+            return res.json({
+                messages: hermesResult.messages,
+                total: hermesResult.total,
+                hasMore: hermesResult.hasMore,
+                nextMessageOffset: hermesResult.nextMessageOffset,
+                appendCursor: hermesResult.appendCursor,
+                nextCursor: hermesResult.nextCursor,
+                source: 'hermes-sqlite-readonly',
+            });
+        }
 
         if (isCbwRouteSessionId(sessionId)) {
             // cN route sessions no longer read from co conversation data.

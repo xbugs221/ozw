@@ -25,6 +25,26 @@ export type SessionBulkMessageResult = {
 };
 
 /**
+ * Hermes continuation is server-authoritative: a page is fetchable only when
+ * the response says so and supplies a new opaque cursor.
+ */
+export function canContinueSessionHistory({
+  provider,
+  hasMore,
+  nextCursor,
+  currentCursor = null,
+}: {
+  provider: string;
+  hasMore: boolean;
+  nextCursor?: string | null;
+  currentCursor?: string | null;
+}): boolean {
+  if (!hasMore) return false;
+  if (provider !== 'hermes') return true;
+  return Boolean(nextCursor && nextCursor !== currentCursor);
+}
+
+/**
  * Pick the next history offset from message metadata, retaining legacy compatibility.
  */
 function resolveNextBulkMessageOffset(data: Record<string, unknown>, offset: number, loadedCount: number): number {
@@ -60,9 +80,10 @@ export async function loadSessionMessagesInPages({
   let offset = 0;
   let total = 0;
   let historySnapshotRawLineOffset: number | null = null;
+  let historyCursor: string | null = null;
 
   for (let attempt = 0; attempt < SESSION_BULK_MAX_PAGE_ATTEMPTS; attempt += 1) {
-    const response = await sessionMessages(projectName, sessionId, pageSize, offset, provider, null, null, projectPath, historySnapshotRawLineOffset);
+    const response = await sessionMessages(projectName, sessionId, pageSize, offset, provider, null, historyCursor, projectPath, historySnapshotRawLineOffset);
     if (!response.ok) {
       throw new Error('Failed to load all session messages');
     }
@@ -75,8 +96,17 @@ export async function loadSessionMessagesInPages({
       historySnapshotRawLineOffset = Number(data.historySnapshotRawLineOffset);
     }
 
-    if (!data?.hasMore) {
+    const nextCursor = typeof data?.nextCursor === 'string' ? data.nextCursor : null;
+    if (!canContinueSessionHistory({
+      provider,
+      hasMore: Boolean(data?.hasMore),
+      nextCursor,
+      currentCursor: historyCursor,
+    })) {
       return { messages, total: Math.max(total, messages.length), historySnapshotRawLineOffset };
+    }
+    if (provider === 'hermes') {
+      historyCursor = nextCursor;
     }
     const nextOffset = resolveNextBulkMessageOffset(data, offset, pageMessages.length);
     if (nextOffset <= offset) {

@@ -28,6 +28,7 @@ const PROVIDER_LABELS: Record<SessionProvider, string> = {
   codex: 'Codex',
   claude: 'Claude Code',
   pi: 'Pi',
+  hermes: 'Hermes',
 };
 
 /**

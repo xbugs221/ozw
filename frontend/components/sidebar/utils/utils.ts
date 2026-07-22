@@ -329,7 +329,11 @@ export const getAllSessions = (
     .filter((session) => includeHidden || isVisibleByDefault(session))
     .map((session) => ({ ...session, __provider: 'claude' as const }));
 
-  return [...codexSessions, ...piSessions, ...claudeSessions].sort(compareSessionsByCreationNumber);
+  const hermesSessions = (project.hermesSessions || [])
+    .filter((session) => includeHidden || isVisibleByDefault(session))
+    .map((session) => ({ ...session, __provider: 'hermes' as const }));
+
+  return [...codexSessions, ...piSessions, ...claudeSessions, ...hermesSessions].sort(compareSessionsByCreationNumber);
 };
 
 /**

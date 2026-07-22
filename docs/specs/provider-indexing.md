@@ -6,6 +6,7 @@
 
 - `pnpm exec tsx --test tests/backend/provider-session-index-store.test.ts`
 - `pnpm exec tsx --test tests/specs/provider-session-list-read-model.spec.ts`
+- `pnpm exec tsx --test tests/specs/hermes-readonly-provider.spec.ts`
 - `pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts tests/specs/project-index-backfill-selection.spec.ts`
 
 ## 需求：项目发现必须使用 Provider 的轻量权威索引
@@ -341,6 +342,27 @@ ozw 不需要迁移、读取或展示历史 co conversation。
 - **并且** 新发送消息不得续写旧 co conversation
 
 ---
+
+## 需求：Hermes 历史是只读的 profile-scoped Provider
+
+Hermes `state.db` 只能作为本地允许 home 中的只读数据源。它的 session identity 必须由 profile scope 和原始 session id 共同组成，不能与其他 provider 或同名 profile session 混淆。
+
+### 场景：SQLite/WAL 刷新只发现可见顶层项目会话
+
+- **给定** 允许列表中的 Hermes home 包含 `state.db`，并且可能有多个 profile 使用同一个原始 session id
+- **当** 后台 backfill 或 state.db/WAL/SHM watcher 刷新项目索引
+- **则** 读取必须使用 SQLite 只读连接，不得迁移、checkpoint、改变 journal mode 或写入数据库
+- **并且** 只显示属于项目的可见顶层逻辑会话；archive、delegate 和 compression ancestor 不得泄漏到普通卡片
+- **且** 未归属会话只能进入只读未归属集合；单个不兼容 schema 或坏 profile 只产生诊断，不能阻塞其余 profile
+
+### 场景：历史与 UI capability 维持只读边界
+
+- **给定** 用户从 Hermes 卡片进入压缩会话的历史详情
+- **当** 服务端读取 root 到 tip 的 active 消息，并把 reasoning、工具调用/结果和结构化正文归一化
+- **则** 历史必须按稳定 message key 有序返回，且不得返回 system prompt、model config、api content 或本机媒体文件内容
+- **并且** 前端必须把会话保存在 `hermesSessions` 独立 bucket；未知 provider 必须安全失败，不能降级为 Codex
+- **且** Hermes capability 仅允许列表和历史读取；创建、发送、重命名、删除、实时订阅、状态查询与终端恢复均为 false
+- **测试文件**：`tests/backend/hermes-session-read-model.test.ts`、`tests/specs/hermes-readonly-provider.spec.ts`
 
 ## 后续规格
 

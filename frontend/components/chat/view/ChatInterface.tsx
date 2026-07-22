@@ -309,6 +309,7 @@ function ChatInterface({
     setPendingPermissionRequests,
   } = useChatProviderState({
     selectedSession,
+    disableModelCatalogs: selectedSession?.__provider === 'hermes' || new URLSearchParams(location.search).get('provider') === 'hermes',
   });
   const projectSessionProvider = useMemo(
     () => resolveProjectSessionProvider(selectedProject, selectedSession?.id, selectedSession),
@@ -322,7 +323,7 @@ function ChatInterface({
     // URL query param takes highest precedence — it's the most reliable
     // signal on page reload when session routes haven't been resolved yet.
     const urlProvider = new URLSearchParams(location.search).get('provider');
-    if (urlProvider === 'pi' || urlProvider === 'codex' || urlProvider === 'claude') {
+    if (urlProvider === 'pi' || urlProvider === 'codex' || urlProvider === 'claude' || urlProvider === 'hermes') {
       return urlProvider;
     }
     const sessionProvider = selectedSession?.__provider || null;
@@ -434,6 +435,7 @@ function ChatInterface({
   } = useChatSessionState({
     selectedProject,
     selectedSession,
+    providerHint: effectiveProvider,
     sendMessage,
     isFollowingLatest,
     isRealtimeConnected: Boolean(ws && ws.readyState === WebSocket.OPEN),
@@ -1095,6 +1097,13 @@ function ChatInterface({
   }, [handleRenderSnapshot, renderSnapshotRequestId, selectedSession]);
 
   useEffect(() => {
+    /** Hermes has no interactive TUI: opening a card immediately loads its read-only transcript. */
+    if (effectiveProvider === 'hermes' && selectedSession && renderSnapshotStateRef.current.mode !== 'renderedSnapshot') {
+      void handleRenderSnapshot();
+    }
+  }, [effectiveProvider, handleRenderSnapshot, selectedSession]);
+
+  useEffect(() => {
     /**
      * Rendering from the Messages tab should land on the newest transcript
      * content, matching the TUI tail-first workflow instead of showing history
@@ -1547,6 +1556,9 @@ function ChatInterface({
         ? selectedSession?.id || ''
         : '';
     const sessionId = routeSessionId || selectedSession?.id || currentSessionId || '';
+    if (effectiveProvider === 'hermes') {
+      return;
+    }
     if (!sessionId || isTemporarySessionId(sessionId)) {
       return;
     }
@@ -1584,6 +1596,7 @@ function ChatInterface({
     selectedProjectPath: selectedProject?.fullPath || selectedProject?.path || '',
     selectedSessionId: selectedSession?.id,
     selectedSessionProjectPath: selectedSession?.projectPath || '',
+    selectedSessionProviderScope: typeof selectedSession?.providerScope === 'string' ? selectedSession.providerScope : null,
     selectedSessionRouteIndex: selectedSession?.routeIndex,
     sendMessage,
     statusReconcileKeyRef,
@@ -1726,7 +1739,7 @@ function ChatInterface({
             className={renderSnapshotState.mode === 'tui' ? 'min-h-0 flex-1' : 'hidden'}
           >
             <div className="flex h-full min-h-0 flex-col">
-              {renderSnapshotState.mode === 'tui' && (
+              {renderSnapshotState.mode === 'tui' && effectiveProvider !== 'hermes' && (
                 <Shell
                   selectedProject={selectedProject}
                   selectedSession={selectedSession}
@@ -1754,6 +1767,11 @@ function ChatInterface({
                 onBookmarkSelect={onBookmarkSelect}
                 placement="floating"
               />
+              {effectiveProvider === 'hermes' && (
+                <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+                  仅供浏览；不能在此续聊或修改会话。
+                </div>
+              )}
               <ChatMessagesPane
             scrollContainerRef={renderedSnapshotScrollContainerRef}
             onTranscriptScroll={handleRenderedSnapshotScroll}
@@ -1791,9 +1809,9 @@ function ChatInterface({
             createDiff={createDiff}
             onFileOpen={onFileOpen}
             onShowSettings={onShowSettings}
-            autoExpandTools={autoExpandTools}
+            autoExpandTools={effectiveProvider === 'hermes' ? true : autoExpandTools}
             showRawParameters={showRawParameters}
-            showThinking={showThinking}
+            showThinking={effectiveProvider === 'hermes' ? true : showThinking}
             isFollowingLatest={isFollowingLatest}
             selectedProject={selectedProject}
             scrollTargetMessageKey={bookmarkScrollTargetKey}
