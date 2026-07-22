@@ -1,12 +1,13 @@
 // @ts-nocheck -- Runtime diagnostics aggregate legacy JS-shaped objects.
 /**
- * PURPOSE: Build one user-facing runtime readiness report for the oz workflow
- * CLI and supported agent CLIs before users start an ozw workflow.
+ * PURPOSE: Build one user-facing capability report for optional oz workflow
+ * and agent CLIs, so the UI exposes only sessions users can start.
  */
 import { spawnSync } from 'child_process';
 import { resolveExecutablePath } from './executable-resolver.js';
 import { getRuntimeDependencyDiagnostics } from './runtime-dependencies.js';
 
+/** Providers that ozw can create and run as new browser conversations. */
 const AGENT_COMMANDS = ['codex', 'pi'];
 
 /**
@@ -94,6 +95,7 @@ function buildOzReadiness(ozDiagnostics) {
       ? ''
       : 'Install a compatible oz CLI and ensure oz flow contract --json exposes list-changes, run, resume, status, and abort.',
     error,
+    canStartWorkflow: available && contractOk,
   };
 }
 
@@ -114,11 +116,16 @@ export async function buildRuntimeReadinessReport(options = {}) {
     commands[commandName] = checkCliAvailability(commandName, { env });
   }
 
+  const manualSessions = AGENT_COMMANDS.filter((commandName) => commands[commandName].available);
+  const workflows = commands.oz.canStartWorkflow;
   return {
-    ready: Boolean(ozDiagnostics.ok)
-      && commands.codex.available
-      && commands.pi.available,
+    /** A usable installation has at least one independently startable capability. */
+    ready: manualSessions.length > 0 || workflows,
     commands,
+    capabilities: {
+      manualSessions,
+      workflows,
+    },
     path: env.PATH || '',
   };
 }

@@ -140,9 +140,6 @@ import {
     syncWorkflowOverviewIndexesForProjects,
     summarizeWorkflowForProjectList,
 } from '../workflows.js';
-import {
-    checkRequiredRuntimeDependencies,
-} from '../runtime-dependencies.js';
 import { buildRuntimeReadinessReport } from '../runtime-readiness.js';
 import { getCodexModelCatalog } from '../codex-models.js';
 import { getPiModelCatalog } from '../pi-models.js';
@@ -1051,9 +1048,6 @@ process.on('SIGTERM', async () => {
 // Initialize database and start server
 async function startServer() {
     try {
-        // Ensure required external binaries are available in PATH
-        checkRequiredRuntimeDependencies();
-
         // Initialize authentication database
         await initializeDatabase();
 

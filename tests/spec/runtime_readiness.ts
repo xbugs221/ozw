@@ -20,7 +20,7 @@ async function writeExecutable(filePath: string, lines: string[]): Promise<void>
   await fs.writeFile(filePath, `${lines.join('\n')}\n`, { mode: 0o755 });
 }
 
-test('统一运行依赖报告覆盖 oz、Codex、Pi 和登录动作', async () => {
+test('统一运行能力报告覆盖 oz、Codex、Pi 和登录动作', async () => {
   /**
    * 业务场景：新用户启动前想知道服务进程能否找到三个必要 CLI。
    */
@@ -74,6 +74,8 @@ test('统一运行依赖报告覆盖 oz、Codex、Pi 和登录动作', async () 
     assert.equal(report.commands.pi.authenticated, 'unknown');
     assert.match(report.commands.codex.requiredAction, /codex login/);
     assert.match(report.commands.pi.requiredAction, /pi login/);
+    assert.deepEqual((report as any).capabilities.manualSessions.sort(), ['codex', 'pi']);
+    assert.equal((report as any).capabilities.workflows, true);
 
     await fs.mkdir(path.join(process.cwd(), 'test-results/runtime-readiness'), { recursive: true });
     await fs.writeFile(
@@ -86,7 +88,7 @@ test('统一运行依赖报告覆盖 oz、Codex、Pi 和登录动作', async () 
   }
 });
 
-test('oz flow contract 缺少能力时整体 ready=false 并说明缺失能力', async () => {
+test('oz flow contract 缺少能力时只禁用工作流，不阻止已安装 Agent 会话', async () => {
   /**
    * 业务场景：oz 可执行但 workflow 子命令不兼容时，页面不能误报可运行。
    */
@@ -123,9 +125,11 @@ test('oz flow contract 缺少能力时整体 ready=false 并说明缺失能力',
       },
     });
 
-    assert.equal(report.ready, false);
+    assert.equal(report.ready, true);
     assert.equal(report.commands.oz.available, true);
     assert.match(report.commands.oz.error, /run|resume|status|abort/);
+    assert.equal((report as any).capabilities.workflows, false);
+    assert.deepEqual((report as any).capabilities.manualSessions.sort(), ['codex', 'pi']);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

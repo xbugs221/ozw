@@ -65,6 +65,17 @@ const CARD_SORT_OPTIONS: Array<{ value: SessionCardSortMode; label: string }> = 
   { value: 'provider', label: 'Provider' },
 ];
 
+type StartableManualProvider = 'codex' | 'pi';
+type RuntimeCapabilityPayload = { capabilities?: { manualSessions?: string[] } };
+
+/** Extract providers that ozw can run as new browser conversations. */
+function getStartableManualProviders(payload: RuntimeCapabilityPayload | null): StartableManualProvider[] {
+  /** PURPOSE: Keep unavailable and legacy transcript providers out of new-session actions. */
+  return (payload?.capabilities?.manualSessions || []).filter((provider): provider is StartableManualProvider => (
+    provider === 'codex' || provider === 'pi'
+  ));
+}
+
 type OverviewActionMenuState =
   | {
     isOpen: false;
@@ -415,6 +426,7 @@ export default function ProjectOverviewPanel({
   const [showAllManualSessionCards, setShowAllManualSessionCards] = useState(false);
   const [sessionExpanded, setSessionExpanded] = useState(() => displayMode === 'all' || displayMode === 'sessions');
   const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  const [runtimeCapabilities, setRuntimeCapabilities] = useState<RuntimeCapabilityPayload | null>(null);
   const [workflowActionDialogOpen, setWorkflowActionDialogOpen] = useState(false);
   const [sessionCreateError, setSessionCreateError] = useState('');
   const [actionMenu, setActionMenu] = useState<OverviewActionMenuState>({ isOpen: false, x: 0, y: 0 });
@@ -439,6 +451,17 @@ export default function ProjectOverviewPanel({
       .join('|'),
     [sessions],
   );
+  const startableProviders = useMemo(() => getStartableManualProviders(runtimeCapabilities), [runtimeCapabilities]);
+
+  useEffect(() => {
+    /** PURPOSE: Read the server PATH-derived capability report for session actions. */
+    let cancelled = false;
+    void api.diagnostics.runtimeDependencies()
+      .then(async (response) => (response.ok ? response.json() : {}))
+      .then((payload) => { if (!cancelled) setRuntimeCapabilities(payload); })
+      .catch(() => { if (!cancelled) setRuntimeCapabilities({}); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     setCurrentTime(new Date());
@@ -1107,33 +1130,18 @@ export default function ProjectOverviewPanel({
                   className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-background px-3 py-2"
                 >
                   <span className="text-xs text-muted-foreground">选择会话提供方</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    data-testid="project-new-session-provider-codex"
-                    onClick={() => handleCreateSession('codex')}
-                  >
-                    Codex
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    data-testid="project-new-session-provider-pi"
-                    onClick={() => handleCreateSession('pi')}
-                  >
-                    Pi
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    data-testid="project-new-session-provider-claude"
-                    onClick={() => handleCreateSession('claude')}
-                  >
-                    Claude Code
-                  </Button>
+                  {startableProviders.map((provider) => (
+                    <Button key={provider} type="button" size="sm" variant="outline"
+                      data-testid={`project-new-session-provider-${provider}`}
+                      onClick={() => handleCreateSession(provider)}>
+                      {provider === 'codex' ? 'Codex' : 'Pi'}
+                    </Button>
+                  ))}
+                  {runtimeCapabilities && startableProviders.length === 0 && (
+                    <span data-testid="project-new-session-provider-missing" className="text-xs text-muted-foreground">
+                      未检测到可启动的会话 Agent；请安装 Codex 或 Pi CLI 后刷新页面。
+                    </span>
+                  )}
                   <Button
                     type="button"
                     size="sm"

@@ -33,6 +33,11 @@ type LaunchResult = {
   error?: string;
 };
 
+type RuntimeCapabilityPayload = {
+  capabilities?: { workflows?: boolean; manualSessions?: string[] };
+  commands?: { oz?: { requiredAction?: string }; codex?: { requiredAction?: string } };
+};
+
 const STATUS_LABELS: Record<LaunchStatus, string> = {
   waiting: '等待',
   starting: '启动中',
@@ -74,6 +79,11 @@ export default function WorkflowActionDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState('');
+  const [runtimeCapabilities, setRuntimeCapabilities] = useState<RuntimeCapabilityPayload | null>(null);
+  const workflowAvailable = runtimeCapabilities?.capabilities?.workflows === true;
+  const planningAvailable = runtimeCapabilities?.capabilities?.manualSessions?.includes('codex') === true;
+  const workflowUnavailableMessage = runtimeCapabilities?.commands?.oz?.requiredAction
+    || '未检测到兼容的 oz CLI，无法发起工作流。';
 
   const selectedCount = selectedChanges.size;
   const allSelected = changes.length > 0 && changes.every((changeName) => selectedChanges.has(changeName));
@@ -104,13 +114,23 @@ export default function WorkflowActionDialog({
   };
 
   useEffect(() => {
+    /** PURPOSE: Refresh oz capability when the workflow launcher opens. */
+    if (!isOpen) return;
+    void api.diagnostics.runtimeDependencies()
+      .then(async (response) => (response.ok ? response.json() : {}))
+      .then((payload) => setRuntimeCapabilities(payload))
+      .catch(() => setRuntimeCapabilities({}));
+  }, [isOpen]);
+
+  useEffect(() => {
+    /** PURPOSE: Query changes only when oz can actually launch a workflow. */
     if (!isOpen) {
       return;
     }
     setResults([]);
     setSelectedChanges(new Set());
-    void loadChanges();
-  }, [isOpen, project.name]);
+    if (workflowAvailable) void loadChanges();
+  }, [isOpen, project.name, workflowAvailable]);
 
   const toggleChange = (changeName: string) => {
     /**
@@ -136,6 +156,10 @@ export default function WorkflowActionDialog({
      * Start each selected change with the existing single-workflow endpoint so
      * each change keeps an independent success or failure state.
      */
+    if (!workflowAvailable) {
+      setError(workflowUnavailableMessage);
+      return;
+    }
     const targets = [...selectedChanges];
     if (targets.length === 0) {
       setError('请先选择至少一个 active change。');
@@ -192,6 +216,10 @@ export default function WorkflowActionDialog({
      * Open a regular Codex session with a planning prompt draft; this path does
      * not call the workflow creation API and therefore cannot start oz flow.
      */
+    if (!planningAvailable) {
+      setError(runtimeCapabilities?.commands?.codex?.requiredAction || '缺少 Codex CLI，无法发起规划会话。');
+      return;
+    }
     const result = await Promise.resolve(onNewSession(project, 'codex', {
       sessionSummary: '新规划：oz change',
       initialPrompt: PLANNING_PROMPT,
@@ -227,20 +255,27 @@ export default function WorkflowActionDialog({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {runtimeCapabilities && !workflowAvailable && (
+            <div data-testid="workflow-dependency-missing" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+              缺少工作流依赖：{workflowUnavailableMessage}
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm font-medium text-foreground">可接手 active changes</div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span>已选 {selectedCount}</span>
-              <button type="button" className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={toggleAll} disabled={isLoading || isStarting || changes.length === 0}>
+              <button type="button" className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={toggleAll} disabled={!workflowAvailable || isLoading || isStarting || changes.length === 0}>
                 {allSelected ? '取消全选' : '全选'}
               </button>
-              <button type="button" className="rounded-md border border-border p-1 hover:bg-accent" onClick={() => void loadChanges()} disabled={isLoading || isStarting} aria-label="刷新 active changes">
+              <button type="button" className="rounded-md border border-border p-1 hover:bg-accent" onClick={() => void loadChanges()} disabled={!workflowAvailable || isLoading || isStarting} aria-label="刷新 active changes">
                 <RefreshCw className={['h-3.5 w-3.5', isLoading ? 'animate-spin' : ''].join(' ')} />
               </button>
             </div>
           </div>
 
-          {isLoading ? (
+          {!workflowAvailable ? (
+            <div className="rounded-md border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">安装兼容的 oz 后即可读取并启动工作流。</div>
+          ) : isLoading ? (
             <div className="rounded-md border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">正在读取 active changes...</div>
           ) : changes.length === 0 ? (
             <div className="rounded-md border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
@@ -308,7 +343,7 @@ export default function WorkflowActionDialog({
             type="button"
             className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm hover:bg-accent"
             onClick={() => void startPlanningSession()}
-            disabled={isStarting}
+            disabled={isStarting || !planningAvailable}
           >
             <MessageSquarePlus className="h-4 w-4" />
             发起新的规划
@@ -321,7 +356,7 @@ export default function WorkflowActionDialog({
               type="button"
               className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
               onClick={() => void startSelectedWorkflows()}
-              disabled={isStarting || selectedCount === 0}
+              disabled={!workflowAvailable || isStarting || selectedCount === 0}
             >
               {isStarting && <Loader2 className="h-4 w-4 animate-spin" />}
               启动选中工作流

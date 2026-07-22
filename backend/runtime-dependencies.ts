@@ -1,7 +1,7 @@
 // @ts-nocheck -- Complex cross-module type dependencies; needs dedicated pass.
 /**
- * PURPOSE: Resolve and validate external oz CLI commands required by the ozw
- * workflow control plane before the web server starts.
+ * PURPOSE: Resolve and diagnose the external oz CLI used by the optional ozw
+ * workflow control plane without making server startup depend on it.
  */
 import { execFileSync, spawnSync } from 'child_process';
 import { resolveExecutablePath } from './executable-resolver.js';
@@ -155,30 +155,14 @@ function checkGraphCapability(commandPath, contractCapabilities, env = process.e
 }
 
 /**
- * Resolve all required workflow binaries and fail fast with actionable context.
+ * Return workflow diagnostics for legacy callers without blocking startup.
  */
 export function checkRequiredRuntimeDependencies() {
-  const diagnostics = getRuntimeDependencyDiagnostics();
-  const missing = Object.entries(diagnostics.commands)
-    .filter(([, command]) => !command.command_path)
-    .map(([name]) => name);
-  const incompatible = [];
-  if (diagnostics.commands.oz.command_path && !diagnostics.commands.oz.version.ok) {
-    incompatible.push('oz --version');
-  }
-  if (diagnostics.commands.oz.command_path && !diagnostics.commands.oz.contract.ok) {
-    incompatible.push(`oz flow contract: ${diagnostics.commands.oz.contract.missing.join(', ')}`);
-  }
-  if (missing.length > 0 || incompatible.length > 0) {
-    throw new Error([
-      'Missing or incompatible required workflow binaries.',
-      missing.length > 0 ? `Missing from PATH: ${missing.join(', ')}` : '',
-      incompatible.length > 0 ? `Incompatible: ${incompatible.join('; ')}` : '',
-      'Install oz manually, then ensure the service process PATH can see it.',
-      `PATH=${process.env.PATH || ''}`,
-    ].filter(Boolean).join(' '));
-  }
-  return diagnostics;
+  /**
+   * PURPOSE: Preserve the old export for integrations while treating every
+   * dependency as optional capability discovery instead of a startup gate.
+   */
+  return getRuntimeDependencyDiagnostics();
 }
 
 /**

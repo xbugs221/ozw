@@ -130,7 +130,7 @@ test('runtime diagnostics report graph unavailable when contract and --help both
   }
 });
 
-test('runtime diagnostics fail when oz flow lacks JSON workflow contract', async () => {
+test('runtime diagnostics report an incompatible oz flow contract without blocking startup', async () => {
   const previousPath = process.env.PATH;
   const binDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-runtime-bin-'));
   await writeFakeCommand(binDir, 'oz', fakeOzBody({
@@ -142,13 +142,13 @@ test('runtime diagnostics fail when oz flow lacks JSON workflow contract', async
     assert.equal(diagnostics.ok, false);
     assert.equal(diagnostics.commands.oz.contract.ok, false);
     assert.deepEqual(diagnostics.commands.oz.contract.missing, ['resume', 'abort']);
-    assert.throws(() => checkRequiredRuntimeDependencies(), /oz flow contract/);
+    assert.equal(checkRequiredRuntimeDependencies().ok, false);
   } finally {
     process.env.PATH = previousPath;
   }
 });
 
-test('runtime diagnostics fail clearly when required CLI is missing', () => {
+test('runtime diagnostics report a missing oz CLI without blocking startup', () => {
   const previousPath = process.env.PATH;
   process.env.PATH = '';
   try {
@@ -156,7 +156,7 @@ test('runtime diagnostics fail clearly when required CLI is missing', () => {
     assert.equal(diagnostics.ok, false);
     assert.equal(diagnostics.commands.oz.command_path, '');
     assert.match(diagnostics.commands.oz.version.error, /PATH/);
-    assert.throws(() => checkRequiredRuntimeDependencies(), /Missing from PATH: oz/);
+    assert.equal(checkRequiredRuntimeDependencies().ok, false);
   } finally {
     process.env.PATH = previousPath;
   }
