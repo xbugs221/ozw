@@ -20,7 +20,7 @@ async function writeExecutable(filePath: string, lines: string[]): Promise<void>
   await fs.writeFile(filePath, `${lines.join('\n')}\n`, { mode: 0o755 });
 }
 
-test('统一运行能力报告覆盖 oz、Codex、Pi 和登录动作', async () => {
+test('统一运行能力报告覆盖 oz、Codex、Pi、Claude 和登录动作', async () => {
   /**
    * 业务场景：新用户启动前想知道服务进程能否找到三个必要 CLI。
    */
@@ -47,6 +47,11 @@ test('统一运行能力报告覆盖 oz、Codex、Pi 和登录动作', async () 
       'if [ "$1" = "--version" ]; then echo "pi 0.75.5"; exit 0; fi',
       'exit 0',
     ]);
+    await writeExecutable(path.join(binDir, 'claude'), [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then echo "claude 1.0.0"; exit 0; fi',
+      'exit 0',
+    ]);
 
     const report: {
       ready: boolean;
@@ -66,15 +71,16 @@ test('统一运行能力报告覆盖 oz、Codex、Pi 和登录动作', async () 
     });
 
     assert.equal(report.ready, true);
-    assert.deepEqual(Object.keys(report.commands).sort(), ['codex', 'oz', 'pi']);
+    assert.deepEqual(Object.keys(report.commands).sort(), ['claude', 'codex', 'oz', 'pi']);
     assert.equal(report.commands.oz.version, 'oz 1.2.3');
     assert.equal(report.commands.codex.version, 'codex 0.134.0');
     assert.equal(report.commands.pi.version, 'pi 0.75.5');
+    assert.equal(report.commands.claude.version, 'claude 1.0.0');
     assert.equal(report.commands.codex.authenticated, 'unknown');
     assert.equal(report.commands.pi.authenticated, 'unknown');
     assert.match(report.commands.codex.requiredAction, /codex login/);
     assert.match(report.commands.pi.requiredAction, /pi login/);
-    assert.deepEqual((report as any).capabilities.manualSessions.sort(), ['codex', 'pi']);
+    assert.deepEqual((report as any).capabilities.manualSessions.sort(), ['claude', 'codex', 'pi']);
     assert.equal((report as any).capabilities.workflows, true);
 
     await fs.mkdir(path.join(process.cwd(), 'test-results/runtime-readiness'), { recursive: true });

@@ -65,14 +65,14 @@ const CARD_SORT_OPTIONS: Array<{ value: SessionCardSortMode; label: string }> = 
   { value: 'provider', label: 'Provider' },
 ];
 
-type StartableManualProvider = 'codex' | 'pi';
+type StartableManualProvider = 'codex' | 'pi' | 'claude';
 type RuntimeCapabilityPayload = { capabilities?: { manualSessions?: string[] } };
 
 /** Extract providers that ozw can run as new browser conversations. */
 function getStartableManualProviders(payload: RuntimeCapabilityPayload | null): StartableManualProvider[] {
   /** PURPOSE: Keep unavailable and legacy transcript providers out of new-session actions. */
   return (payload?.capabilities?.manualSessions || []).filter((provider): provider is StartableManualProvider => (
-    provider === 'codex' || provider === 'pi'
+    provider === 'codex' || provider === 'pi' || provider === 'claude'
   ));
 }
 
@@ -1134,12 +1134,12 @@ export default function ProjectOverviewPanel({
                     <Button key={provider} type="button" size="sm" variant="outline"
                       data-testid={`project-new-session-provider-${provider}`}
                       onClick={() => handleCreateSession(provider)}>
-                      {provider === 'codex' ? 'Codex' : 'Pi'}
+                      {provider === 'codex' ? 'Codex' : provider === 'pi' ? 'Pi' : 'Claude Code'}
                     </Button>
                   ))}
                   {runtimeCapabilities && startableProviders.length === 0 && (
                     <span data-testid="project-new-session-provider-missing" className="text-xs text-muted-foreground">
-                      未检测到可启动的会话 Agent；请安装 Codex 或 Pi CLI 后刷新页面。
+                      未检测到可启动的会话 Agent；请安装 Codex、Pi 或 Claude Code CLI 后刷新页面。
                     </span>
                   )}
                   <Button

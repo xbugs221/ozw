@@ -8,7 +8,7 @@ import { resolveExecutablePath } from './executable-resolver.js';
 import { getRuntimeDependencyDiagnostics } from './runtime-dependencies.js';
 
 /** Providers that ozw can create and run as new browser conversations. */
-const AGENT_COMMANDS = ['codex', 'pi'];
+const AGENT_COMMANDS = ['codex', 'pi', 'claude'];
 
 /**
  * Probe one non-oz CLI using PATH resolution and a lightweight --version call.
