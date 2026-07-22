@@ -16,7 +16,6 @@ type MainTabConfig = {
 
 const TAB_CONFIG: MainTabConfig[] = [
   { id: 'appearance', labelKey: 'mainTabs.appearance', defaultLabel: 'Appearance' },
-  { id: 'agents', labelKey: 'mainTabs.agents', defaultLabel: 'Agents' },
   { id: 'diagnostics', labelKey: 'mainTabs.diagnostics', defaultLabel: 'Diagnostics', icon: Activity },
 ];
 

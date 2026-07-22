@@ -119,7 +119,7 @@ test('主工作区不再显示 Git 标签且保留文件和终端入口', async 
 
 // ── Settings + provider switching ──────────────────────────────────────────
 
-test('设置页只展示当前支持的智能体', async ({ page }) => {
+test('设置页不再展示智能体子页', async ({ page }) => {
   let removedProviderStatusRequests = 0;
   await page.route('/api/cli/opencode/status', async (route) => {
     removedProviderStatusRequests += 1;
@@ -129,11 +129,7 @@ test('设置页只展示当前支持的智能体', async ({ page }) => {
   await page.goto('/', { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: /设置|Settings/ }).first().click();
 
-  await expect(page.getByRole('tab', { name: /智能体|Agents/ })).toBeVisible({ timeout: 5_000 });
-  await page.getByRole('tab', { name: /智能体|Agents/ }).click();
-
-  await expect(page.getByRole('button', { name: /Codex/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Pi/ })).toBeVisible();
+  await expect(page.getByRole('tab', { name: /智能体|Agents/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /OpenCode/ })).toHaveCount(0);
   expect(removedProviderStatusRequests).toBe(0);
 });

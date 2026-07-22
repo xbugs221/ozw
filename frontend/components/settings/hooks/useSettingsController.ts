@@ -23,7 +23,7 @@ type CodexSettingsStorage = {
   permissionMode?: CodexPermissionMode;
 };
 
-const KNOWN_MAIN_TABS: SettingsMainTab[] = ['appearance', 'agents', 'diagnostics'];
+const KNOWN_MAIN_TABS: SettingsMainTab[] = ['appearance', 'diagnostics'];
 
 /**
  * Resolve external settings tab names into a supported panel, using appearance

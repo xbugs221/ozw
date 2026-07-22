@@ -4,7 +4,6 @@ const X = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidt
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../ui/button';
 import SettingsMainTabs from '../view/SettingsMainTabs';
-import AgentsSettingsTab from '../view/tabs/agents-settings/AgentsSettingsTab';
 import AppearanceSettingsTab from '../view/tabs/AppearanceSettingsTab';
 import RuntimeDiagnosticsTab from '../view/tabs/RuntimeDiagnosticsTab';
 import { useSettingsController } from '../hooks/useSettingsController';
@@ -60,11 +59,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'appearance' }:
 
             {activeTab === 'diagnostics' && <RuntimeDiagnosticsTab />}
 
-            {activeTab === 'agents' && (
-              <AgentsSettingsTab
-                usageEnabled={activeTab === 'agents'}
-              />
-            )}
           </div>
         </div>
 

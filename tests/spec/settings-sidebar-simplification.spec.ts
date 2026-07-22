@@ -44,7 +44,7 @@ test.beforeEach(async ({ page }) => {
   }, AUTH_TOKEN);
 });
 
-test('settings only exposes appearance agents diagnostics and supported providers', async ({ page }) => {
+test('settings only exposes appearance and diagnostics', async ({ page }) => {
   let removedProviderStatusRequests = 0;
   await page.route('/api/cli/opencode/status', async (route) => {
     removedProviderStatusRequests += 1;
@@ -55,7 +55,7 @@ test('settings only exposes appearance agents diagnostics and supported provider
   await page.getByRole('button', { name: /设置|Settings/ }).first().click();
 
   await expect(page.getByRole('tab', { name: '外观' })).toBeVisible();
-  await expect(page.getByRole('tab', { name: '智能体' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '智能体' })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: '诊断' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Git' })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: /API|令牌/ })).toHaveCount(0);
@@ -63,10 +63,7 @@ test('settings only exposes appearance agents diagnostics and supported provider
   await expect(page.getByText('项目排序')).toHaveCount(0);
   await expect(page.getByText('代码编辑器')).toHaveCount(0);
 
-  await page.getByRole('tab', { name: '智能体' }).click();
   await expect(page.getByText('MCP 服务器')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /Codex/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Pi/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /OpenCode/ })).toHaveCount(0);
   expect(removedProviderStatusRequests).toBe(0);
 });
