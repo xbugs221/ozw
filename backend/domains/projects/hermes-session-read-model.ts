@@ -279,7 +279,11 @@ async function listMatching(
       }
       diagnostics.push({ scope: home.scope, status: 'ready', schemaVersion: opened.schemaVersion });
     } catch (error: any) {
-      diagnostics.push(diagnosticFromError(home.scope, error));
+      // Hermes is an optional, read-only integration. A configured profile can
+      // disappear when Hermes is not installed or its local state is cleaned.
+      // Do not turn that expected absence into a workspace-wide warning.
+      const diagnostic = diagnosticFromError(home.scope, error);
+      if (diagnostic.status !== 'missing') diagnostics.push(diagnostic);
     } finally {
       opened?.db.close();
     }

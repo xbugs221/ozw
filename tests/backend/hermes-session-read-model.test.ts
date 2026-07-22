@@ -118,6 +118,21 @@ test('Hermes production read model reads an active WAL without mutating it', asy
   }
 });
 
+test('Hermes treats a missing database as an optional integration', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-hermes-optional-'));
+  const projectPath = path.join(root, 'project');
+  await fs.mkdir(projectPath);
+  try {
+    const listed = await listHermesSessionsForProject(projectPath, {
+      homes: [{ scope: 'default', dbPath: path.join(root, 'missing-state.db') }],
+    });
+    assert.deepEqual(listed.sessions, []);
+    assert.deepEqual(listed.diagnostics, []);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('Hermes overview globally sorts profiles, hides archived rows, and keeps scoped diagnostics', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-hermes-overview-'));
   const projectPath = path.join(root, 'project');

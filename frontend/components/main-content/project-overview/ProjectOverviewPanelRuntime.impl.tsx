@@ -393,7 +393,9 @@ export default function ProjectOverviewPanel({
   const [optimisticSessionUiState, setOptimisticSessionUiState] = useState<Record<string, Pick<ProjectSession, 'favorite' | 'pending' | 'hidden'>>>({});
   const projectConfigPath = project.fullPath || project.path || '';
   const readOnlyProviderCollection = project.readOnlyProviderCollection === true;
-  const hermesDiagnosticFailures = (project.hermesDiagnostics || []).filter((item) => item.status !== 'ready');
+  // Hermes history is optional; a missing local database must not interrupt
+  // normal project work, including while an older backend response is cached.
+  const hermesDiagnosticFailures = (project.hermesDiagnostics || []).filter((item) => item.status !== 'ready' && item.status !== 'missing');
   const workflowEntries = [...(project.workflows || [])]
     .sort((workflowA, workflowB) => compareWorkflowBySortMode(workflowA, workflowB, workflowSortMode));
   const workflows = workflowEntries;
