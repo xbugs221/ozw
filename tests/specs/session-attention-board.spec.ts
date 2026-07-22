@@ -12,6 +12,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { providerSessionIndexDb } from '../../backend/provider-session-index-store.ts';
 import { sessionAttentionDb } from '../../backend/session-attention-store.ts';
+import { workflowOverviewIndexDb } from '../../backend/workflow-overview-index-store.ts';
 
 let tempDir = '';
 let db: Database.Database;
@@ -104,4 +105,32 @@ test('现代手动待处理状态不会被旧配置迁移覆盖', () => {
     WHERE provider = ? AND session_id = ?
   `).get(current.provider, current.sessionId) as { legacy_pending_migrated: number };
   assert.equal(migration.legacy_pending_migrated, 1);
+});
+
+test('首页待处理看板按 Provider 身份过滤 oz flow 内部会话', () => {
+  /** 工作流索引是所有权真值，即使 Provider 行尚未写入 origin 也不得泄漏到首页。 */
+  workflowOverviewIndexDb.replaceForProject(db, '/tmp/session-attention/pi', [{
+    id: 'flow-run',
+    workflowOwnedSessionRefs: [{ provider: 'pi', sessionId: 'flow-owned' }],
+  }]);
+  indexActivity('pi', 'flow-owned', 1_750_000_000_201);
+  indexActivity('codex', 'flow-owned', 1_750_000_000_202);
+  indexActivity('pi', 'manual-visible', 1_750_000_000_203);
+  providerSessionIndexDb.upsert(db, {
+    provider: 'pi',
+    id: 'explicit-workflow',
+    origin: 'workflow',
+    projectPath: '/tmp/session-attention/pi',
+    title: 'explicit workflow session',
+    filePath: '/tmp/session-attention/pi/explicit-workflow.jsonl',
+    lastActivity: new Date(1_750_000_000_204).toISOString(),
+    fileMtimeMs: 1_750_000_000_204,
+  });
+
+  const identities = sessionAttentionDb.list(db, { limit: 100 })
+    .map((row) => `${row.provider}:${row.sessionId}`);
+  assert.equal(identities.includes('pi:flow-owned'), false);
+  assert.equal(identities.includes('pi:explicit-workflow'), false);
+  assert.equal(identities.includes('codex:flow-owned'), true);
+  assert.equal(identities.includes('pi:manual-visible'), true);
 });

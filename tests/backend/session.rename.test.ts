@@ -377,15 +377,15 @@ test('Rejected Claude rename leaves history filename and summary unchanged', { c
   });
 });
 
-test('manual Claude draft sessions are rejected by the provider contract', { concurrency: false }, async () => {
+test('unknown manual draft providers are rejected by the provider contract', { concurrency: false }, async () => {
   await withTemporaryHome(async (tempHome) => {
     const projectPath = path.join(tempHome, 'workspace', 'claude-manual-rejected');
     await fs.mkdir(projectPath, { recursive: true });
 
     const project = await addProjectManually(projectPath, 'Claude Draft Rejected Demo');
     await assert.rejects(
-      () => createManualSessionDraft(project.name, projectPath, 'claude', '会话1'),
-      /provider must be "codex" or "pi"/,
+      () => createManualSessionDraft(project.name, projectPath, 'unknown', '会话1'),
+      /provider must be "codex", "pi" or "claude"/,
     );
   });
 });

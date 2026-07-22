@@ -64,7 +64,7 @@ async function setupRequestDirs(coHome) {
 // Test: Pi send through pi-command WebSocket path (native runtime)
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('pi-command sends native events through WebSocket (no co writes)', async () => {
+test('pi-command redirects users to the tmux TUI without co writes', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-pi-send-'));
   const coHome = path.join(tempRoot, 'co');
   const binDir = path.join(tempRoot, 'bin');
@@ -96,8 +96,8 @@ test('pi-command sends native events through WebSocket (no co writes)', async ()
       },
     }));
 
-    // Wait for native runtime to process
-    await new Promise((r) => setTimeout(r, 5000));
+    // Wait for the protocol-level TUI response.
+    await new Promise((r) => setTimeout(r, 500));
 
     // Verify no co-request-v1 pending requests were written
     const pendingDir = path.join(coHome, 'requests', 'pending');
@@ -108,27 +108,9 @@ test('pi-command sends native events through WebSocket (no co writes)', async ()
     assert.equal(pendingFiles.length, 0,
       `must not write any co-request-v1 pending requests (native runtime, not co). Server: ${fixture.output.text.slice(-400)}`);
 
-    // The native runtime should send status plus either accepted or explicit rejection/error.
-    const statusEvents = messages.filter((m) => m.type === 'session-status');
-    assert.ok(statusEvents.length > 0, 'must send session-status events via WebSocket');
-
-    const accepted = messages.find((m) => m.type === 'message-accepted');
-    const rejected = messages.find((m) => m.type === 'message-rejected' || m.type === 'pi-error' || m.type === 'error');
-    assert.ok(accepted || rejected,
-      `must respond to Pi command via WebSocket. Got: ${messages.map(m => m.type).join(',')}`);
-    if (accepted) {
-      assert.equal(accepted.provider, 'pi', 'message-accepted must carry provider=pi');
-    }
-
-    const piSessionStatus = statusEvents.find((m) => m.provider === 'pi');
-    if (piSessionStatus) {
-      assert.ok('isProcessing' in piSessionStatus, 'session-status must have isProcessing');
-      assert.ok('turnId' in piSessionStatus, 'session-status must have turnId for abort support');
-      if (piSessionStatus.isProcessing) {
-        assert.equal(typeof piSessionStatus.turnStartedAt, 'string', 'running session-status must have turnStartedAt');
-        assert.ok(!Number.isNaN(Date.parse(piSessionStatus.turnStartedAt)), 'turnStartedAt must be an ISO timestamp');
-      }
-    }
+    const tuiRedirect = messages.find((message) => message.type === 'pi-error');
+    assert.equal(tuiRedirect?.error, 'Pi 仅支持 tmux TUI');
+    assert.equal(messages.some((message) => message.type === 'message-accepted'), false);
 
     ws.close();
   } finally {

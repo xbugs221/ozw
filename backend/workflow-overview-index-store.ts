@@ -341,6 +341,7 @@ function listProjectBatchOverviews(db: any, projectPath: string, limit = 100): R
 }
 
 const workflowOverviewIndexDb = {
+  ensureSchema: ensureWorkflowOverviewIndexSchema,
   replaceForProject: replaceProjectWorkflowOverviews,
   replaceBatchesForProject: replaceProjectBatchOverviews,
   listForProject: listProjectWorkflowOverviews,

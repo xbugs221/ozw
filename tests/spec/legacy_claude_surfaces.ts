@@ -116,10 +116,11 @@ test('global chat search no longer scans or returns Claude sessions', async () =
 });
 
 test('active frontend empty and tool states do not show Claude copy', async () => {
+  /** Claude tmux TUI is supported; this contract only guards generic empty/tool states and retired SDK actions. */
+  const shellSource = await readSource('frontend/components/shell/view/Shell.tsx');
   const activeSources = await Promise.all([
     readSource('frontend/components/sidebar/view/subcomponents/SidebarProjectsState.tsx'),
     readSource('frontend/components/main-content/view/subcomponents/MainContentStateView.tsx'),
-    readSource('frontend/components/shell/view/Shell.tsx'),
     readSource('frontend/components/chat/tools/components/InteractiveRenderers/AskUserQuestionPanel.tsx'),
     readSource('frontend/i18n/locales/en/sidebar.json'),
     readSource('frontend/i18n/locales/en/common.json'),
@@ -133,6 +134,8 @@ test('active frontend empty and tool states do not show Claude copy', async () =
     assert.doesNotMatch(source, /Claude/);
     assert.doesNotMatch(source, /runClaudeCli/);
   }
+  assert.doesNotMatch(shellSource, /runClaudeCli/);
+  assert.match(shellSource, /providerRisk\.provider === ['"]claude['"]/, 'Shell must keep the explicit Claude TUI risk gate');
 });
 
 test('settings locale copy does not expose legacy Claude provider entries', async () => {

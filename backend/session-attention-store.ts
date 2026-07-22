@@ -4,6 +4,7 @@
  */
 import type Database from 'better-sqlite3';
 import { providerSessionIndexDb } from './provider-session-index-store.js';
+import { workflowOverviewIndexDb } from './workflow-overview-index-store.js';
 
 type AttentionIdentity = {
   provider: string;
@@ -39,6 +40,7 @@ function ensureSchema(db: Database.Database): void {
   /** 业务目的：旧数据库升级后可立即使用看板，无需手工迁移。 */
   if (schemaReadyDbs.has(db)) return;
   providerSessionIndexDb.ensureSchema(db);
+  workflowOverviewIndexDb.ensureSchema(db);
   const columns = db.prepare('PRAGMA table_info(provider_session_index)').all() as Array<{ name: string }>;
   if (!columns.some((column) => column.name === 'activity_revision')) {
     db.exec('ALTER TABLE provider_session_index ADD COLUMN activity_revision INTEGER NOT NULL DEFAULT 1');
@@ -95,6 +97,15 @@ function list(db: Database.Database, options: { limit: number }): AttentionRow[]
       OR COALESCE(a.manual_pending, 0) = 1
     )
       AND COALESCE(p.origin, 'manual') <> 'workflow'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM workflow_overview_index w,
+          json_each(w.workflow_json, '$.workflowOwnedSessionRefs') AS owned
+        WHERE w.visible = 1
+          AND w.normalized_project_path = p.normalized_project_path
+          AND json_extract(owned.value, '$.sessionId') = p.session_id
+          AND COALESCE(json_extract(owned.value, '$.provider'), 'codex') = p.provider
+      )
     ORDER BY p.last_activity DESC
     LIMIT ?
   `).all(limit) as Array<Record<string, unknown>>;

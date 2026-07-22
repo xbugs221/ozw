@@ -52,6 +52,25 @@ async function writeIdleConversation(coHome) {
   })}\n`);
 }
 
+async function waitForWebSocketMessage(ws, received, predicate, timeoutMs = 5_000) {
+  /** Wait for the business event instead of assuming a fixed machine response time. */
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      ws.off('message', handleMessage);
+      reject(new Error(`WebSocket event timed out; received: ${received.map((message) => message.type).join(', ')}`));
+    }, timeoutMs);
+    const handleMessage = (rawMessage) => {
+      const message = JSON.parse(rawMessage.toString());
+      received.push(message);
+      if (!predicate(message)) return;
+      clearTimeout(timeout);
+      ws.off('message', handleMessage);
+      resolve(message);
+    };
+    ws.on('message', handleMessage);
+  });
+}
+
 test('idle check-session-status sends only session-status over the real WebSocket', async () => {
   /** Scenario: Opening idle c51 must not push old agent_message events again. */
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-idle-ws-'));
@@ -77,11 +96,9 @@ test('idle check-session-status sends only session-status over the real WebSocke
 
     const received = [];
     const ws = await openAuthenticatedWebSocket(fixture, registerPayload.token);
-    ws.on('message', (message) => {
-      received.push(JSON.parse(message.toString()));
-    });
+    const statusEvent = waitForWebSocketMessage(ws, received, (message) => message.type === 'session-status');
     ws.send(JSON.stringify({ type: 'check-session-status', sessionId: 'c51', ozwSessionId: 'c51', provider: 'codex' }));
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await statusEvent;
     ws.close();
 
     assert.equal(received.some((message) => (

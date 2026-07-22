@@ -114,7 +114,7 @@ test('Unknown provider still rejected for manual draft creation', async () => {
 
   try {
     await assert.rejects(
-      createManualSessionDraft(projectName, projectPath, 'claude', 'Claude 会话'),
+      createManualSessionDraft(projectName, projectPath, 'unknown', '未知 Provider 会话'),
       /provider must be/,
     );
   } finally {

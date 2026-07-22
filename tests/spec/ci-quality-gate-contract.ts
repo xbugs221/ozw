@@ -33,10 +33,21 @@ test('local pre-commit hook runs only staged tests without changing staged files
   const hook = read('.githooks/pre-commit');
   const precommit = read('scripts/pre-commit.sh');
   const nodeVersion = read('.nvmrc').trim();
+  const engineRange = String(packageJson.engines?.node || '');
+  const minimumMatch = engineRange.match(/^>=(\d+)\.(\d+)\.(\d+)$/);
+  const pinnedMatch = nodeVersion.match(/^v(\d+)\.(\d+)\.(\d+)$/);
 
   assert.equal(packageJson.scripts?.precommit, './scripts/pre-commit.sh');
-  assert.equal(packageJson.engines?.node, nodeVersion.replace(/^v/, ''));
   assert.match(nodeVersion, /^v\d+\.\d+\.\d+$/);
+  assert.ok(minimumMatch, 'package engine must declare a minimum Node version');
+  assert.ok(pinnedMatch, '.nvmrc must pin an exact Node version');
+  const minimum = minimumMatch.slice(1).map(Number);
+  const pinned = pinnedMatch.slice(1).map(Number);
+  assert.ok(
+    pinned.some((part, index) => part > minimum[index] && pinned.slice(0, index).every((value, prefix) => value === minimum[prefix]))
+      || pinned.every((part, index) => part === minimum[index]),
+    '.nvmrc version must satisfy package engines.node',
+  );
   assert.match(hook, /scripts\/pre-commit\.sh/);
   assert.match(precommit, /git diff --cached --quiet/);
   assert.match(precommit, /GIT_REFLOG_ACTION/);
