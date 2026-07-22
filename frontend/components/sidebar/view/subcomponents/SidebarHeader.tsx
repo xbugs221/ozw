@@ -1,4 +1,5 @@
 import type { TFunction } from 'i18next';
+import { Link } from 'react-router-dom';
 import { IS_PLATFORM } from '../../../../constants/config';
 
 type SidebarHeaderProps = {
@@ -34,6 +35,33 @@ export default function SidebarHeader({
     </div>
   );
 
+  const HomeLink = ({ mobile = false }: { mobile?: boolean }) => {
+    const className = `flex items-center gap-2.5 min-w-0 transition-opacity ${mobile ? 'active:opacity-70' : 'hover:opacity-80'}`;
+
+    if (IS_PLATFORM) {
+      return (
+        <a
+          href="https://ozw.ai/dashboard"
+          className={className}
+          title={t('tooltips.viewEnvironments')}
+        >
+          <LogoBlock />
+        </a>
+      );
+    }
+
+    return (
+      <Link
+        to="/"
+        className={className}
+        onClick={mobile ? onCollapseSidebar : undefined}
+        title={t('app.title')}
+      >
+        <LogoBlock />
+      </Link>
+    );
+  };
+
   const CollapseButton = () => (
     <button
       type="button"
@@ -58,17 +86,7 @@ export default function SidebarHeader({
       >
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            {IS_PLATFORM ? (
-              <a
-                href="https://ozw.ai/dashboard"
-                className="flex items-center gap-2.5 min-w-0 hover:opacity-80 transition-opacity"
-                title={t('tooltips.viewEnvironments')}
-              >
-                <LogoBlock />
-              </a>
-            ) : (
-              <LogoBlock />
-            )}
+            <HomeLink />
           </div>
 
           <CollapseButton />
@@ -85,17 +103,7 @@ export default function SidebarHeader({
       >
         <div className="flex items-center justify-between">
           <div className="min-w-0">
-            {IS_PLATFORM ? (
-              <a
-                href="https://ozw.ai/dashboard"
-                className="flex items-center gap-2.5 active:opacity-70 transition-opacity min-w-0"
-                title={t('tooltips.viewEnvironments')}
-              >
-                <LogoBlock />
-              </a>
-            ) : (
-              <LogoBlock />
-            )}
+            <HomeLink mobile />
           </div>
 
           <CollapseButton />
