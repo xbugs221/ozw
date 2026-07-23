@@ -58,10 +58,9 @@ export default function SessionAttentionBoard({ onNavigateToSession, invalidatio
   const loadPromiseRef = useRef<Promise<void> | null>(null);
 
   const load = useCallback((): Promise<void> => {
-    /** 重试会覆盖旧错误，但失败时不伪造空列表。 */
+    /** 首屏沿用初始加载态；后台失效刷新保留列表节点与滚动位置。 */
     if (loadPromiseRef.current) return loadPromiseRef.current;
     const request = (async () => {
-      setIsLoading(true);
       setError('');
       try {
         const response = await api.sessionAttention(100);
