@@ -269,14 +269,17 @@ function isDefaultManualSessionTitle(title: string, routeIndex: number, draftSes
 }
 
 /**
- * Normalize a user request into a compact manual-session title.
+ * Normalize a user request into a manual-session title.
  */
-function summarizeManualSessionTitle(text: unknown, maxLength = 50, ellipsis = true): string {
+function summarizeManualSessionTitle(text: unknown, maxLength: number | null = null, ellipsis = true): string {
   /**
-   * PURPOSE: Store enough of the user's first request for list scanning while
-   * keeping route titles bounded for compact cards.
+   * PURPOSE: Preserve the full first request for content cards while allowing
+   * explicit compact limits for route-only labels.
    */
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (maxLength === null) {
+    return normalized;
+  }
   const chars = Array.from(normalized);
   if (chars.length <= maxLength) {
     return normalized;

@@ -19,6 +19,7 @@ type AttentionRow = AttentionIdentity & {
   projectPath: string;
   title: string;
   summary: string;
+  createdAt: string;
   lastActivity: string;
   activityRevision: number;
   handledRevision: number;
@@ -85,6 +86,7 @@ function list(db: Database.Database, options: { limit: number }): AttentionRow[]
       p.project_path,
       p.title,
       p.summary,
+      p.created_at,
       p.last_activity,
       p.activity_revision,
       COALESCE(a.handled_revision, 0) AS handled_revision,
@@ -106,7 +108,7 @@ function list(db: Database.Database, options: { limit: number }): AttentionRow[]
           AND json_extract(owned.value, '$.sessionId') = p.session_id
           AND COALESCE(json_extract(owned.value, '$.provider'), 'codex') = p.provider
       )
-    ORDER BY p.last_activity DESC
+    ORDER BY COALESCE(p.created_at, p.last_activity) DESC, p.provider ASC, p.session_id ASC
     LIMIT ?
   `).all(limit) as Array<Record<string, unknown>>;
   return rows.map((row) => ({
@@ -115,6 +117,7 @@ function list(db: Database.Database, options: { limit: number }): AttentionRow[]
     projectPath: String(row.project_path || ''),
     title: String(row.title || row.summary || '未命名会话'),
     summary: String(row.summary || row.title || '未命名会话'),
+    createdAt: String(row.created_at || row.last_activity || ''),
     lastActivity: String(row.last_activity || ''),
     activityRevision: Number(row.activity_revision || 1),
     handledRevision: Number(row.handled_revision || 0),

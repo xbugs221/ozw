@@ -413,7 +413,7 @@ test('manual Codex default route title adopts the first WebUI request', { concur
 
     const project = await addProjectManually(projectPath, 'Codex Manual First Request Title');
     const draftSession = await createManualSessionDraft(project.name, projectPath, 'codex', '');
-    const firstRequest = '请修复手动会话标题重复';
+    const firstRequest = '请修复手动会话标题重复，并确保这条明显超过五十个字符的首条请求完整写入内容标题，不要在进入待处理会话索引之前被后端提前截断';
 
     const updateResult = await updateManualSessionTitleFromFirstRequest(
       project.name,
@@ -438,13 +438,13 @@ test('manual Codex default route title adopts the first WebUI request', { concur
     const config = await loadProjectConfig(projectPath);
     const routeRecord = config.chat?.[String(draftSession.routeIndex)];
     assert.equal(routeRecord?.title, firstRequest);
-    assert.equal(routeRecord?.routeTitle, firstRequest);
+    assert.equal(routeRecord?.routeTitle, Array.from(firstRequest).slice(0, 20).join(''));
     assert.equal(config.sessionSummaryById?.['codex-manual-first-request-real'], firstRequest);
 
     const sessions = await getCodexSessions(projectPath, { limit: 0, includeHidden: true });
     const session = sessions.find((candidate) => candidate.providerSessionId === 'codex-manual-first-request-real');
     assert.equal(session?.title, firstRequest);
-    assert.equal(session?.routeTitle, firstRequest);
+    assert.equal(session?.routeTitle, Array.from(firstRequest).slice(0, 20).join(''));
     assert.equal(session?.summary, firstRequest);
     assert.equal(session?.routeIndex, draftSession.routeIndex);
   });

@@ -27,7 +27,6 @@ const REQUIRED_MESSAGE_COLUMNS = ['id', 'session_id', 'role', 'content', 'timest
 export const HERMES_HISTORY_MAX_ROW_BYTES = 64 * 1024;
 export const HERMES_HISTORY_MAX_PAGE_BYTES = 512 * 1024;
 const HERMES_HISTORY_MAX_FIELD_BYTES = 48 * 1024;
-const HERMES_TITLE_MAX_BYTES = 256;
 const HERMES_HISTORY_PAGE_MARKER_RESERVE_BYTES = 1024;
 const HERMES_HISTORY_ROW_MARKER_RESERVE_BYTES = 512;
 
@@ -144,18 +143,11 @@ function isCompressionParent(row: Row, children: Map<string, Row[]>): boolean {
     && (children.get(String(row.id)) || []).some((child) => isCompressionContinuation(child, row));
 }
 
-function truncateUtf8Prefix(value: string, maxBytes: number): string {
-  const encoded = Buffer.from(value, 'utf8');
-  if (encoded.length <= maxBytes) return value;
-  const suffix = '…';
-  const available = Math.max(0, maxBytes - Buffer.byteLength(suffix));
-  return `${encoded.subarray(0, available).toString('utf8').replace(/\uFFFD$/u, '')}${suffix}`;
-}
-
 function titleFor(row: Row, firstVisibleUserText: string): string {
+  /** 内容卡片需要完整标题，最终可见行数由前端响应式布局控制。 */
   const explicit = typeof row.title === 'string' ? row.title.trim() : '';
   const fallback = firstVisibleUserText.replace(/\s+/g, ' ').trim();
-  return truncateUtf8Prefix(explicit || fallback || 'Hermes Session', HERMES_TITLE_MAX_BYTES);
+  return explicit || fallback || 'Hermes Session';
 }
 
 function projectSession(

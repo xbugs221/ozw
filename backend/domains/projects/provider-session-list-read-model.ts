@@ -87,12 +87,18 @@ function mergeSessionTitle(
   providerValue: unknown,
   routeValue: unknown,
   routeSession: LooseRecord,
+  providerComparisonValue: unknown = providerValue,
 ): unknown {
   /**
    * PURPOSE: Route metadata owns explicit renames; provider transcripts own the
    * title when terminal-created routes never left their generated placeholder.
    */
-  return isGeneratedManualRouteTitle(routeValue, routeSession)
+  const providerTitle = String(providerComparisonValue || '').replace(/\s+/g, ' ').trim();
+  const routeTitle = String(routeValue || '').trim();
+  const legacyPrefix = Array.from(providerTitle).slice(0, 50).join('');
+  const isLegacyAutoSummary = providerTitle.length > legacyPrefix.length
+    && routeTitle === `${legacyPrefix}...`;
+  return isGeneratedManualRouteTitle(routeValue, routeSession) || isLegacyAutoSummary
     ? (providerValue || routeValue)
     : routeValue;
 }
@@ -111,7 +117,7 @@ function mergeRoutedProviderSession(providerSession: LooseRecord, routeSession: 
     ...routeSession,
     title: mergeSessionTitle(providerSession.title, routeSession.title, routeSession),
     routeTitle: mergeSessionTitle(providerSession.routeTitle, routeSession.routeTitle, routeSession),
-    summary: mergeSessionTitle(providerSession.summary, routeSession.summary, routeSession),
+    summary: mergeSessionTitle(providerSession.summary, routeSession.summary, routeSession, providerSession.title),
     origin: providerSession.origin === 'workflow'
       ? 'workflow'
       : (routeSession.origin || providerSession.origin),

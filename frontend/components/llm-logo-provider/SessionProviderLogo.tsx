@@ -1,6 +1,13 @@
+/**
+ * 文件目的：将会话 Provider 映射为统一尺寸的品牌矢量标志。
+ * 业务意义：项目导航和会话卡片共享同一套可识别的 Provider 视觉语言。
+ */
 import type { SessionProvider } from '../../types/app';
 import ChatGptLogo from './ChatGptLogo';
+import ClaudeLogo from './ClaudeLogo';
+import HermesLogo from './HermesLogo';
 import KimiLogo from './KimiLogo';
+import PiLogo from './PiLogo';
 
 type SessionProviderLogoProps = {
   provider?: SessionProvider | string | null;
@@ -13,23 +20,21 @@ export default function SessionProviderLogo({
   model = null,
   className = 'w-5 h-5',
 }: SessionProviderLogoProps) {
+  /** 已知 Provider 返回品牌标志，模型标志仅作为未知 Provider 的后备。 */
   if (provider === 'codex') {
     return <ChatGptLogo className={className} />;
   }
 
+  if (provider === 'claude') {
+    return <ClaudeLogo className={className} />;
+  }
+
   if (provider === 'pi') {
-    return (
-      <span
-        className={`${className} inline-flex items-center justify-center rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-[0.65em] font-semibold`}
-        aria-label="Pi provider"
-      >
-        Pi
-      </span>
-    );
+    return <PiLogo className={className} />;
   }
 
   if (provider === 'hermes') {
-    return <span className={`${className} inline-flex items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 text-[0.55em] font-bold`} aria-label="Hermes provider">H</span>;
+    return <HermesLogo className={className} />;
   }
 
   const modelLabel = (model || '').toLowerCase();

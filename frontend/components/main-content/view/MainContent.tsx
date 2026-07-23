@@ -493,7 +493,7 @@ function MainContent({
         />
 
         <div className="flex-1 min-h-0 overflow-hidden">
-          <SessionAttentionBoard onNavigateToSession={onNavigateToSession} invalidationMessage={latestMessage} />
+          <SessionAttentionBoard onNavigateToSession={onNavigateToSession} />
         </div>
       </div>
     );

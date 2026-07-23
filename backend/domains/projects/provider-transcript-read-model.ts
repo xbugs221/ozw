@@ -197,6 +197,7 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
   const timestamp = String(firstRecord.timestamp || lastTimestamp || new Date().toISOString());
   const activityTimestamp = lastTimestamp || timestamp;
   const stat = await fs.stat(filePath).catch(() => null);
+  const title = firstRecord.title || (firstUserMessage ? summarizeText(firstUserMessage) : 'Pi Session');
   return {
     id,
     provider: 'pi',
@@ -205,8 +206,9 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
     createdAt: timestamp,
     lastActivity: activityTimestamp,
     updated_at: activityTimestamp,
-    summary: firstRecord.title || (firstUserMessage ? summarizeText(firstUserMessage, 20, false) : 'Pi Session'),
-    title: firstRecord.title || (firstUserMessage ? summarizeText(firstUserMessage, 20, false) : 'Pi Session'),
+    summary: title,
+    title,
+    routeTitle: summarizeText(title, 20, false),
     messageCount,
     messageCountKnown: true,
     filePath,
@@ -227,8 +229,8 @@ export async function parseClaudeSessionHeader(filePath = ''): Promise<LooseReco
   const lastActivity = stat ? new Date(stat.mtimeMs).toISOString() : timestamp;
   const sessionId = String(first.sessionId);
   const firstContent = typeof first.message?.content === 'string' ? first.message.content : '';
-  const title = firstContent.trim().slice(0, 80) || 'Claude Session';
-  return { id: sessionId, provider: 'claude', __provider: 'claude', sourceSessionId: sessionId, cwd: String(first.cwd), projectPath: String(first.cwd), createdAt: timestamp, lastActivity, updated_at: lastActivity, summary: title, title, routeTitle: title, messageCount: null, messageCountKnown: false, filePath, fileMtimeMs: stat?.mtimeMs || 0, sessionFileName: path.basename(filePath) };
+  const title = summarizeText(firstContent) || 'Claude Session';
+  return { id: sessionId, provider: 'claude', __provider: 'claude', sourceSessionId: sessionId, cwd: String(first.cwd), projectPath: String(first.cwd), createdAt: timestamp, lastActivity, updated_at: lastActivity, summary: title, title, routeTitle: summarizeText(title, 20, false), messageCount: null, messageCountKnown: false, filePath, fileMtimeMs: stat?.mtimeMs || 0, sessionFileName: path.basename(filePath) };
 }
 
 
@@ -1978,8 +1980,11 @@ function stringifyAssistantTextContent(content: unknown): string {
 /**
  * Trim a message into a session title.
  */
-function summarizeText(text: string, maxLength = 50, ellipsis = true): string {
+function summarizeText(text: string, maxLength: number | null = null, ellipsis = true): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
+  if (maxLength === null) {
+    return normalized;
+  }
   if (normalized.length <= maxLength) {
     return normalized;
   }

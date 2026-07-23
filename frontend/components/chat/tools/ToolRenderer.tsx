@@ -89,6 +89,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
     }
     return (
       <SubagentContainer
+        toolName={toolName}
         toolInput={toolInput}
         toolResult={toolResult}
         subagentState={subagentState ?? { childTools: [], currentToolIndex: -1, isComplete: Boolean(toolResult) }}

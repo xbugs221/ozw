@@ -850,11 +850,11 @@ test('Codex project overview uses first request title without deep transcript su
   });
 });
 
-test('Codex project overview card title uses first user request prefix', async () => {
+test('Codex project overview preserves the full first request for content cards', async () => {
   await withTemporaryHome(async (tempHome) => {
     clearProjectDirectoryCache();
     const projectPath = path.join(tempHome, 'workspace', 'codex-title-prefix');
-    const firstRequest = '请修复项目主页手动会话卡片显示过多的问题并保持列表清爽';
+    const firstRequest = '请修复项目主页手动会话卡片显示过多的问题并保持列表清爽，同时确保标题内容不会在固定五十个字符处被提前裁短，最终仅由响应式界面决定显示一行还是两行';
     await fs.mkdir(projectPath, { recursive: true });
     await addProjectManually(projectPath, 'Codex Title Prefix');
     await createCodexSummaryFixture(tempHome, 'codex-title-prefix-session', projectPath, [firstRequest]);

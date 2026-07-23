@@ -145,9 +145,11 @@ test('Hermes overview globally sorts profiles, hides archived rows, and keeps sc
   const brokenDb = new Database(path.join(brokenPath, 'state.db'));
   const previousHome = process.env.HERMES_HOME;
   try {
+    const longHermesTitle = 'Hermes 完整标题'.repeat(40);
     const insert = defaultDb.prepare('INSERT INTO sessions (id, source, started_at, cwd, title, archived) VALUES (?, ?, ?, ?, ?, ?)');
     for (let index = 1; index <= 12; index += 1) insert.run(`default-${index}`, 'cli', index, projectPath, `Default ${index}`, 0);
     insert.run('archived-newest', 'cli', 1000, projectPath, 'Archived newest', 1);
+    insert.run('long-title', 'cli', 998, projectPath, longHermesTitle, 0);
     teamDb.prepare('INSERT INTO sessions (id, source, started_at, cwd, title, archived) VALUES (?, ?, ?, ?, ?, 0)')
       .run('team-newest', 'cli', 999, projectPath, 'Team newest');
     brokenDb.exec('CREATE TABLE unrelated (id INTEGER PRIMARY KEY)');
@@ -165,6 +167,7 @@ test('Hermes overview globally sorts profiles, hides archived rows, and keeps sc
     );
     assert.equal(overview.hermesSessions.length, 10);
     assert.equal(overview.hermesSessions[0].providerSessionId, 'team-newest');
+    assert.equal(overview.hermesSessions.find((session: any) => session.providerSessionId === 'long-title')?.title, longHermesTitle);
     assert.equal(overview.hermesSessions.some((session: any) => session.providerSessionId === 'archived-newest'), false);
     assert.equal(overview.hermesDiagnostics.some((item: any) => item.scope === 'broken' && item.status === 'incompatible'), true);
   } finally {

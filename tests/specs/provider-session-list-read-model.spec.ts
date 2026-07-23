@@ -285,6 +285,34 @@ test('终端手动会话保留用户自定义标题', () => {
   assert.equal(output[0].summary, '我设置的标题');
 });
 
+test('旧版五十字符自动摘要会由 Provider 完整标题修复', () => {
+  /** 历史自动摘要不是用户重命名，重新索引时应恢复完整首条请求。 */
+  const fullTitle = '请完整保留这个已经明显超过五十个字符的会话标题，因为待处理卡片会根据实际屏幕宽度显示一至两行，而不是依赖后端固定字符数截断';
+  const legacyTitle = `${Array.from(fullTitle).slice(0, 50).join('')}...`;
+  const output = buildProviderSessionListReadModel({
+    provider: 'codex',
+    providerSessions: [{
+      id: 'legacy-auto-summary',
+      title: fullTitle,
+      routeTitle: Array.from(fullTitle).slice(0, 20).join(''),
+      summary: 'Codex Session',
+    }],
+    manualDrafts: [{
+      id: 'legacy-auto-summary',
+      routeIndex: 481,
+      provider: 'codex',
+      providerSessionId: 'legacy-auto-summary',
+      title: legacyTitle,
+      routeTitle: Array.from(fullTitle).slice(0, 20).join(''),
+      summary: legacyTitle,
+    }],
+    includeHidden: true,
+  });
+
+  assert.equal(output[0].title, fullTitle);
+  assert.equal(output[0].summary, 'Codex Session');
+});
+
 test('projects.ts 调用 Provider 会话列表 read model 而不是内联核心过滤规则', async () => {
   /**
    * 业务场景：后续修复项目首页会话展示时，开发者能先改项目域小模块和小测试，

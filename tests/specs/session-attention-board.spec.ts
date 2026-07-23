@@ -18,13 +18,21 @@ let tempDir = '';
 let db: Database.Database;
 
 /** 写入一次真实 Provider 索引活动，并让版本随文件指纹变化递增。 */
-function indexActivity(provider: string, sessionId: string, fileMtimeMs: number): void {
-  providerSessionIndexDb.upsert(db, {
+function indexActivity(
+  provider: string,
+  sessionId: string,
+  fileMtimeMs: number,
+  createdAtMs = fileMtimeMs,
+  targetDb = db,
+): void {
+  /** 创建时间与活动时间可独立变化，用于验证看板不会随回复重排。 */
+  providerSessionIndexDb.upsert(targetDb, {
     provider,
     id: sessionId,
     projectPath: `/tmp/session-attention/${provider}`,
     title: `${provider} session`,
     filePath: `/tmp/session-attention/${provider}/${sessionId}.jsonl`,
+    createdAt: new Date(createdAtMs).toISOString(),
     lastActivity: new Date(fileMtimeMs).toISOString(),
     fileMtimeMs,
   });
@@ -55,6 +63,26 @@ test('三种 Provider 共用有界读模型且复合身份不重复', () => {
     'codex:shared',
     'pi:pi-session',
   ]);
+});
+
+test('看板只按创建时间排序，后续回复不会改变卡片位置', () => {
+  /** 较旧会话即使刚收到回复，仍排在较新创建的会话之后。 */
+  const isolatedDb = new Database(':memory:');
+  sessionAttentionDb.ensureSchema(isolatedDb);
+  indexActivity('codex', 'older-stable', 1_750_000_000_400, 1_750_000_000_100, isolatedDb);
+  indexActivity('pi', 'newer-stable', 1_750_000_000_300, 1_750_000_000_200, isolatedDb);
+
+  const beforeReply = sessionAttentionDb.list(isolatedDb, { limit: 100 })
+    .filter((row) => row.sessionId.endsWith('-stable'))
+    .map((row) => row.sessionId);
+  indexActivity('codex', 'older-stable', 1_750_000_000_500, 1_750_000_000_100, isolatedDb);
+  const afterReply = sessionAttentionDb.list(isolatedDb, { limit: 100 })
+    .filter((row) => row.sessionId.endsWith('-stable'))
+    .map((row) => row.sessionId);
+
+  assert.deepEqual(beforeReply, ['newer-stable', 'older-stable']);
+  assert.deepEqual(afterReply, beforeReply);
+  isolatedDb.close();
 });
 
 test('批量确认只记录观察版本并保留并发新活动', () => {

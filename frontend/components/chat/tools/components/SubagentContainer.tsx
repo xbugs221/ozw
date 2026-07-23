@@ -19,6 +19,7 @@ import {
 } from '../../../../../shared/subagent-tool-utils.js';
 
 interface SubagentContainerProps {
+  toolName: string;
   toolInput: unknown;
   toolResult?: { content?: unknown; isError?: boolean } | null;
   subagentState: {
@@ -268,6 +269,7 @@ const ChildToolRow: React.FC<{
 /* ─── main component ─── */
 
 export const SubagentContainer: React.FC<SubagentContainerProps> = ({
+  toolName,
   toolInput,
   toolResult,
   subagentState,
@@ -277,6 +279,8 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
   const subagentType = subagentSummary.subagentType;
   const description = subagentSummary.description;
   const prompt = subagentSummary.prompt;
+  const taskName = subagentSummary.taskName;
+  const command = subagentSummary.command;
   const { childTools, currentToolIndex, isComplete } = subagentState;
   const currentTool = currentToolIndex >= 0 ? childTools[currentToolIndex] : null;
 
@@ -321,6 +325,44 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
 
     return content;
   }, [toolResult]);
+
+  const normalizedToolName = toolName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  const isSpawnSubagent = normalizedToolName.includes('spawn_subagent')
+    || normalizedToolName.includes('spawn_agent')
+    || Boolean(taskName && command);
+
+  if (isSpawnSubagent) {
+    const displayTaskName = taskName || description || 'Agent task';
+    const displayCommand = command || prompt;
+
+    return (
+      <div
+        data-testid="spawn-subagent-card"
+        className="my-1 overflow-hidden rounded-xl border border-violet-200/80 bg-gradient-to-br from-violet-50/80 to-white shadow-sm shadow-violet-500/10 dark:border-violet-800/60 dark:from-violet-950/35 dark:to-gray-950/20"
+      >
+        <div className="flex items-center gap-2.5 px-3 py-2.5">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600 ring-1 ring-violet-200 dark:bg-violet-900/50 dark:text-violet-300 dark:ring-violet-700/70">
+            <Bot className="h-4 w-4" strokeWidth={2} />
+          </div>
+          <div
+            data-testid="spawn-subagent-task-name"
+            className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-gray-100"
+            title={displayTaskName}
+          >
+            {displayTaskName}
+          </div>
+        </div>
+        {displayCommand && (
+          <pre
+            data-testid="spawn-subagent-command"
+            className="m-0 border-t border-violet-100/90 bg-white/65 px-3 py-2.5 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-gray-600 dark:border-violet-900/60 dark:bg-gray-950/35 dark:text-gray-300"
+          >
+            {displayCommand}
+          </pre>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="my-1 rounded-lg border border-purple-200/60 bg-purple-50/25 px-3 py-2 shadow-sm shadow-purple-500/5 dark:border-purple-900/45 dark:bg-purple-950/10">

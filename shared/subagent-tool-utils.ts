@@ -10,6 +10,8 @@ export type SubagentSummary = {
   subagentType: string;
   description: string;
   prompt: string;
+  taskName: string;
+  command: string;
 };
 
 const SUBAGENT_EXACT_TOOL_NAMES = new Set([
@@ -18,6 +20,8 @@ const SUBAGENT_EXACT_TOOL_NAMES = new Set([
   'subagent',
   'sub_agent',
   'subagents',
+  'spawn_agent',
+  'spawn_subagent',
 ]);
 
 /**
@@ -61,6 +65,52 @@ function firstStringField(payload: SubagentPayloadRecord, keys: string[]): strin
 }
 
 /**
+ * Decode one quoted JavaScript object value without evaluating the wrapper.
+ */
+function decodeJavaScriptStringLiteral(literal: string): string {
+  /** Preserve command content while supporting the common JSON, quote, and template forms. */
+  if (literal.startsWith('"')) {
+    try {
+      return JSON.parse(literal);
+    } catch {
+      return literal.slice(1, -1);
+    }
+  }
+
+  const quote = literal[0];
+  return literal
+    .slice(1, -1)
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(new RegExp(`\\\\${quote}`, 'g'), quote)
+    .replace(/\\\\/g, '\\');
+}
+
+/**
+ * Extract one string field from a JavaScript tool wrapper without rendering it.
+ */
+function extractJavaScriptStringField(source: unknown, keys: string[]): string {
+  /** Match only explicit object fields so unrelated wrapper source stays hidden. */
+  if (typeof source !== 'string') {
+    return '';
+  }
+
+  for (const key of keys) {
+    const pattern = new RegExp(
+      `(?:["']?${key}["']?)\\s*:\\s*("(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|\`(?:\\\\.|[^\`\\\\])*\`)`,
+      's',
+    );
+    const match = source.match(pattern);
+    if (match?.[1]) {
+      return decodeJavaScriptStringLiteral(match[1]).trim();
+    }
+  }
+
+  return '';
+}
+
+/**
  * Format a parallel or chained subagent task list for compact display.
  */
 function formatTaskList(items: unknown): string {
@@ -90,6 +140,9 @@ export function isSubagentToolName(toolName: unknown): boolean {
 
   const normalized = rawName.toLowerCase();
   if (SUBAGENT_EXACT_TOOL_NAMES.has(normalized)) {
+    return true;
+  }
+  if (normalized.endsWith('spawn_agent') || normalized.endsWith('spawn_subagent')) {
     return true;
   }
 
@@ -123,12 +176,17 @@ export function summarizeSubagentToolInput(toolInput: unknown): SubagentSummary 
   const payload = toSubagentPayloadRecord(toolInput);
   const chainPrompt = formatTaskList(payload.chain);
   const parallelPrompt = formatTaskList(payload.tasks);
+  const taskName = firstStringField(payload, ['task_name', 'taskName']) ||
+    extractJavaScriptStringField(toolInput, ['task_name', 'taskName']);
+  const command = firstStringField(payload, ['cmd', 'command']) ||
+    extractJavaScriptStringField(toolInput, ['cmd', 'command']);
   const prompt = firstStringField(payload, ['prompt', 'instructions', 'task']) || chainPrompt || parallelPrompt;
   const hasChain = Array.isArray(payload.chain) && payload.chain.length > 0;
   const hasParallel = Array.isArray(payload.tasks) && payload.tasks.length > 0;
   const subagentType = firstStringField(payload, ['subagent_type', 'agent_type', 'agent', 'name', 'type']) ||
     (hasChain ? 'chain' : hasParallel ? 'parallel' : 'Agent');
-  const description = firstStringField(payload, ['description', 'summary', 'task', 'instructions', 'prompt']) ||
+  const description = taskName ||
+    firstStringField(payload, ['description', 'summary', 'task', 'instructions', 'prompt']) ||
     (hasChain ? `${(payload.chain as unknown[]).length} chained tasks` : '') ||
     (hasParallel ? `${(payload.tasks as unknown[]).length} parallel tasks` : '') ||
     'Running task';
@@ -138,5 +196,7 @@ export function summarizeSubagentToolInput(toolInput: unknown): SubagentSummary 
     subagentType,
     description,
     prompt,
+    taskName,
+    command,
   };
 }
