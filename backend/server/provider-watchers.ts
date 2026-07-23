@@ -20,6 +20,37 @@ const goRunnerWatchers = new Map<string, { close(): Promise<void> | void }>();
 let goRunnerWatcherDebounceTimer: NodeJS.Timeout | null = null;
 
 /**
+ * 新 Provider 会话出现时刷新对应项目的 workflow 所有权索引。
+ */
+export async function syncWorkflowIndexForNewProviderSession(input: {
+    eventType: string;
+    projectName?: string;
+    projectPath?: string;
+    syncProjectWorkflowOverviewIndex?: (projectPath: string) => Promise<unknown>;
+    ensureGoRunnerWatchersForProjects?: (projects: LooseRecord[], watcher: (project: LooseRecord, workflow: LooseRecord) => Promise<unknown>) => Promise<unknown>;
+    watchGoWorkflowRun: (project: LooseRecord, workflow: LooseRecord) => Promise<unknown>;
+}): Promise<void> {
+    /**
+     * 业务目的：外部 oz flow 可在服务启动后创建新 run；其首个 Provider
+     * transcript 是稳定的实时信号，必须先刷新所有权索引再通知首页。
+     */
+    const projectPath = String(input.projectPath || '').trim();
+    if (input.eventType !== 'add' || !projectPath || typeof input.syncProjectWorkflowOverviewIndex !== 'function') {
+        return;
+    }
+    const workflows = await input.syncProjectWorkflowOverviewIndex(projectPath);
+    if (!Array.isArray(workflows) || typeof input.ensureGoRunnerWatchersForProjects !== 'function') {
+        return;
+    }
+    await input.ensureGoRunnerWatchersForProjects([{
+        name: input.projectName || '',
+        path: projectPath,
+        fullPath: projectPath,
+        workflows,
+    }], input.watchGoWorkflowRun);
+}
+
+/**
  * 创建 provider 与 workflow watcher 控制器。
  */
 export function createProviderWatcherController(deps: any) {
@@ -223,6 +254,14 @@ export function createProviderWatcherController(deps: any) {
                             const session = await indexProviderSessionFile(provider, filePath);
                             const projectPath = await upsertProjectIndexFromProviderSession(session);
                             if (projectPath) {
+                                await syncWorkflowIndexForNewProviderSession({
+                                    eventType,
+                                    projectName: session?.projectName || '',
+                                    projectPath,
+                                    syncProjectWorkflowOverviewIndex,
+                                    ensureGoRunnerWatchersForProjects,
+                                    watchGoWorkflowRun,
+                                });
                                 void broadcastProjectListInvalidated({
                                     reason: 'project-index-sync',
                                     changedProjectPath: projectPath,
