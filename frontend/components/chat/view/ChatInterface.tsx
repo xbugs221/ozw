@@ -28,6 +28,10 @@ import {
 import { buildConversationBookmarks } from '../utils/conversationBookmarks';
 import { buildChatTuiSessionKey } from '../tui/chatTuiSessionKey';
 import {
+  readClipboardImageFiles,
+  type ClipboardImageReader,
+} from '../tui/clipboardImageFiles';
+import {
   applyUserRenderSnapshot,
   createInitialRenderSnapshotState,
   prependRenderSnapshotHistory,
@@ -49,6 +53,15 @@ const Upload = ({ className: cls, strokeWidth: sw }: { className?: string; strok
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
     <polyline points="17 8 12 3 7 8" />
     <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);
+
+const ClipboardImage = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => (
+  <svg className={cls || 'h-4 w-4'} stroke="currentColor" strokeWidth={sw || 2} fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+    <rect x="5" y="4" width="14" height="17" rx="2" />
+    <path d="M9 4.5V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1.5" />
+    <circle cx="10" cy="11" r="1.5" />
+    <path d="m7.5 17 3.25-3.25L13 16l1.5-1.5 2 2" />
   </svg>
 );
 
@@ -1223,6 +1236,43 @@ function ChatInterface({
     void handleTuiAttachmentUpload(files);
   }, [handleTuiAttachmentUpload]);
 
+  const handleTuiClipboardImageUpload = useCallback(async () => {
+    /**
+     * PURPOSE: Turn one explicit user gesture into a clipboard image upload and
+     * reuse the same fixed-path insertion flow as manually selected files.
+     */
+    const clipboard = navigator.clipboard as ClipboardImageReader | undefined;
+    if (!clipboard?.read) {
+      setTuiUploadError(t('input.clipboardImageUnsupported', {
+        defaultValue: '当前浏览器或连接方式不支持读取剪贴板图片',
+      }));
+      return;
+    }
+
+    setIsUploadingTuiAttachment(true);
+    setTuiUploadError('');
+    try {
+      const imageFiles = await readClipboardImageFiles(clipboard);
+      if (imageFiles.length === 0) {
+        return;
+      }
+      await handleTuiAttachmentUpload(imageFiles);
+    } catch (error) {
+      const isPermissionError = error instanceof DOMException
+        && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
+      setTuiUploadError(t(
+        isPermissionError ? 'input.clipboardImagePermissionDenied' : 'input.clipboardImageReadFailed',
+        {
+          defaultValue: isPermissionError
+            ? '未获得剪贴板读取权限'
+            : '读取剪贴板图片失败',
+        },
+      ));
+    } finally {
+      setIsUploadingTuiAttachment(false);
+    }
+  }, [handleTuiAttachmentUpload, t]);
+
   const handleSetCodexModel = useCallback(
     (nextModel: string) => {
       const normalizedNextModel = nextModel.trim().toLowerCase();
@@ -1685,6 +1735,19 @@ function ChatInterface({
           {tuiUploadError}
         </span>
       )}
+      <button
+        type="button"
+        data-testid="chat-tui-paste-clipboard-image-button"
+        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-700"
+        disabled={isUploadingTuiAttachment}
+        title={t('input.pasteClipboardImage', { defaultValue: '粘贴剪贴板图片' })}
+        onClick={() => void handleTuiClipboardImageUpload()}
+      >
+        <ClipboardImage className="h-3.5 w-3.5" strokeWidth={2} />
+        <span className="hidden sm:inline">
+          {t('input.pasteClipboardImage', { defaultValue: '粘贴截图' })}
+        </span>
+      </button>
       <button
         type="button"
         data-testid="chat-tui-upload-attachment-button"
