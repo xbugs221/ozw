@@ -90,10 +90,13 @@ function getProjectPathSuffix(projectPath: string): string {
 
 /**
  * 将路径风格名称转成 tmux 安全名称。
+ *
+ * tmux 明确禁止 session 名包含 `.` 和 `:`；这里采用保守白名单，
+ * 同时兜底路径中的空白、Unicode 和 shell 特殊字符。
  */
 function sanitizeTmuxSessionName(value: string): string {
   return value
-    .replace(/[^A-Za-z0-9_.-]+/g, '_')
+    .replace(/[^A-Za-z0-9_-]+/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 80) || 'ozw_terminal';
