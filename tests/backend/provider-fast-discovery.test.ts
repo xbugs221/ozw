@@ -525,10 +525,8 @@ test('getProjects filters Pi workflow child sessions from manual session payload
     assert.equal(sessionIds.includes('pi-child-payload'), false);
     assert.equal(sessionIds.includes('pi-manual-payload'), true);
     const manualSession = project.piSessions.find((session) => session.id === 'pi-manual-payload');
-    assert.equal(
-      manualSession.summary,
-      Array.from('Pi manual session should remain visible').slice(0, 20).join(''),
-    );
+    /** 内容卡片使用完整摘要；只有 routeTitle 保留紧凑截断。 */
+    assert.equal(manualSession.summary, 'Pi manual session should remain visible');
   });
 });
 
