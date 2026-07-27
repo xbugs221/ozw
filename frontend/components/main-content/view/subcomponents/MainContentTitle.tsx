@@ -9,6 +9,7 @@ import type { AppTab, Project, ProjectSession, ProjectWorkflow } from '../../../
 import { api } from '../../../../utils/api';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
 import { getProviderCapabilities, normalizeSessionProvider } from '../../../../utils/providerCapabilities';
+import { getMainContentTabTitle } from '../../utils/mainContentTitle';
 
 const Check = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>;
 const Edit3 = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>;
@@ -44,18 +45,6 @@ type MainContentTitleProps = {
   selectedWorkflow?: ProjectWorkflow | null;
   onRefresh?: () => Promise<void> | void;
 };
-
-function getTabTitle(activeTab: AppTab, t: (key: string) => string) {
-  if (activeTab === 'overview') {
-    return t('tabs.overview');
-  }
-
-  if (activeTab === 'files') {
-    return t('mainContent.projectFiles');
-  }
-
-  return 'Project';
-}
 
 function getSessionTitle(session: ProjectSession): string {
   if (session.__provider === 'codex') {
@@ -253,7 +242,7 @@ export default function MainContentTitle({
           <h2 className="text-base font-semibold text-foreground leading-tight">{t('tabs.chat')}</h2>
         ) : (
           <h2 className="text-sm font-semibold text-foreground leading-tight">
-            {getTabTitle(activeTab, t)}
+            {getMainContentTabTitle(activeTab, selectedProject, t)}
           </h2>
         )}
       </div>

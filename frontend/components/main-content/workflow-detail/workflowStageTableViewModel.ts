@@ -238,29 +238,26 @@ function getWorkflowSessionIdentityKey(session: WorkflowChildSession): string {
   ].join(':');
 }
 
-function getWorkflowLogicalStage(stageKey: string): { key: string; label: string; order: number } {
+function getWorkflowLogicalStage(stageKey: string): { key: string; label: string; order: number } | null {
   /**
-   * PURPOSE: Collapse runner loop stages into the business columns users scan:
-   * plan, execution, review, fix, QA, and archive.
+   * PURPOSE: Project current and historical runner keys into the four automatic
+   * workflow phases while keeping planning outside the automatic stage table.
    */
   const normalized = String(stageKey || '').trim();
   if (normalized === 'planning' || normalized === 'acceptance' || normalized === 'ready_for_acceptance') {
-    return { key: 'planning', label: '规划', order: 10 };
+    return null;
   }
   if (normalized === 'execution') {
     return { key: 'execution', label: '执行', order: 20 };
   }
-  if (/^review_\d+$/.test(normalized) || normalized === 'verification') {
-    return { key: 'review', label: '审核', order: 30 };
-  }
-  if (/^(?:fix|repair)_\d+$/.test(normalized)) {
-    return { key: 'fix', label: '修正', order: 40 };
+  if (/^(?:review|fix|repair|audit|targeted_repair)_\d+$/.test(normalized) || normalized === 'verification') {
+    return { key: 'optimization', label: '优化', order: 30 };
   }
   if (normalized === 'qa' || /^qa_\d+$/.test(normalized)) {
-    return { key: 'qa', label: 'QA', order: 50 };
+    return { key: 'qa', label: '测试', order: 40 };
   }
   if (normalized === 'archive') {
-    return { key: 'archive', label: '归档', order: 60 };
+    return { key: 'archive', label: '归档', order: 50 };
   }
   return { key: normalized || 'unknown', label: getWorkflowStageTreeTitle({ stageKey: normalized, title: normalized, status: '', substages: [] }).replace(/阶段$/u, ''), order: 90 };
 }
@@ -316,8 +313,15 @@ export function buildWorkflowStageTableColumns(stageInspections: WorkflowStageIn
   const columns = new Map<string, WorkflowStageTableColumn>();
   const seenSessionKeysByColumn = new Map<string, Set<string>>();
 
-  const resolveColumn = (stageKey: string): WorkflowStageTableColumn => {
+  const resolveColumn = (stageKey: string): WorkflowStageTableColumn | null => {
+    /**
+     * Resolve one raw stage to its four-phase table column, or omit pre-flight
+     * planning stages that are not part of the automatic workflow.
+     */
     const logicalStage = getWorkflowLogicalStage(stageKey);
+    if (!logicalStage) {
+      return null;
+    }
     const existing = columns.get(logicalStage.key);
     if (existing) {
       return existing;
@@ -335,6 +339,9 @@ export function buildWorkflowStageTableColumns(stageInspections: WorkflowStageIn
 
   stageInspections.forEach((stage) => {
     const column = resolveColumn(stage.stageKey);
+    if (!column) {
+      return;
+    }
     const primarySession = getPrimaryStageSession(stage);
     const primarySessionKey = primarySession ? getWorkflowSessionIdentityKey(primarySession) : '';
     const seenSessionKeys = seenSessionKeysByColumn.get(column.key) || new Set<string>();

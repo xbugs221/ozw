@@ -36,6 +36,14 @@ export interface SubagentChildTool {
   timestamp: Date;
 }
 
+export interface ChatTokenUsage {
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens?: number;
+  outputTokens: number;
+  totalTokens?: number;
+}
+
 export interface ChatMessage {
   type: string;
   content?: string;
@@ -56,6 +64,8 @@ export interface ChatMessage {
   completedAt?: string | number | Date;
   durationMs?: number;
   timeToFirstTokenMs?: number;
+  model?: string;
+  tokenUsage?: ChatTokenUsage;
   isStreaming?: boolean;
   isInteractivePrompt?: boolean;
   isToolUse?: boolean;

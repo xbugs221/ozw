@@ -24,6 +24,11 @@ import {
 } from '../../frontend/components/chat/utils/nativeRuntimeTranscript.ts';
 import { buildTurnDisplayBlocks } from '../../frontend/components/chat/utils/turnNonBodyCollapse.ts';
 import { convertSessionMessages } from '../../frontend/components/chat/utils/messageTransforms.ts';
+import {
+  estimateOpenAiTokenCostCny,
+  formatTokenCostCny,
+} from '../../frontend/components/chat/utils/openAiTokenCost.ts';
+import { formatProcessedDuration } from '../../frontend/components/chat/utils/turnSummaryFormatting.ts';
 
 const REPO_ROOT = process.cwd();
 const EVIDENCE_DIR = path.join(REPO_ROOT, 'test-results/chat-rendering-parity');
@@ -657,6 +662,98 @@ test('completed turns collapse thinking and tool calls while keeping final body 
     'non-body group must preserve transcript order before the final body',
   );
   assert.deepEqual(nonBodyGroup?.items?.map((item) => item.kind), ['thinking-group', 'tool-group']);
+});
+
+test('pre-body process groups preserve completed duration and active timing anchors', async () => {
+  /**
+   * The collapsed summary must keep a fixed user-to-body duration after a turn
+   * completes, while a live tail retains its start timestamp for ticking UI.
+   */
+  const completedRows = [
+    row({
+      type: 'user',
+      timestamp: '2026-06-10T12:00:00.000Z',
+      content: '检查项目',
+      messageKey: 'timed-turn-user',
+    }),
+    row({
+      type: 'assistant',
+      timestamp: '2026-06-10T12:00:15.000Z',
+      content: '正在检查',
+      isThinking: true,
+      messageKey: 'timed-turn-thinking',
+    }),
+    row({
+      type: 'assistant',
+      timestamp: '2026-06-10T12:01:23.000Z',
+      content: '检查完成',
+      messageKey: 'timed-turn-body',
+    }),
+  ];
+  const completedGroup = buildTurnDisplayBlocks(completedRows)
+    .find((block) => block.kind === 'turn-non-body-group');
+  const liveGroup = buildTurnDisplayBlocks(
+    completedRows.slice(0, 2).map((message) => message.type === 'user'
+      ? message
+      : { ...message, source: 'codex-live', isStreaming: true }),
+  ).find((block) => block.kind === 'turn-non-body-group');
+  const turnGroupSource = await readSource('frontend/components/chat/view/subcomponents/TurnNonBodyGroup.tsx');
+
+  assert.equal(completedGroup?.processedDurationMs, 83_000);
+  assert.equal(formatProcessedDuration(48_000), '48秒');
+  assert.equal(formatProcessedDuration(completedGroup?.processedDurationMs || 0), '01分钟23秒');
+  assert.equal(formatProcessedDuration(3_723_000), '01时02分03秒');
+  assert.equal(completedGroup?.isProcessing, false);
+  assert.equal(liveGroup?.processingStartedAt, '2026-06-10T12:00:00.000Z');
+  assert.equal(liveGroup?.isProcessing, true);
+  assert.match(turnGroupSource, /data-testid=["']turn-non-body-elapsed["']/);
+  assert.match(turnGroupSource, /耗时 \{processedDuration\}/);
+  assert.match(turnGroupSource, /setInterval[\s\S]*1000/);
+});
+
+test('pre-body process summary carries an OpenAI standard-price RMB estimate', async () => {
+  /**
+   * The final assistant row owns the complete turn usage; the collapsed process
+   * group must carry it to the summary beside elapsed time.
+   */
+  const messages = [
+    row({
+      type: 'user',
+      timestamp: '2026-06-10T12:00:00.000Z',
+      content: '计算成本',
+      messageKey: 'cost-turn-user',
+    }),
+    row({
+      type: 'assistant',
+      timestamp: '2026-06-10T12:00:10.000Z',
+      content: '处理中',
+      isThinking: true,
+      messageKey: 'cost-turn-thinking',
+    }),
+    row({
+      type: 'assistant',
+      timestamp: '2026-06-10T12:00:20.000Z',
+      content: '处理完成',
+      model: 'gpt-5.6-sol',
+      tokenUsage: {
+        inputTokens: 1_000,
+        cachedInputTokens: 400,
+        outputTokens: 100,
+      },
+      messageKey: 'cost-turn-body',
+    }),
+  ];
+  const group = buildTurnDisplayBlocks(messages)
+    .find((block) => block.kind === 'turn-non-body-group');
+  const estimate = estimateOpenAiTokenCostCny(group?.model, group?.tokenUsage);
+  const turnGroupSource = await readSource('frontend/components/chat/view/subcomponents/TurnNonBodyGroup.tsx');
+
+  assert.equal(group?.model, 'gpt-5.6-sol');
+  assert.deepEqual(group?.tokenUsage, messages[2].tokenUsage);
+  assert.equal(formatTokenCostCny(estimate?.cny || 0), '¥0.04');
+  assert.match(turnGroupSource, /data-testid=["']turn-non-body-cost["']/);
+  assert.match(turnGroupSource, /价值 \{tokenCostLabel\}/);
+  assert.doesNotMatch(turnGroupSource, />正文前过程</);
 });
 
 test('agent messages delimit independently counted tool call groups', async () => {

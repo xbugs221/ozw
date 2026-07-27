@@ -2,7 +2,7 @@
  * PURPOSE: Build turn-level display blocks so assistant body text stays
  * primary while thinking and tool activity can collapse as inspectable detail.
  */
-import type { ChatMessage } from '../types/types';
+import type { ChatMessage, ChatTokenUsage } from '../types/types';
 
 export type TurnNonBodyItemKind = 'thinking-group' | 'tool-group';
 
@@ -18,6 +18,11 @@ export interface TurnNonBodyGroupBlock {
   kind: 'turn-non-body-group';
   turnKey: string;
   defaultOpen: boolean;
+  isProcessing: boolean;
+  processingStartedAt?: ChatMessage['timestamp'];
+  processedDurationMs?: number;
+  model?: string;
+  tokenUsage?: ChatTokenUsage;
   items: TurnNonBodyItem[];
 }
 
@@ -35,6 +40,36 @@ export type TurnDisplayBlock = TurnNonBodyGroupBlock | AssistantBodyBlock | Mess
 
 export interface BuildTurnDisplayBlocksOptions {
   activeTailDefaultOpen?: boolean;
+}
+
+/**
+ * Convert a transcript timestamp into milliseconds without letting malformed
+ * provider data produce an invalid duration in the collapsed summary.
+ */
+function getTimestampMs(timestamp: ChatMessage['timestamp'] | undefined): number | null {
+  if (timestamp === undefined || timestamp === null) {
+    return null;
+  }
+  const parsed = timestamp instanceof Date
+    ? timestamp.getTime()
+    : typeof timestamp === 'number'
+      ? timestamp
+      : Date.parse(timestamp);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Read the last process-row timestamp as a fallback when no final assistant
+ * body exists in persisted history.
+ */
+function getLastPendingTimestamp(items: TurnNonBodyItem[]): ChatMessage['timestamp'] | undefined {
+  for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
+    const messages = items[itemIndex].messages;
+    if (messages.length > 0) {
+      return messages[messages.length - 1].timestamp;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -199,19 +234,41 @@ export function buildTurnDisplayBlocks(
 ): TurnDisplayBlock[] {
   const blocks: TurnDisplayBlock[] = [];
   let currentTurnKey = 'turn-start';
+  let currentTurnStartedAt: ChatMessage['timestamp'] | undefined;
   let pendingItems: TurnNonBodyItem[] = [];
 
-  const flushPending = (defaultOpen: boolean, forceDefaultOpen = false) => {
+  /**
+   * Materialize pending process rows together with the elapsed boundary needed
+   * by the collapsed "正文前过程" summary.
+   */
+  const flushPending = (
+    defaultOpen: boolean,
+    forceDefaultOpen = false,
+    completedAt?: ChatMessage['timestamp'],
+    billingMessage?: ChatMessage,
+  ) => {
     if (pendingItems.length === 0) {
       return;
     }
+    const hasLiveProcess = pendingItems.some((item) => item.messages.some(isLiveProcessMessage));
     const shouldDefaultOpen = defaultOpen && pendingItems.some((item) =>
       forceDefaultOpen || item.messages.some(isLiveProcessMessage),
     );
+    const processingStartedAt = currentTurnStartedAt ?? pendingItems[0]?.messages[0]?.timestamp;
+    const processingStartedAtMs = getTimestampMs(processingStartedAt);
+    const processingCompletedAtMs = getTimestampMs(completedAt ?? getLastPendingTimestamp(pendingItems));
+    const isProcessing = shouldDefaultOpen && (forceDefaultOpen || hasLiveProcess);
     blocks.push({
       kind: 'turn-non-body-group',
       turnKey: currentTurnKey,
       defaultOpen: shouldDefaultOpen,
+      isProcessing,
+      processingStartedAt,
+      processedDurationMs: processingStartedAtMs !== null && processingCompletedAtMs !== null
+        ? Math.max(0, processingCompletedAtMs - processingStartedAtMs)
+        : undefined,
+      model: billingMessage?.model,
+      tokenUsage: billingMessage?.tokenUsage,
       items: pendingItems.map((item) => ({ ...item, defaultOpen: shouldDefaultOpen })),
     });
     pendingItems = [];
@@ -221,6 +278,7 @@ export function buildTurnDisplayBlocks(
     if (message.type === 'user') {
       flushPending(true);
       currentTurnKey = getMessageKey(message, index);
+      currentTurnStartedAt = message.timestamp;
       blocks.push({ kind: 'message', message });
       return;
     }
@@ -243,12 +301,14 @@ export function buildTurnDisplayBlocks(
       flushPending(
         isLiveProcessMessage(message) || isActiveTailBody,
         isActiveTailBody,
+        message.timestamp,
+        message,
       );
       blocks.push({ kind: 'assistant-body', message });
       return;
     }
 
-    flushPending(true);
+    flushPending(true, false, message.timestamp);
     blocks.push({ kind: 'message', message });
   });
 

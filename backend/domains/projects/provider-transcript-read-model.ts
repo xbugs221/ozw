@@ -25,6 +25,14 @@ type CodexRecordContext = {
   goalCompletionTurnIds: Set<string>;
 };
 
+type CodexTokenUsage = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
 const jsonlCursorCache = new Map<string, JsonlCursor>();
 const claudeSessionFileCache = new Map<string, string>();
 const CLAUDE_HISTORY_READ_CHUNK_BYTES = 64 * 1024;
@@ -268,7 +276,138 @@ export async function getCodexSessionMessages(
       messages.push(message);
     }
   }
+  enrichCodexTurnsWithUsage(transcript.records, messages);
   return paginateMessages(messages, limit, offset, transcript.totalLines);
+}
+
+/**
+ * Add per-turn model and token totals to the final assistant row. Codex emits
+ * cumulative token snapshots, so subtracting the snapshot before each visible
+ * user request captures every model call made during that turn.
+ */
+function enrichCodexTurnsWithUsage(
+  records: JsonlReadResult['records'],
+  messages: LooseRecord[],
+): void {
+  /** Read the JSONL line embedded in normalized message identity keys. */
+  const readMessageLine = (message: LooseRecord): number | null => {
+    const match = String(message.messageKey || '').match(/:line:(\d+):/);
+    return match ? Number(match[1]) : null;
+  };
+
+  const userLines = messages
+    .filter((message) => message.type === 'user')
+    .map(readMessageLine)
+    .filter((line): line is number => line !== null);
+
+  userLines.forEach((startLine, turnIndex) => {
+    const endLine = userLines[turnIndex + 1] ?? Number.POSITIVE_INFINITY;
+    let baseline: CodexTokenUsage | null = null;
+    let completed: CodexTokenUsage | null = null;
+    let model = '';
+
+    for (const { record, lineNumber } of records) {
+      const snapshot = readCodexTotalTokenUsage(record);
+      if (snapshot && lineNumber < startLine) {
+        baseline = snapshot;
+      } else if (snapshot && lineNumber >= startLine && lineNumber < endLine) {
+        completed = snapshot;
+      }
+      const recordModel = readCodexRecordModel(record);
+      if (recordModel && lineNumber < endLine) {
+        model = recordModel;
+      }
+    }
+
+    if (!completed) {
+      return;
+    }
+    const zeroUsage: CodexTokenUsage = {
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    };
+    const usage = subtractCodexTokenUsage(completed, baseline ?? zeroUsage);
+    let assistant: LooseRecord | undefined;
+    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+      const candidate = messages[messageIndex];
+      const line = readMessageLine(candidate);
+      if (
+        candidate.type === 'assistant'
+        && !candidate.isTaskNotification
+        && line !== null
+        && line > startLine
+        && line < endLine
+      ) {
+        assistant = candidate;
+        break;
+      }
+    }
+    if (assistant) {
+      assistant.model = model || undefined;
+      assistant.tokenUsage = usage;
+    }
+  });
+}
+
+/**
+ * Read cumulative token usage from a Codex token_count transcript record.
+ */
+function readCodexTotalTokenUsage(record: LooseRecord): CodexTokenUsage | null {
+  const info = record.type === 'event_msg' && record.payload?.type === 'token_count'
+    ? record.payload.info
+    : record.type === 'token_count'
+      ? record.info
+      : null;
+  const usage = info?.total_token_usage;
+  if (!usage) {
+    return null;
+  }
+  return {
+    inputTokens: Math.max(0, Number(usage.input_tokens) || 0),
+    cachedInputTokens: Math.max(0, Number(usage.cached_input_tokens) || 0),
+    cacheWriteInputTokens: Math.max(0, Number(usage.cache_write_input_tokens) || 0),
+    outputTokens: Math.max(0, Number(usage.output_tokens) || 0),
+    totalTokens: Math.max(0, Number(usage.total_tokens) || 0),
+  };
+}
+
+/**
+ * Read the active model from session and turn context records.
+ */
+function readCodexRecordModel(record: LooseRecord): string {
+  if (record.type === 'turn_context') {
+    return typeof record.payload?.model === 'string' ? record.payload.model : '';
+  }
+  if (record.type === 'session_meta') {
+    return typeof record.payload?.model === 'string' ? record.payload.model : '';
+  }
+  if (record.type === 'event_msg' && record.payload?.type === 'thread_settings_applied') {
+    return typeof record.payload.thread_settings?.model === 'string'
+      ? record.payload.thread_settings.model
+      : '';
+  }
+  return '';
+}
+
+/**
+ * Subtract two cumulative snapshots while guarding against provider resets.
+ */
+function subtractCodexTokenUsage(
+  completed: CodexTokenUsage,
+  baseline: CodexTokenUsage,
+): CodexTokenUsage {
+  /** Clamp one cumulative field because compaction can reset provider totals. */
+  const subtract = (value: number, previous: number) => Math.max(0, value - previous);
+  return {
+    inputTokens: subtract(completed.inputTokens, baseline.inputTokens),
+    cachedInputTokens: subtract(completed.cachedInputTokens, baseline.cachedInputTokens),
+    cacheWriteInputTokens: subtract(completed.cacheWriteInputTokens, baseline.cacheWriteInputTokens),
+    outputTokens: subtract(completed.outputTokens, baseline.outputTokens),
+    totalTokens: subtract(completed.totalTokens, baseline.totalTokens),
+  };
 }
 
 /**

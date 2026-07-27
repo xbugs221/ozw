@@ -8,6 +8,12 @@ import MessageComponent from './MessageComponent';
 import type { ChatMessage, Provider } from '../../types/types';
 import type { Project } from '../../../../types/app';
 import type { TurnNonBodyGroupBlock } from '../../utils/turnNonBodyCollapse';
+import {
+  estimateOpenAiTokenCostCny,
+  formatTokenCostCny,
+  USD_CNY_REFERENCE_RATE,
+} from '../../utils/openAiTokenCost';
+import { formatProcessedDuration } from '../../utils/turnSummaryFormatting';
 
 type DiffLine = {
   type: string;
@@ -76,15 +82,48 @@ export default function TurnNonBodyGroup({
   provider,
 }: TurnNonBodyGroupProps) {
   const [isOpen, setIsOpen] = useState(block.defaultOpen || provider === 'hermes');
+  const [, setElapsedTick] = useState(0);
   const isToolOnlyBlock = block.items.every((item) => item.kind === 'tool-group');
   const toolInvocationCount = block.items.filter((item) => item.kind === 'tool-group').length;
   const toolInvocationLabel = toolInvocationCount === 1
     ? '一次工具调用'
     : `${toolInvocationCount}次工具调用`;
+  const processingStartedAtMs = block.processingStartedAt instanceof Date
+    ? block.processingStartedAt.getTime()
+    : typeof block.processingStartedAt === 'number'
+      ? block.processingStartedAt
+      : block.processingStartedAt
+        ? Date.parse(block.processingStartedAt)
+        : Number.NaN;
+  const processedDurationMs = block.isProcessing && Number.isFinite(processingStartedAtMs)
+    ? Date.now() - processingStartedAtMs
+    : block.processedDurationMs;
+  const processedDuration = processedDurationMs === undefined
+    ? null
+    : formatProcessedDuration(processedDurationMs);
+  const tokenCost = estimateOpenAiTokenCostCny(block.model, block.tokenUsage);
+  const tokenCostLabel = tokenCost ? formatTokenCostCny(tokenCost.cny) : null;
+  const tokenCostTitle = tokenCost
+    ? `${tokenCost.modelLabel} 标准价估算；1 美元≈${USD_CNY_REFERENCE_RATE}元；不代表实际账单`
+    : undefined;
 
   useEffect(() => {
     setIsOpen(block.defaultOpen || provider === 'hermes');
   }, [block.defaultOpen, block.turnKey, provider]);
+
+  /**
+   * Refresh only active process summaries; completed transcript groups retain
+   * the fixed duration captured when their final assistant body was grouped.
+   */
+  useEffect(() => {
+    if (!block.isProcessing || !Number.isFinite(processingStartedAtMs)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setElapsedTick((current) => current + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [block.isProcessing, processingStartedAtMs]);
 
   /**
    * Toggle the outer group from React state so live defaultOpen changes cannot
@@ -116,7 +155,12 @@ export default function TurnNonBodyGroup({
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
-          <span>正文前过程</span>
+          {processedDuration && (
+            <span data-testid="turn-non-body-elapsed">耗时 {processedDuration}</span>
+          )}
+          {tokenCostLabel && (
+            <span data-testid="turn-non-body-cost" title={tokenCostTitle}>价值 {tokenCostLabel}</span>
+          )}
         </summary>
 
         {isOpen && (
@@ -168,7 +212,12 @@ export default function TurnNonBodyGroup({
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
-        <span>正文前过程</span>
+        {processedDuration && (
+          <span data-testid="turn-non-body-elapsed">耗时 {processedDuration}</span>
+        )}
+        {tokenCostLabel && (
+          <span data-testid="turn-non-body-cost" title={tokenCostTitle}>价值 {tokenCostLabel}</span>
+        )}
       </summary>
 
       {isOpen && (

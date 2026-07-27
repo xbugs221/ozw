@@ -884,6 +884,81 @@ test('getCodexSessionMessages preserves assistant phase metadata from Codex tran
   });
 });
 
+test('getCodexSessionMessages attaches cumulative turn token usage and model to the final answer', async () => {
+  await withTemporaryHome(async (tempHome) => {
+    /** Build one turn with a prior cumulative snapshot to verify delta billing. */
+    const sessionId = 'codex-turn-token-cost-session';
+    const sessionsDir = path.join(tempHome, '.codex', 'sessions', '2026', '07', '27');
+    const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+    const tokenCount = (timestamp, usage) => ({
+      timestamp,
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { total_token_usage: usage },
+      },
+    });
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(
+      sessionFile,
+      [
+        {
+          timestamp: '2026-07-27T00:00:00.000Z',
+          type: 'session_meta',
+          payload: { id: sessionId, model: 'gpt-5.6-sol', cwd: tempHome },
+        },
+        tokenCount('2026-07-27T00:00:01.000Z', {
+          input_tokens: 1_000,
+          cached_input_tokens: 200,
+          cache_write_input_tokens: 0,
+          output_tokens: 50,
+          total_tokens: 1_050,
+        }),
+        {
+          timestamp: '2026-07-27T00:00:02.000Z',
+          type: 'event_msg',
+          payload: { type: 'user_message', message: '检查成本' },
+        },
+        {
+          timestamp: '2026-07-27T00:00:03.000Z',
+          type: 'turn_context',
+          payload: { model: 'gpt-5.6-sol' },
+        },
+        {
+          timestamp: '2026-07-27T00:00:10.000Z',
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'assistant',
+            phase: 'final_answer',
+            content: [{ type: 'output_text', text: '成本已计算。' }],
+          },
+        },
+        tokenCount('2026-07-27T00:00:11.000Z', {
+          input_tokens: 2_100,
+          cached_input_tokens: 700,
+          cache_write_input_tokens: 10,
+          output_tokens: 150,
+          total_tokens: 2_250,
+        }),
+      ].map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+      'utf8',
+    );
+
+    const result = await getCodexSessionMessages(sessionId, null, 0, null);
+    const assistant = result.messages.find((message) => message.type === 'assistant');
+
+    assert.equal(assistant.model, 'gpt-5.6-sol');
+    assert.deepEqual(assistant.tokenUsage, {
+      inputTokens: 1_100,
+      cachedInputTokens: 500,
+      cacheWriteInputTokens: 10,
+      outputTokens: 100,
+      totalTokens: 1_200,
+    });
+  });
+});
+
 test('getProjects keeps every visible Codex session in project overview snapshots', async () => {
   await withTemporaryHome(async (tempHome) => {
     clearProjectDirectoryCache();

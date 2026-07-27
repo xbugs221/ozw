@@ -662,6 +662,10 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
   const getStoredOrderFields = (message: any): Partial<ChatMessage> => ({
     ...(message.sequence !== undefined ? { sequence: message.sequence } : {}),
     ...(message.rowid !== undefined ? { rowid: message.rowid } : {}),
+    ...(typeof message.model === 'string' ? { model: message.model } : {}),
+    ...(message.tokenUsage && typeof message.tokenUsage === 'object'
+      ? { tokenUsage: message.tokenUsage }
+      : {}),
   });
 
   rawMessages.forEach((message) => {
