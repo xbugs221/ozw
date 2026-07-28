@@ -165,7 +165,7 @@ test('workflow stage table and role artifacts keep inspectable business output',
         substageKey: 'audit_1',
         title: '全量自查',
         status: 'completed',
-        agentSessions: [],
+        agentSessions: [{ id: 'audit-session', stageKey: 'audit_1', role: 'reviewer', title: 'audit_1', provider: 'codex' }],
         files: [{ id: 'audit-1', label: 'audit-1.json', path: '.wo/runs/run-1/audit-1.json', exists: true }],
       }],
     },
@@ -178,7 +178,7 @@ test('workflow stage table and role artifacts keep inspectable business output',
         substageKey: 'targeted_repair_1',
         title: '定向修复',
         status: 'completed',
-        agentSessions: [],
+        agentSessions: [{ id: 'targeted-repair-session', stageKey: 'targeted_repair_1', role: 'fixer', title: 'targeted_repair_1', provider: 'codex' }],
         files: [{ id: 'targeted-repair-1', label: 'targeted-repair-1.json', path: '.wo/runs/run-1/targeted-repair-1.json', exists: true }],
       }],
     },
@@ -235,6 +235,12 @@ test('workflow stage table and role artifacts keep inspectable business output',
       .filter((entry) => entry.kind === 'artifact')
       .map((entry) => entry.label),
     ['fix-1.md', 'audit-1.json', 'targeted-repair-1.json'],
+  );
+  assert.deepEqual(
+    optimization.entries
+      .filter((entry) => entry.kind === 'session')
+      .map((entry) => [entry.label, entry.session?.id]),
+    [['审核会话', 'audit-session'], ['修复会话', 'targeted-repair-session']],
   );
   assert.equal(columns.some((column) => column.key === 'planning'), false);
 

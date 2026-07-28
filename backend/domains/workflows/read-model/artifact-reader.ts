@@ -12,9 +12,11 @@ type FixedArtifactPattern = {
 
 const FIXED_ARTIFACT_PATTERNS: FixedArtifactPattern[] = [
   { regex: /^review-(\d+)\.(?:json|md|markdown)$/i, stage: (n) => `review_${n}`, type: 'review-result' },
+  { regex: /^audit-(\d+)\.(?:json|md|markdown)$/i, stage: (n) => `audit_${n}`, type: 'audit-result' },
   { regex: /^qa-(\d+)\.json$/i, stage: (n) => `qa_${n}`, type: 'qa-result' },
   { regex: /^fix-(\d+)\.(?:json|md|markdown)$/i, stage: (n) => `fix_${n}`, type: 'fix-result' },
   { regex: /^repair-(\d+)\.(?:json|md|markdown)$/i, stage: (n) => `repair_${n}`, type: 'repair-result' },
+  { regex: /^targeted-repair-(\d+)\.(?:json|md|markdown)$/i, stage: (n) => `targeted_repair_${n}`, type: 'targeted-repair-result' },
   { regex: /^fix-(\d+)-summary\.(?:json|md|markdown)$/i, stage: (n) => `fix_${n}`, type: 'repair-summary' },
   { regex: /^repair-(\d+)-summary\.(?:json|md|markdown)$/i, stage: (n) => `repair_${n}`, type: 'repair-summary' },
   { regex: /^delivery-summary\.(?:json|md|markdown)$/i, stage: () => 'archive', type: 'delivery-summary' },
@@ -57,6 +59,13 @@ function classifyPath(key: unknown, value: unknown): Record<string, any> {
   }
   if (/^review_\d+$/.test(normalizedKey)) {
     return { kind: 'artifact', type: 'review-result', stage: normalizedKey, label: `Review result ${normalizedKey.split('_')[1]}` };
+  }
+  if (/^audit_\d+$/.test(normalizedKey)) {
+    return { kind: 'artifact', type: 'audit-result', stage: normalizedKey, label: `Audit result ${normalizedKey.split('_')[1]}` };
+  }
+  if (/^targeted_repair_\d+(?:_summary)?$/.test(normalizedKey)) {
+    const stage = normalizedKey.replace('_summary', '');
+    return { kind: 'artifact', type: normalizedKey.endsWith('_summary') ? 'targeted-repair-summary' : 'targeted-repair-result', stage, label: `Targeted repair ${stage.split('_').at(-1)}` };
   }
   if (/^repair_\d+_summary$/.test(normalizedKey)) {
     const stage = normalizedKey.replace('_summary', '');

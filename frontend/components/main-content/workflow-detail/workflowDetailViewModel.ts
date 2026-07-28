@@ -96,10 +96,10 @@ export function getWorkflowStageTreeTitle(stage: WorkflowStageInspection): strin
   if (stage.stageKey === 'execution') {
     return '执行阶段';
   }
-  if (/^review_\d+$/.test(stage.stageKey) || stage.stageKey === 'verification') {
+  if (/^(?:review|audit)_\d+$/.test(stage.stageKey) || stage.stageKey === 'verification') {
     return '审核阶段';
   }
-  if (/^(?:fix|repair)_\d+$/.test(stage.stageKey)) {
+  if (/^(?:fix|repair|targeted_repair)_\d+$/.test(stage.stageKey)) {
     return '修复阶段';
   }
   if (/^qa(?:_\d+)?$/.test(stage.stageKey)) {
@@ -119,9 +119,9 @@ export function getCompactAgentLabel(value: string | null | undefined): string {
    * Hide technical graph prefixes while preserving the human business role.
    */
   const compact = String(value || '')
-    .replace(/^(?:review|qa|fix|repair|planning(?:_context)?|implementation_context)\s+subagent:\s*/i, '')
+    .replace(/^(?:review|audit|qa|fix|repair|targeted_repair|planning(?:_context)?|implementation_context)\s+subagent:\s*/i, '')
     .replace(/^subagent:\s*/i, '')
-    .replace(/^(?:review|qa|fix|repair|planning(?:_context)?|implementation_context):/i, '')
+    .replace(/^(?:review|audit|qa|fix|repair|targeted_repair|planning(?:_context)?|implementation_context):/i, '')
     .trim();
   return compact.replace(/:\d+$/i, '').trim();
 }
@@ -147,7 +147,7 @@ export function isWorkflowReviewStageKey(stageKey: string | null | undefined): b
    * Recognize both the current independent review stages and legacy workflow
    * records that stored all reviewer passes under one verification stage.
    */
-  return /^review_\d+$/.test(String(stageKey || '')) || stageKey === 'verification';
+  return /^(?:review|audit)_\d+$/.test(String(stageKey || '')) || stageKey === 'verification';
 }
 
 export function getExactSubstageSessions(substage: WorkflowSubstageInspection): WorkflowChildSession[] {
@@ -292,7 +292,7 @@ export function getSingleStageSubstage(stage: WorkflowStageInspection): Workflow
     'execution',
     'archive',
   ].includes(stage.stageKey)
-    || /^(?:review|qa|fix|repair)_\d+$/.test(stage.stageKey);
+    || /^(?:review|audit|qa|fix|repair|targeted_repair)_\d+$/.test(stage.stageKey);
   if (!collapsibleStage || stage.substages.length !== 1) {
     return null;
   }
@@ -348,4 +348,3 @@ export function resolveContinueState(workflow: ProjectWorkflow, stageInspections
 
   return { canContinue: false, disabled: true, label: '继续推进' };
 }
-

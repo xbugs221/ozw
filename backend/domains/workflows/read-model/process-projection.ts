@@ -58,9 +58,9 @@ export function buildRunnerProcesses(
     const roleCandidates = new Set([role, inferredRole, stage].map((value) => String(value || '').trim()).filter(Boolean));
     if (stage === 'execution') roleCandidates.add('executor');
     if (stage === 'archive') roleCandidates.add('archiver');
-    if (/^review_\d+$/.test(stage)) roleCandidates.add('reviewer');
+    if (/^(?:review|audit)_\d+$/.test(stage)) roleCandidates.add('reviewer');
     if (/^qa(?:_\d+)?$/.test(stage)) roleCandidates.add('qa');
-    if (/^(?:fix|repair)_\d+$/.test(stage)) roleCandidates.add('fixer');
+    if (/^(?:fix|repair|targeted_repair)_\d+$/.test(stage)) roleCandidates.add('fixer');
 
     const valueMatches = [];
     for (const [key, value] of Object.entries(sessions && typeof sessions === 'object' ? sessions : {})) {
@@ -102,4 +102,3 @@ export function buildRunnerProcesses(
     };
   }).map((process) => Object.fromEntries(Object.entries(process).filter(([, value]) => value !== undefined && value !== '')));
 }
-

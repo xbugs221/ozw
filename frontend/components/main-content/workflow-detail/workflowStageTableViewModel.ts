@@ -191,9 +191,9 @@ function getWorkflowSessionPhaseOrder(label: string): number {
     .replace(/^subagent:/, '');
   if (normalized.startsWith('planning_context:')) return 0;
   if (normalized.startsWith('implementation_context:')) return 1;
-  if (normalized.startsWith('review:')) return 2;
+  if (normalized.startsWith('review:') || normalized.startsWith('audit:')) return 2;
   if (normalized.startsWith('qa:')) return 3;
-  if (normalized.startsWith('fix:') || normalized.startsWith('repair:')) return 4;
+  if (normalized.startsWith('fix:') || normalized.startsWith('repair:') || normalized.startsWith('targeted_repair:')) return 4;
   return 5;
 }
 
@@ -284,6 +284,20 @@ function getWorkflowStageTableSessionLabel(session: WorkflowChildSession, logica
     return compactRole;
   }
   return logicalLabel;
+}
+
+function getWorkflowStageTablePrimarySessionLabel(stageKey: string, logicalLabel: string): string {
+  /**
+   * PURPOSE: Keep the main stage session visibly distinct from artifacts after
+   * several raw oz flow stages are collapsed into one business column.
+   */
+  const normalized = String(stageKey || '').trim();
+  if (normalized === 'execution') return '执行会话';
+  if (/^(?:review|audit)_\d+$/.test(normalized)) return '审核会话';
+  if (/^(?:fix|repair|targeted_repair)_\d+$/.test(normalized)) return '修复会话';
+  if (normalized === 'qa' || /^qa_\d+$/.test(normalized)) return '测试会话';
+  if (normalized === 'archive') return '归档会话';
+  return `${logicalLabel}会话`;
 }
 
 function isParallelWorkflowArtifact(artifact: WorkflowArtifact, substage: WorkflowSubstageInspection): boolean {
@@ -389,7 +403,7 @@ export function buildWorkflowStageTableColumns(stageInspections: WorkflowStageIn
       primaryEntries.push({
         id: `session-${stage.stageKey}-${primarySessionKey}`,
         kind: 'session',
-        label: column.label,
+        label: getWorkflowStageTablePrimarySessionLabel(stage.stageKey, column.label),
         status: stage.status,
         session: primarySession,
       });

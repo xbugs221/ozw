@@ -50,10 +50,10 @@ function getStageTone(status: string): string {
  * represents the role in compact project and sidebar cards.
  */
 function getDisplayStageKey(stageKey: string): string {
-  if (/^review_\d+$/.test(stageKey)) {
+  if (/^(?:review|audit)_\d+$/.test(stageKey)) {
     return 'review';
   }
-  if (/^(repair|fix)_\d+$/.test(stageKey)) {
+  if (/^(?:repair|fix|targeted_repair)_\d+$/.test(stageKey)) {
     return 'repair';
   }
   if (/^qa_\d+$/.test(stageKey)) {

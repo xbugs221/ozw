@@ -46,9 +46,9 @@ export function buildChildSessions(
     if (primaryRoles[stage]?.includes(role)) {
       return true;
     }
-    if (/^review_\d+$/.test(stage)) return role === 'reviewer' || role === stage;
+    if (/^(?:review|audit)_\d+$/.test(stage)) return role === 'reviewer' || role === stage;
     if (/^qa(?:_\d+)?$/.test(stage)) return role === 'qa' || role === 'tester' || role === stage;
-    if (/^(?:fix|repair)_\d+$/.test(stage)) return role === 'fixer' || role === stage;
+    if (/^(?:fix|repair|targeted_repair)_\d+$/.test(stage)) return role === 'fixer' || role === stage;
     return role === stage;
   }
 

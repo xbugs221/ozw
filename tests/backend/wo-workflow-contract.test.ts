@@ -286,6 +286,34 @@ test('wo read model treats current fix stages as repair rounds', async () => {
   });
 });
 
+test('wo read model recognizes current audit and targeted repair stages', async () => {
+  await withFakePath(async ({ projectPath }) => {
+    const runRoot = path.join(resolveFlowRunsRoot(projectPath), 'run-current-stage-names');
+    await fs.mkdir(runRoot, { recursive: true });
+    await fs.writeFile(path.join(runRoot, 'state.json'), JSON.stringify({
+      run_id: 'run-current-stage-names',
+      change_name: 'change-a',
+      status: 'running',
+      stage: 'targeted_repair_1',
+      stages: { execution: 'completed', audit_1: 'completed', targeted_repair_1: 'running' },
+      sessions: { 'codex:repairer': 'repair-session' },
+      paths: { audit_1: 'audit-1.json', targeted_repair_1: 'targeted-repair-1.json' },
+    }));
+    await fs.writeFile(path.join(runRoot, 'audit-1.json'), '{}');
+    await fs.writeFile(path.join(runRoot, 'targeted-repair-1.json'), '{}');
+
+    const [workflow] = await listWorkflowReadModels(projectPath);
+    assert.deepEqual(workflow.stageStatuses.map((stage) => stage.key), ['execution', 'audit_1', 'targeted_repair_1']);
+    assert.deepEqual(workflow.workflowDisplay.lines.map((line) => line.text), ['start', 'review', '1 fix']);
+    assert.deepEqual(workflow.workflowStatusSummary.rows.map((row) => row.key), ['executor', 'reviewer', 'fixer']);
+    assert.deepEqual(
+      workflow.childSessions.map((session) => session.routePath),
+      ['/runs/run-current-stage-names/sessions/targeted_repair_1'],
+    );
+    assert.ok(!workflow.diagnostics.warnings.some((warning) => /Unknown runner (?:stage|path key)/.test(warning)));
+  });
+});
+
 test('wo read model leaves unknown terminal state rows non-clickable', async () => {
   await withFakePath(async ({ projectPath }) => {
     const runRoot = path.join(resolveFlowRunsRoot(projectPath), 'run-blocked-after-fix');

@@ -13,7 +13,9 @@ export const STAGE_LABELS: Record<string, string> = {
   review_2: '再审',
   repair_2: '再修',
   review_3: '三审',
+  audit_1: '初审',
   repair_3: '三修',
+  targeted_repair_1: '初修',
   qa: 'QA 验收',
   archive: '归档',
 };
@@ -46,8 +48,11 @@ export function mapStageStatus(status: unknown): 'completed' | 'active' | 'block
  */
 export function inferRole(stage: unknown): string {
   const normalized = String(stage || '').trim();
-  if (normalized.startsWith('review')) {
+  if (normalized.startsWith('review') || normalized.startsWith('audit')) {
     return 'reviewer';
+  }
+  if (normalized.startsWith('fix') || normalized.startsWith('repair') || normalized.startsWith('targeted_repair')) {
+    return 'fixer';
   }
   if (normalized === 'archive') {
     return 'archiver';
@@ -62,7 +67,19 @@ export function inferRole(stage: unknown): string {
  * Parse both historical repair_N keys and the current oz flow fix_N keys.
  */
 export function parseFixStage(stage: unknown): number | null {
-  const match = String(stage || '').trim().match(/^(?:repair|fix)_(\d+)$/);
+  const match = String(stage || '').trim().match(/^(?:repair|fix|targeted_repair)_(\d+)$/);
+  if (!match) {
+    return null;
+  }
+  const iteration = Number(match[1]);
+  return Number.isInteger(iteration) && iteration > 0 ? iteration : null;
+}
+
+/**
+ * Parse the current oz flow audit rounds alongside historical review rounds.
+ */
+export function parseReviewStage(stage: unknown): number | null {
+  const match = String(stage || '').trim().match(/^(?:review|audit)_(\d+)$/);
   if (!match) {
     return null;
   }
@@ -75,9 +92,9 @@ export function parseFixStage(stage: unknown): number | null {
  */
 export function stageLabel(stage: unknown): string {
   const normalized = String(stage || '').trim();
-  const reviewMatch = normalized.match(/^review_(\d+)$/);
-  if (reviewMatch) {
-    return Number(reviewMatch[1]) === 1 ? '初审' : `${Number(reviewMatch[1])}审`;
+  const reviewIteration = parseReviewStage(normalized);
+  if (reviewIteration) {
+    return reviewIteration === 1 ? '初审' : `${reviewIteration}审`;
   }
   const qaMatchIter = normalized.match(/^qa_(\d+)$/);
   if (qaMatchIter) {
@@ -114,9 +131,9 @@ export function stageDisplayText(stage: unknown): string {
   if (fixIteration) {
     return `${fixIteration} fix`;
   }
-  const reviewMatch = normalized.match(/^review_(\d+)$/);
-  if (reviewMatch) {
-    return `${Number(reviewMatch[1]) - 1} fix review`;
+  const reviewIteration = parseReviewStage(normalized);
+  if (reviewIteration) {
+    return reviewIteration === 1 ? 'review' : `${reviewIteration - 1} fix review`;
   }
   return normalized;
 }

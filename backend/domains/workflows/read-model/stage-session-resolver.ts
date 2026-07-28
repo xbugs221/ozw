@@ -67,7 +67,7 @@ export function inferSubagentRoleStage(role: unknown, stageStatuses: WorkflowSta
   const parts = normalized.split(':').map((part) => part.trim()).filter(Boolean);
   const phase = parts[0] === 'subagent' ? parts[1] : parts[0];
   const roundToken = parts[0] === 'subagent' ? parts[2] : parts[1];
-  const phaseMatch = String(phase || '').match(/^(review|qa|fix|repair)_(\d+)$/);
+  const phaseMatch = String(phase || '').match(/^(review|audit|qa|fix|repair|targeted_repair)_(\d+)$/);
   if (phaseMatch) {
     return `${phaseMatch[1]}_${Number(phaseMatch[2])}`;
   }
@@ -83,7 +83,7 @@ export function inferSubagentRoleStage(role: unknown, stageStatuses: WorkflowSta
   if (phase === 'acceptance') {
     return 'acceptance';
   }
-  if (['review', 'qa', 'fix', 'repair'].includes(String(phase))) {
+  if (['review', 'audit', 'qa', 'fix', 'repair', 'targeted_repair'].includes(String(phase))) {
     const numericRound = Number(roundToken);
     const trailingRound = Number(parts[parts.length - 1]);
     if (Number.isInteger(numericRound) && numericRound > 0) {
@@ -93,8 +93,8 @@ export function inferSubagentRoleStage(role: unknown, stageStatuses: WorkflowSta
       return `${phase}_${trailingRound}`;
     }
     const matching = (stageStatuses || []).filter((stage) => (
-      phase === 'repair'
-        ? /^(?:repair|fix)_\d+$/.test(stage.key)
+      ['repair', 'targeted_repair'].includes(String(phase))
+        ? /^(?:repair|fix|targeted_repair)_\d+$/.test(stage.key)
         : new RegExp(`^${phase}_\\d+$`).test(stage.key)
     ));
     const active = matching.find((stage) => stage.status === 'active');
@@ -147,12 +147,16 @@ export function resolveRoleDefaultStage(role: unknown, stageStatuses: WorkflowSt
     return findBestRoundStage(stageStatuses, ['qa']) || 'qa';
   }
   if (normalizedRole === 'archiver') return 'archive';
-  if (/^(?:review_\d+|fix_\d+|repair_\d+)$/.test(normalizedRole)) return normalizedRole;
+  if (/^(?:review_\d+|audit_\d+|fix_\d+|repair_\d+|targeted_repair_\d+)$/.test(normalizedRole)) return normalizedRole;
   if (normalizedRole === 'reviewer') {
-    return findBestRoundStage(stageStatuses, ['review']) || 'review_1';
+    return findBestRoundStage(stageStatuses, ['review', 'audit']) || 'review_1';
   }
-  if (normalizedRole === 'fixer') {
-    return findBestRoundStage(stageStatuses, ['fix', 'repair']) || 'fix_1';
+  if (normalizedRole === 'fixer' || normalizedRole === 'repairer') {
+    /**
+     * quality-loop-v1 reuses one repairer thread across audit and targeted
+     * repair rounds; attach it to the active optimization stage for navigation.
+     */
+    return findBestRoundStage(stageStatuses, ['audit', 'targeted_repair', 'fix', 'repair']) || 'audit_1';
   }
   return undefined;
 }

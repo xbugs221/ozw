@@ -19,6 +19,7 @@ import {
   LEGACY_STAGE_ORDER,
   mapStageStatus,
   parseFixStage,
+  parseReviewStage,
   stageDisplayText,
   stageLabel,
 } from './stage-taxonomy.js';
@@ -88,12 +89,9 @@ function parseRunnerStage(stage: unknown): { known: boolean; displayable: boolea
   if (normalized === 'qa') {
     return { known: true, displayable: true, order: Number.MAX_SAFE_INTEGER - 2 };
   }
-  const reviewMatch = normalized.match(/^review_(\d+)$/);
-  if (reviewMatch) {
-    const iteration = Number(reviewMatch[1]);
-    if (Number.isInteger(iteration) && iteration > 0) {
-      return { known: true, displayable: true, order: iteration * 3 - 2 };
-    }
+  const reviewIteration = parseReviewStage(normalized);
+  if (reviewIteration) {
+    return { known: true, displayable: true, order: reviewIteration * 3 - 2 };
   }
   const qaMatch = normalized.match(/^qa_(\d+)$/);
   if (qaMatch) {
@@ -199,7 +197,7 @@ export function buildStageStatuses(
     }
     const role = String(parsed.role || '').trim();
     const roleStage = inferSubagentRoleStage(role)
-      || (/^(?:review_\d+|fix_\d+|repair_\d+|qa_\d+)$/.test(role) ? role : '');
+      || (/^(?:review_\d+|audit_\d+|fix_\d+|repair_\d+|targeted_repair_\d+|qa_\d+)$/.test(role) ? role : '');
     const parsedStage = parseRunnerStage(roleStage);
     if (roleStage && parsedStage.displayable) {
       stageKeys.add(roleStage);
@@ -406,7 +404,7 @@ export function buildWorkflowRoleSummary(
       writeCount += 1;
     } else if (parseFixStage(stageKey)) {
       fixCount += 1;
-    } else if (/^review_\d+$/.test(stageKey)) {
+    } else if (parseReviewStage(stageKey)) {
       reviewCount += 1;
     } else if (stageKey === 'qa' || /^qa_\d+$/.test(stageKey)) {
       qaCount += 1;
@@ -444,8 +442,8 @@ export function buildWorkflowRoleSummary(
       const roleFallbacks: Record<string, string[]> = {
         acceptance: ['acceptance'],
         executor: ['execution'],
-        reviewer: ['review_1', 'review_2', 'review_3'],
-        fixer: ['fix_1', 'fix_2', 'fix_3', 'repair_1', 'repair_2', 'repair_3'],
+        reviewer: ['review_1', 'review_2', 'review_3', 'audit_1', 'audit_2', 'audit_3'],
+        fixer: ['fix_1', 'fix_2', 'fix_3', 'repair_1', 'repair_2', 'repair_3', 'targeted_repair_1', 'targeted_repair_2', 'targeted_repair_3'],
         qa: ['qa'],
         archiver: ['archive'],
         planning: ['planning'],
@@ -610,7 +608,7 @@ export function buildWorkflowStatusSummary(
     if (!nodeStatus || nodeStatus === 'pending') {
       continue;
     }
-    if (/^(?:execution|review_\d+|fix_\d+|repair_\d+|qa(?:_\d+)?|archive)$/.test(nodeId)) {
+    if (/^(?:execution|review_\d+|audit_\d+|fix_\d+|repair_\d+|targeted_repair_\d+|qa(?:_\d+)?|archive)$/.test(nodeId)) {
       evidenceStageKeys.add(nodeId);
     }
   }
@@ -644,9 +642,9 @@ export function buildWorkflowStatusSummary(
   for (const stageKey of evidenceStageKeys) {
     if (stageKey === 'execution') {
       executionStages.push(stageKey);
-    } else if (/^review_\d+$/.test(stageKey)) {
+    } else if (parseReviewStage(stageKey)) {
       reviewStages.push(stageKey);
-    } else if (/^fix_\d+$/.test(stageKey) || /^repair_\d+$/.test(stageKey)) {
+    } else if (parseFixStage(stageKey)) {
       fixStages.push(stageKey);
     } else if (stageKey === 'qa' || /^qa_\d+$/.test(stageKey)) {
       qaStages.push(stageKey);
@@ -655,16 +653,8 @@ export function buildWorkflowStatusSummary(
     }
   }
 
-  reviewStages.sort((left, right) => {
-    const leftMatch = left.match(/^review_(\d+)$/);
-    const rightMatch = right.match(/^review_(\d+)$/);
-    return Number(leftMatch?.[1] || 0) - Number(rightMatch?.[1] || 0);
-  });
-  fixStages.sort((left, right) => {
-    const leftMatch = left.match(/^(?:fix|repair)_(\d+)$/);
-    const rightMatch = right.match(/^(?:fix|repair)_(\d+)$/);
-    return Number(leftMatch?.[1] || 0) - Number(rightMatch?.[1] || 0);
-  });
+  reviewStages.sort((left, right) => (parseReviewStage(left) || 0) - (parseReviewStage(right) || 0));
+  fixStages.sort((left, right) => (parseFixStage(left) || 0) - (parseFixStage(right) || 0));
   qaStages.sort((left, right) => {
     const leftMatch = left.match(/^qa(?:_(\d+))?$/);
     const rightMatch = right.match(/^qa(?:_(\d+))?$/);
