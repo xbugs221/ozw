@@ -1,0 +1,50 @@
+# PURPOSE: Run two isolated, read-only Hermes history viewers from one shared
+# ozw image. Host paths are deliberately explicit for Synology Container Manager.
+
+x-ozw-common: &ozw-common
+  image: ozw-local:latest
+  restart: unless-stopped
+  init: true
+  environment:
+    HOST: 0.0.0.0
+    HERMES_HOME: /data/hermes
+    DATABASE_PATH: /var/lib/ozw/ozw.db
+    OZW_TRUST_LOCALHOST_AUTH: "false"
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+    interval: 30s
+    timeout: 5s
+    start_period: 20s
+    retries: 3
+
+services:
+  ozw-zzl:
+    <<: *ozw-common
+    container_name: ozw-zzl
+    build:
+      context: /volume1/docker/src/ozw
+      dockerfile: /volume1/docker/app-data/ozw-deploy/Dockerfile
+      args:
+        HTTP_PROXY: http://192.168.112.1:7897
+        HTTPS_PROXY: http://192.168.112.1:7897
+        ALL_PROXY: http://192.168.112.1:7897
+    env_file:
+      - /volume1/docker/app-data/ozw-deploy/.env.zzl
+    ports:
+      - "127.0.0.1:8652:3001"
+    volumes:
+      - /volume1/docker/app-data/hermes-zzl/data:/data/hermes:ro
+      - /volume1/homes/zzl/agent_data:/workspace
+      - /volume1/docker/app-data/ozw-zzl:/var/lib/ozw
+
+  ozw-dmh:
+    <<: *ozw-common
+    container_name: ozw-dmh
+    env_file:
+      - /volume1/docker/app-data/ozw-deploy/.env.dmh
+    ports:
+      - "127.0.0.1:8653:3001"
+    volumes:
+      - /volume1/docker/app-data/hermes-dmh/data:/data/hermes:ro
+      - /volume1/homes/Dmh/agent_data:/workspace
+      - /volume1/docker/app-data/ozw-dmh:/var/lib/ozw
