@@ -109,6 +109,7 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
       try {
         const response = await api.getFiles(projectName, {
           depth: 0,
+          showHidden: true,
           projectPath,
           signal: abortController.signal,
         });
@@ -170,6 +171,7 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
       const response = await api.getFiles(projectName, {
         path: targetNode.relativePath || directoryPath,
         depth: 1,
+        showHidden: true,
         projectPath: projectRoot,
       });
 

@@ -6,7 +6,6 @@
 import {
     expandWorkspacePath as expandWorkspacePathWithRoot,
     permissionBitsToRwx,
-    shouldSkipProjectTreeEntry,
 } from './file-route-helpers.js';
 
 type LooseRecord = Record<string, any>;
@@ -43,11 +42,6 @@ export function registerFileRoutesImpl(deps: FileRouteDeps): void {
         return expandWorkspacePathWithRoot(inputPath, { WORKSPACES_ROOT, path });
     };
     // Helper function to convert permissions to rwx format
-    function shouldSkipTreeEntry(entryName: string): boolean {
-        return shouldSkipProjectTreeEntry(entryName);
-    }
-
-    // Helper function to convert permissions to rwx format
     function permToRwx(perm: number): string {
         return permissionBitsToRwx(perm);
     }
@@ -60,11 +54,6 @@ export function registerFileRoutesImpl(deps: FileRouteDeps): void {
 
             for (const entry of entries) {
                 if (!showHidden && entry.name.startsWith('.')) {
-                    continue;
-                }
-
-                // Skip heavy build directories and VCS directories.
-                if (shouldSkipTreeEntry(entry.name)) {
                     continue;
                 }
 
@@ -114,9 +103,6 @@ export function registerFileRoutesImpl(deps: FileRouteDeps): void {
                         try {
                             const childEntries = await fsPromises.readdir(item.path, { withFileTypes: true });
                             item.hasChildren = childEntries.some((childEntry: any) => {
-                                if (shouldSkipTreeEntry(childEntry.name)) {
-                                    return false;
-                                }
                                 return showHidden || !childEntry.name.startsWith('.');
                             });
                         } catch (e: any) {

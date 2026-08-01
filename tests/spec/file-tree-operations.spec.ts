@@ -116,6 +116,32 @@ test('directory-heavy projects keep folders collapsed until the user expands the
   await expect(page.getByRole('button', { name: /Save/i })).toBeVisible();
 });
 
+test('files tab lists every readable workspace entry without fixed directory exclusions', async ({ request }) => {
+  /** Scenario: A workspace contains normally hidden, generated, and VCS-like entries that remain readable. */
+  await fs.mkdir(path.join(PRIMARY_FIXTURE_PROJECT_PATH, '.git'), { recursive: true });
+  await writeWorkspaceTextFile('.env', 'SECRET=visible-for-inspection\n');
+  await writeWorkspaceTextFile('node_modules/package.json', '{}\n');
+  await writeWorkspaceTextFile('dist/bundle.js', 'console.log(1);\n');
+  await writeWorkspaceTextFile('build/output.txt', 'build output\n');
+  await writeWorkspaceTextFile('.git/HEAD', 'ref: refs/heads/main\n');
+
+  const project = await getFixtureProject(request);
+  const response = await request.get(
+    `/api/projects/${encodeURIComponent(project.name)}/files?projectPath=${encodeURIComponent(project.fullPath)}&depth=0`,
+    { headers: authHeaders() },
+  );
+
+  expect(response.ok()).toBeTruthy();
+  const payload = await response.json();
+  expect(payload.map((entry) => entry.name)).toEqual(expect.arrayContaining([
+    '.env',
+    '.git',
+    'build',
+    'dist',
+    'node_modules',
+  ]));
+});
+
 test('rename endpoint moves a directory and preserves its nested contents', async ({ page, request }) => {
   /** Scenario: Renaming a directory from the file tree */
   await writeWorkspaceTextFile('docs/guide.md', 'hello\n');

@@ -1,0 +1,11 @@
+验收场景：与修复前相同，项目根目录包含 `.env`、`.git`、`node_modules`、`dist`、`build`。
+
+修复后文件 Tab 根目录可见：
+
+.env
+.git
+node_modules
+dist
+build
+
+点击目录后，可继续查看其内部文件；目录默认保持折叠。

@@ -1,0 +1,12 @@
+验收场景：项目根目录包含 `.env`、`.git`、`node_modules`、`dist`、`build`。
+
+修复前文件 Tab 根目录可见：
+
+.env
+
+修复前文件 Tab 不可见：
+
+.git
+node_modules
+dist
+build

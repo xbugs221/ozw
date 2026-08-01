@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createChatClientScopeStore, normalizeChatClientScope } from '../../backend/server/realtime/chat-client-scope-store.ts';
 import { buildChatCommandContext, dispatchChatCommand } from '../../backend/server/realtime/chat-command-router.ts';
-import { shouldSkipProjectTreeEntry, permissionBitsToRwx, expandWorkspacePath } from '../../backend/server/files/file-route-helpers.ts';
+import { permissionBitsToRwx, expandWorkspacePath } from '../../backend/server/files/file-route-helpers.ts';
 
 test('chat-client-scope-store normalizes private realtime ownership', () => {
   /** provider session 和 request id 至少一个存在时才记录私有 scope。 */
@@ -28,9 +28,8 @@ test('chat-command-router builds context and dispatches command', () => {
   assert.deepEqual(received, { type: 'ping' });
 });
 
-test('file-route-helpers protect project file tree and workspace expansion', () => {
-  /** 文件树应跳过沉重目录，并稳定展示权限文本。 */
-  assert.equal(shouldSkipProjectTreeEntry('node_modules'), true);
+test('file-route-helpers preserve file metadata and workspace expansion', () => {
+  /** 文件路由 helper 需要稳定展示权限文本，并正确展开工作区路径。 */
   assert.equal(permissionBitsToRwx(5), 'r-x');
   assert.equal(expandWorkspacePath('~/demo', { WORKSPACES_ROOT: '/workspace', path: { join: (...parts: string[]) => parts.join('/') } }), '/workspace/demo');
 });

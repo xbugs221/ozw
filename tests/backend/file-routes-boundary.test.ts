@@ -1,24 +1,12 @@
 /**
- * 文件目的：锁定项目文件路由 helper 的目录树过滤和权限文本行为。
+ * 文件目的：锁定项目文件路由 helper 的权限文本行为。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
   permissionBitsToRwx,
-  shouldSkipProjectTreeEntry,
 } from '../../backend/server/file-routes.ts';
-
-test('file route helpers keep heavy/internal directories out of project tree', () => {
-  /**
-   * 项目文件树不能暴露沉重构建目录或 VCS 内部目录。
-   */
-  assert.equal(shouldSkipProjectTreeEntry('node_modules'), true);
-  assert.equal(shouldSkipProjectTreeEntry('dist'), true);
-  assert.equal(shouldSkipProjectTreeEntry('build'), true);
-  assert.equal(shouldSkipProjectTreeEntry('.git'), true);
-  assert.equal(shouldSkipProjectTreeEntry('src'), false);
-});
 
 test('file route helpers render rwx permission bits for inspectable file metadata', () => {
   /**
