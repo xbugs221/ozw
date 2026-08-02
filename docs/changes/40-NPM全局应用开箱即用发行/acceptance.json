@@ -1,0 +1,267 @@
+{
+  "summary": "ozw 必须以预编译、最小且经过跨平台验收的 NPM 包发布；用户全局安装后运行 ozw 即可自动初始化 ~/.ozw 并启动，且在可复现的单核慢磁盘剖面下快速返回健康、登录页和项目摘要；ozw 只检测、不管理外部编程代理。",
+  "coverage": [
+    {
+      "spec": "需求：发布包必须是预编译的生产成品",
+      "tests": ["npm-package-runtime"],
+      "evidence": ["package-manifest", "isolated-startup"],
+      "risk": "动态资源只有从真实压缩包启动才能证明没有漏装。"
+    },
+    {
+      "spec": "需求：首次运行必须安全初始化单用户环境",
+      "tests": ["first-run-bootstrap"],
+      "evidence": ["user-state", "concurrent-bootstrap"],
+      "risk": "不同平台的文件权限语义需要分别验证。"
+    },
+    {
+      "spec": "需求：配置与数据必须独立于全局安装目录",
+      "tests": ["user-directory-boundary", "upgrade-uninstall-data"],
+      "evidence": ["readonly-install", "upgrade-state", "uninstall-state"],
+      "risk": "系统服务环境中的 HOME 解析必须在后置阶段单独覆盖。"
+    },
+    {
+      "spec": "需求：外部编程代理必须只检测、不管理",
+      "tests": ["provider-diagnostics-boundary"],
+      "evidence": ["provider-process-state"],
+      "risk": "外部工具升级可能改变诊断协议，但不得扩大为进程管理。"
+    },
+    {
+      "spec": "需求：低端单核与慢磁盘不得阻塞启动和首页",
+      "tests": ["low-end-runtime-budget"],
+      "evidence": ["low-end-segments", "event-loop-lag", "storage-boundary"],
+      "risk": "真实 NAS 型号差异很大，只以固定 CPU 配额、注入 I/O 延迟和文件规模作为发布门禁；网络文件系统上的 SQLite 不纳入保证。"
+    },
+    {
+      "spec": "需求：每个声明支持的平台必须通过原生数据库验收",
+      "tests": ["native-database-matrix"],
+      "evidence": ["platform-matrix"],
+      "risk": "上游原生预编译产物可能晚于新 Node.js 版本发布。"
+    },
+    {
+      "spec": "需求：发布流水线必须发布经过验收的同一产物",
+      "tests": ["release-artifact-identity"],
+      "evidence": ["artifact-digest", "registry-smoke"],
+      "risk": "首发前仍需确认公开注册表中的包名所有权。"
+    },
+    {
+      "spec": "需求：可选系统服务不得分叉运行边界",
+      "tests": ["optional-service-boundary"],
+      "evidence": ["service-definition"],
+      "risk": "系统服务是后置可选阶段，不阻断首个前台 NPM 版本。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "npm-package-runtime",
+      "source": "planned_change_contract",
+      "path": "tests/specs/npm-global-distribution.spec.ts",
+      "command": "node --import tsx --test --test-name-pattern='真实压缩包可全局安装并直接启动' tests/specs/npm-global-distribution.spec.ts",
+      "purpose": "证明真实 NPM 压缩包只包含生产资产，且全局命令不需要开发工具即可启动。",
+      "assertions": [
+        "bin 入口、编译后端、前端静态资源和数据库资源存在",
+        "压缩包不包含 TypeScript 源码、测试、构建配置或完整开发脚本目录",
+        "安装和启动不调用 pnpm、tsx、tsc 或 Vite"
+      ],
+      "expected_initial_failure": "执行阶段合同尚未创建；按当前 package.json 打包后，即使入口存在，也会失败于 files 携带源码、start 依赖 pnpm 或 postinstall 依赖 tsx。"
+    },
+    {
+      "id": "first-run-bootstrap",
+      "source": "planned_change_contract",
+      "path": "tests/specs/npm-global-distribution.spec.ts",
+      "command": "node --import tsx --test --test-name-pattern='首次运行幂等创建用户配置和秘密' tests/specs/npm-global-distribution.spec.ts",
+      "purpose": "证明首次、重复和并发启动安全创建单用户配置。",
+      "assertions": [
+        "创建 ~/.ozw/.env、ozw.db 和 .jwt-secret",
+        "访问令牌恰好 32 个字符且 JWT 密钥不进入 .env",
+        "重复或并发启动不覆盖已有值"
+      ],
+      "expected_initial_failure": "执行阶段合同尚未创建；当前首次运行不会自动创建 ~/.ozw/.env 和 OZW_ACCESS_TOKEN，应失败于用户配置缺失。"
+    },
+    {
+      "id": "user-directory-boundary",
+      "source": "planned_change_contract",
+      "path": "tests/specs/npm-global-distribution.spec.ts",
+      "command": "node --import tsx --test --test-name-pattern='只读安装目录与统一用户目录' tests/specs/npm-global-distribution.spec.ts",
+      "purpose": "证明可变状态与全局安装目录分离。",
+      "assertions": [
+        "只读安装目录仍能启动",
+        "CLI、服务端和 status 使用同一用户配置",
+        "显式环境变量优先级一致"
+      ],
+      "expected_initial_failure": "执行阶段合同尚未创建；当前 CLI 和服务端仍读取安装包根目录 .env，应失败于配置来源不一致。"
+    },
+    {
+      "id": "upgrade-uninstall-data",
+      "source": "planned_change_contract",
+      "path": "tests/specs/npm-global-distribution.spec.ts",
+      "command": "node --import tsx --test --test-name-pattern='全局升级和卸载保留用户数据' tests/specs/npm-global-distribution.spec.ts",
+      "purpose": "证明标准 NPM 升级和卸载保护用户数据。",
+      "assertions": [
+        "升级后访问令牌、JWT 密钥和数据库保持",
+        "数据库迁移后既有业务数据可读",
+        "卸载全局包不会删除 ~/.ozw"
+      ],
+      "expected_initial_failure": "执行阶段合同尚未创建；当前没有两个真实候选版本的全局安装升级链路，应失败于缺少可安装发行产物。"
+    },
+    {
+      "id": "provider-diagnostics-boundary",
+      "source": "planned_change_contract",
+      "path": "tests/specs/npm-global-distribution.spec.ts",
+      "command": "node --import tsx --test --test-name-pattern='外部编程代理只检测不管理' tests/specs/npm-global-distribution.spec.ts",
+      "purpose": "证明 ozw 只诊断外部编程代理。",
+      "assertions": [
+        "诊断前后外部进程和配置不变",
+        "不执行安装、启动、停止或升级命令",
+        "可选代理缺失不阻断主服务"
+      ],
+      "expected_initial_failure": "执行阶段合同尚未创建；现有诊断行为需先建立进程和配置不变的可执行边界证据。"
+    },
+    {
+      "id": "low-end-runtime-budget",
+      "source": "planned_performance_gate",
+      "path": "tests/performance/npm-low-end-runtime.test.ts",
+      "command": "npm run test:npm:low-end",
+      "purpose": "证明真实候选包在固定单核慢磁盘剖面下快速提供健康、登录页、认证首页和项目摘要，且不阻塞事件循环。",
+      "assertions": [
+        "1 vCPU、512 MiB、20 ms I/O 延迟与 10 MiB/s 吞吐限制及固定大型夹具均被记录",
+        "首次初始化和已初始化启动到 /health、登录页、认证首页和 /api/projects 的冷热 95 分位通过规格预算",
+        "并发首页与后台索引期 95 分位停顿不超过 100 ms，单次不超过 250 ms",
+        "进程健康和 /api/projects 不等待外部探测、不遍历 Provider 历史或读取 transcript 正文",
+        "transcript 体积增加 10 倍后项目列表文件操作数不变且 95 分位增幅不超过 10%",
+        "SQLite 和 WAL/SHM 位于本地卷，证据不把网络文件系统结果宣称为受支持性能"
+      ],
+      "expected_initial_failure": "性能剖面、分段采集器和 test:npm:low-end 尚未创建；当前发布验收无法证明慢磁盘下的启动、首页与事件循环预算。"
+    },
+    {
+      "id": "native-database-matrix",
+      "source": "planned_ci_matrix",
+      "path": ".github/workflows/npm-release.yml",
+      "command": "npm run test:npm:platform",
+      "purpose": "证明每个公开支持的平台都能安装并运行原生数据库。",
+      "assertions": [
+        "同一候选压缩包在支持矩阵全局安装",
+        "better-sqlite3 加载、迁移和读写成功",
+        "支持列表不包含未通过组合"
+      ],
+      "expected_initial_failure": "发布工作流和 test:npm:platform 尚未创建；当前 CI 只有 Ubuntu 源码回归，无法证明跨平台原生模块可用。"
+    },
+    {
+      "id": "release-artifact-identity",
+      "source": "planned_ci_release_gate",
+      "path": ".github/workflows/npm-release.yml",
+      "command": "npm run test:npm:published",
+      "purpose": "证明发布到注册表的是矩阵验收过的同一产物。",
+      "assertions": [
+        "候选包与公开下载包摘要或内容一致",
+        "版本、标签和包内版本一致",
+        "公开安装后版本、初始化、健康检查和 WebUI 通过"
+      ],
+      "expected_initial_failure": "发布工作流和 test:npm:published 尚未创建；当前 release.sh 只生成提交和标签，不发布或复装注册表产物。"
+    },
+    {
+      "id": "optional-service-boundary",
+      "source": "planned_change_contract",
+      "path": "tests/specs/npm-global-service.spec.ts",
+      "command": "node --import tsx --test tests/specs/npm-global-service.spec.ts",
+      "purpose": "在后置阶段证明系统服务复用主入口且只管理 ozw。",
+      "assertions": [
+        "前台与服务入口读取同一用户目录",
+        "服务定义只启动 ozw",
+        "服务卸载不删除用户数据或管理外部代理"
+      ],
+      "expected_initial_failure": "后置系统服务阶段的合同尚未创建；当前没有服务安装入口，因此不阻断首个前台 NPM 发行。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "package-manifest",
+      "kind": "state_snapshot",
+      "path": "test-results/change-40-npm-global-distribution/package-manifest.json",
+      "purpose": "记录候选压缩包的完整文件、体积和命令入口。"
+    },
+    {
+      "id": "isolated-startup",
+      "kind": "log",
+      "path": "test-results/change-40-npm-global-distribution/isolated-startup.log",
+      "purpose": "证明隔离全局前缀中无需开发工具即可启动健康服务。"
+    },
+    {
+      "id": "user-state",
+      "kind": "state_snapshot",
+      "path": "test-results/change-40-npm-global-distribution/user-state.json",
+      "purpose": "记录首次初始化后的文件、权限和秘密边界，不保存秘密明文。"
+    },
+    {
+      "id": "concurrent-bootstrap",
+      "kind": "state_snapshot",
+      "path": "test-results/change-40-npm-global-distribution/concurrent-bootstrap.json",
+      "purpose": "证明并发进程观察到同一套持久化配置且没有截断文件。"
+    },
+    {
+      "id": "readonly-install",
+      "kind": "log",
+      "path": "test-results/change-40-npm-global-distribution/readonly-install.log",
+      "purpose": "证明全局包目录不可写时所有可变状态仍进入用户目录。"
+    },
+    {
+      "id": "upgrade-state",
+      "kind": "state_snapshot",
+      "path": "test-results/change-40-npm-global-distribution/upgrade-state.json",
+      "purpose": "记录升级前后配置、数据库迁移与业务数据一致性。"
+    },
+    {
+      "id": "uninstall-state",
+      "kind": "state_snapshot",
+      "path": "test-results/change-40-npm-global-distribution/uninstall-state.json",
+      "purpose": "证明卸载程序后用户目录和业务数据仍存在。"
+    },
+    {
+      "id": "provider-process-state",
+      "kind": "state_snapshot",
+      "path": "test-results/change-40-npm-global-distribution/provider-process-state.json",
+      "purpose": "记录诊断前后外部编程代理的进程、服务和配置均未被修改。"
+    },
+    {
+      "id": "low-end-segments",
+      "kind": "metric",
+      "path": "test-results/change-40-npm-global-distribution/low-end-segments.json",
+      "purpose": "记录固定单核慢磁盘剖面、夹具摘要、各冷热点的中位数、95 分位、最大值、文件操作数和读取字节数。"
+    },
+    {
+      "id": "event-loop-lag",
+      "kind": "metric",
+      "path": "test-results/change-40-npm-global-distribution/event-loop-lag.json",
+      "purpose": "记录首页请求和后台索引并行期间的事件循环停顿分布及超预算样本。"
+    },
+    {
+      "id": "storage-boundary",
+      "kind": "state_snapshot",
+      "path": "test-results/change-40-npm-global-distribution/storage-boundary.json",
+      "purpose": "记录程序、配置、内部密钥、数据库和 WAL/SHM 的实际路径与存储类型，不保存秘密明文，并证明 SQLite 验收使用本地卷。"
+    },
+    {
+      "id": "platform-matrix",
+      "kind": "matrix",
+      "path": "test-results/change-40-npm-global-distribution/platform-matrix.json",
+      "purpose": "记录各操作系统、架构和 Node.js 组合的安装与 SQLite 读写结果。"
+    },
+    {
+      "id": "artifact-digest",
+      "kind": "state_snapshot",
+      "path": "test-results/change-40-npm-global-distribution/artifact-digest.json",
+      "purpose": "证明跨平台验收和 NPM 发布使用同一候选压缩包。"
+    },
+    {
+      "id": "registry-smoke",
+      "kind": "log",
+      "path": "test-results/change-40-npm-global-distribution/registry-smoke.log",
+      "purpose": "记录从公开注册表重新安装后的版本、初始化和健康检查。"
+    },
+    {
+      "id": "service-definition",
+      "kind": "state_snapshot",
+      "path": "test-results/change-40-npm-global-distribution/service-definition.json",
+      "purpose": "在后置阶段证明服务只启动 ozw 并复用用户目录。"
+    }
+  ]
+}
