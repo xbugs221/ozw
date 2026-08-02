@@ -1,14 +1,19 @@
 // @ts-nocheck -- Complex state typing and dynamic JSX components.
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * PURPOSE: Guide first-run provider checks while loading the interactive login
+ * terminal only when the user explicitly opens it.
+ */
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 const ChevronRight = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>;
 const ChevronLeft = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>;
 const Check = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>;
 const LogIn = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10,17 15,12 10,7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>;
 const Loader2 = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4 animate-spin"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
 import SessionProviderLogo from '../llm-logo-provider/SessionProviderLogo';
-import LoginModal from './LoginModal';
 import { authenticatedFetch } from '../../utils/api';
 import { IS_PLATFORM } from '../../constants/config';
+
+const LoginModal = lazy(() => import('./LoginModal'));
 
 const Onboarding = ({ onComplete }) => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -300,14 +305,16 @@ const Onboarding = ({ onComplete }) => {
       </div>
 
       {activeLoginProvider && (
-        <LoginModal
-          isOpen={!!activeLoginProvider}
-          onClose={() => setActiveLoginProvider(null)}
-          provider={activeLoginProvider}
-          project={selectedProject}
-          onComplete={handleLoginComplete}
-          isOnboarding={true}
-        />
+        <Suspense fallback={<div className="fixed inset-0 z-[9999] bg-black/50" aria-label="Loading provider login" />}>
+          <LoginModal
+            isOpen={!!activeLoginProvider}
+            onClose={() => setActiveLoginProvider(null)}
+            provider={activeLoginProvider}
+            project={selectedProject}
+            onComplete={handleLoginComplete}
+            isOnboarding={true}
+          />
+        </Suspense>
       )}
     </>
   );

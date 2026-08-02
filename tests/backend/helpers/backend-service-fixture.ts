@@ -9,7 +9,7 @@ import path from 'node:path';
 import WebSocket from 'ws';
 
 const TSX_CLI = 'node_modules/tsx/dist/cli.mjs';
-const TEST_JWT_SECRET = 'backend-service-fixture-jwt-secret';
+const DEFAULT_TEST_ACCESS_TOKEN = '0123456789abcdef0123456789abcdef';
 
 async function getFreePort() {
   /** Allocate a loopback port for the short-lived backend fixture process. */
@@ -42,8 +42,8 @@ async function waitForHealth(fixture, timeoutMs = 15_000) {
 
 export async function startIsolatedBackendServer(options = {}) {
   /**
-   * Start backend/index.ts with a per-test database and deterministic auth
-   * secret so tests cannot share local user state.
+   * Start backend/index.ts with a per-test database so auth and application
+   * state cannot leak between test processes.
    */
   const port = options.port || await getFreePort();
   const cwd = options.cwd || path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
@@ -55,9 +55,9 @@ export async function startIsolatedBackendServer(options = {}) {
     HOST: '127.0.0.1',
     DATABASE_PATH: options.databasePath,
     OZW_DATABASE_PATH_DEFAULTED: '',
-    JWT_SECRET: TEST_JWT_SECRET,
     OZW_FAKE_PI_RUNTIME: '1',
     SESSION_PATH_SCAN_INTERVAL_MS: '0',
+    OZW_ACCESS_TOKEN: options.accessToken || DEFAULT_TEST_ACCESS_TOKEN,
   };
   if (!env.DATABASE_PATH) {
     throw new Error('startIsolatedBackendServer requires databasePath');
@@ -77,23 +77,22 @@ export async function startIsolatedBackendServer(options = {}) {
     port,
     baseUrl: `http://127.0.0.1:${port}`,
     wsUrl: `ws://127.0.0.1:${port}/ws`,
+    accessToken: env.OZW_ACCESS_TOKEN,
   };
   await waitForHealth(fixture, options.healthTimeoutMs);
   return fixture;
 }
 
-export async function registerTestUser(fixture, credentials = {}) {
-  /** Register a real backend user and return the auth route payload. */
-  const username = credentials.username || `tester-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const password = credentials.password || 'password';
-  const response = await fetch(`${fixture.baseUrl}/api/auth/register`, {
+export async function authenticateTestClient(fixture) {
+  /** Exchange the fixture access token for a real internal JWT session. */
+  const response = await fetch(`${fixture.baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ accessToken: fixture.accessToken }),
   });
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(`register user failed: ${JSON.stringify(payload)}`);
+    throw new Error(`test client login failed: ${JSON.stringify(payload)}`);
   }
   return payload;
 }
@@ -111,15 +110,28 @@ export async function openAuthenticatedWebSocket(fixture, token) {
 
 export async function stopBackendServerFixture(fixture) {
   /** Stop the backend fixture process without relying on process exit hooks. */
-  if (!fixture?.child || fixture.child.exitCode !== null) {
+  if (!fixture?.child || fixture.child.exitCode !== null || fixture.child.signalCode !== null) {
     return;
   }
-  fixture.child.kill('SIGTERM');
-  await Promise.race([
-    new Promise((resolve) => fixture.child.once('exit', resolve)),
-    new Promise((resolve) => setTimeout(resolve, 3000)),
-  ]);
-  if (fixture.child.exitCode === null) {
-    fixture.child.kill('SIGKILL');
-  }
+  await new Promise((resolve) => {
+    /** Clear the fallback timer when SIGTERM succeeds so tests do not retain a three-second event-loop handle. */
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(forceKillTimer);
+      fixture.child.off('exit', finish);
+      resolve();
+    };
+    const forceKillTimer = setTimeout(() => {
+      if (fixture.child.exitCode === null) fixture.child.kill('SIGKILL');
+      finish();
+    }, 3000);
+    fixture.child.once('exit', finish);
+    if (fixture.child.exitCode !== null || fixture.child.signalCode !== null) {
+      finish();
+      return;
+    }
+    fixture.child.kill('SIGTERM');
+  });
 }

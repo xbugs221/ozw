@@ -65,6 +65,14 @@
 - **那么** 页面应把这些 delta 合并为一条 assistant 消息
 - **并且** 不依赖 `/messages` 反复读取 JSONL 才能看到运行中内容
 
+### 场景：Provider 首帧低延迟且持续流受控
+
+- **给定** Codex 或 Pi 连续输出用户可见文本 delta
+- **当** 后端向 WebSocket 转发运行中内容
+- **那么** 首个可见批次的目标延迟不得超过 100ms
+- **并且** 后续高频 delta 应按较慢节奏合并，限制 WebSocket 帧数和前端重绘
+- **并且** complete、abort 或 runtime dispose 前必须发送尚未转发的尾部文本且清理计时器
+
 ## 需求：provider JSONL 只作为持久历史来源
 
 ### 场景：完成后用 provider JSONL reconcile，不重复显示 live 消息

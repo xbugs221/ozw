@@ -1,8 +1,13 @@
+/**
+ * PURPOSE: Render fenced Markdown code with copy controls and asynchronously
+ * load only the Prism language requested by the current block.
+ */
 import type { ComponentProps } from 'react';
 import { useState } from 'react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PrismAsyncLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark as prismOneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { copyTextToClipboard } from '../../../../../utils/clipboard';
+import { getSyntaxLanguageFromClassName } from '../../../../../utils/syntaxLanguage';
 import MarkdownMermaidBlock from './MarkdownMermaidBlock';
 
 type MarkdownCodeBlockProps = {
@@ -35,8 +40,7 @@ export default function MarkdownCodeBlock({
     );
   }
 
-  const languageMatch = /language-(\w+)/.exec(className || '');
-  const language = languageMatch ? languageMatch[1].toLowerCase() : 'text';
+  const language = getSyntaxLanguageFromClassName(className);
 
   if (language === 'mermaid') {
     return (

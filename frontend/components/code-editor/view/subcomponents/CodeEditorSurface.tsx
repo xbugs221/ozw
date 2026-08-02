@@ -1,6 +1,12 @@
+/**
+ * PURPOSE: Render the editable CodeMirror surface while deferring rich
+ * Markdown preview resources until the user explicitly opens the preview.
+ */
 import CodeMirror from '@uiw/react-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
-import MarkdownPreview from './markdown/MarkdownPreview';
+import { lazy, Suspense } from 'react';
+
+const MarkdownPreview = lazy(() => import('./markdown/MarkdownPreview'));
 
 /**
  * PURPOSE: Keep extension typing local to avoid hard dependency on @codemirror/state types.
@@ -32,7 +38,9 @@ export default function CodeEditorSurface({
     return (
       <div className="h-full overflow-y-auto bg-white dark:bg-gray-900">
         <div className="max-w-4xl mx-auto px-8 py-6 prose prose-sm dark:prose-invert prose-headings:font-semibold prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-code:text-sm prose-pre:bg-gray-900 prose-img:rounded-lg max-w-none">
-          <MarkdownPreview content={content} isDarkMode={isDarkMode} />
+          <Suspense fallback={null}>
+            <MarkdownPreview content={content} isDarkMode={isDarkMode} />
+          </Suspense>
         </div>
       </div>
     );

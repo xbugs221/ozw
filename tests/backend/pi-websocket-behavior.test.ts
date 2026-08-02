@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   openAuthenticatedWebSocket,
-  registerTestUser,
+  authenticateTestClient,
   startIsolatedBackendServer,
   stopBackendServerFixture,
 } from './helpers/backend-service-fixture.ts';
@@ -77,7 +77,7 @@ test('pi-command redirects users to the tmux TUI without co writes', async () =>
 
   try {
     fixture = await spawnCcflowServer(binDir, coHome, databasePath);
-    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const { token } = await authenticateTestClient(fixture);
     const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
@@ -137,7 +137,7 @@ test('abort-session with provider=pi handles accepted and rejected native starts
 
   try {
     fixture = await spawnCcflowServer(binDir, coHome, databasePath);
-    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const { token } = await authenticateTestClient(fixture);
     const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
@@ -214,7 +214,7 @@ test('abort-session with provider=pi sends session-aborted via WebSocket', async
 
   try {
     fixture = await spawnCcflowServer(binDir, coHome, databasePath);
-    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const { token } = await authenticateTestClient(fixture);
     const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
@@ -269,7 +269,7 @@ test('providers.pi=false gate does not crash server (native runtime)', async () 
 
   try {
     fixture = await spawnCcflowServer(binDir, coHome, databasePath);
-    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const { token } = await authenticateTestClient(fixture);
     const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
@@ -328,7 +328,7 @@ test('check-session-status returns isProcessing from native runtime', async () =
 
   try {
     fixture = await spawnCcflowServer(binDir, coHome, databasePath);
-    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const { token } = await authenticateTestClient(fixture);
     const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
@@ -372,7 +372,7 @@ test('check-session-status for unknown session returns isProcessing=false', asyn
 
   try {
     fixture = await spawnCcflowServer(binDir, coHome, databasePath);
-    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const { token } = await authenticateTestClient(fixture);
     const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 
@@ -417,7 +417,7 @@ test('get-active-sessions returns pi and codex arrays from native runtime', asyn
 
   try {
     fixture = await spawnCcflowServer(binDir, coHome, databasePath);
-    const { token } = await registerTestUser(fixture, { username: 'pi-tester', password: 'pi-pass' });
+    const { token } = await authenticateTestClient(fixture);
     const ws = await openAuthenticatedWebSocket(fixture, token);
     const messages = collectWsMessages(ws);
 

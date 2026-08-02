@@ -1,10 +1,13 @@
+/**
+ * PURPOSE: Embed the shared terminal runtime as a standalone workspace panel.
+ */
 import { useCallback, useState } from 'react';
 import type { Project, ProjectSession } from '../../../types/app';
 import Shell from '../../shell/view/Shell';
 import StandaloneShellEmptyState from './subcomponents/StandaloneShellEmptyState';
 import StandaloneShellHeader from './subcomponents/StandaloneShellHeader';
 
-type StandaloneShellProps = {
+export type StandaloneShellProps = {
   project?: Project | null;
   session?: ProjectSession | null;
   command?: string | null;

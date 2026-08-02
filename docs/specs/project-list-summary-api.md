@@ -144,6 +144,8 @@ ozw 默认 SQLite 数据库承载项目索引、Provider 索引和其他应用�
 
 项目清单响应不得等待 workflow watcher ready、全局 workflow attach 或 provider 全历史索引完成；这些重任务应在单项目详情或后台异步路径处理。
 
+HTTP 服务必须先进入监听状态，再在后台启动 Provider watcher。watcher 的目录创建、历史树遍历、`ready` 超时或初始化失败不得延迟 `/health`；失败只影响实时增量刷新，并由日志暴露。
+
 #### 场景：默认项目清单响应不等待 watcher ready 或全局 workflow attach
 
 - **给定** 用户有真实 provider history 和 oz flow run

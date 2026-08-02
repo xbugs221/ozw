@@ -720,6 +720,41 @@ test('Go runner client accepts state-publishing commands that exit immediately',
   });
 });
 
+test('Go runner client accepts a final state write that becomes visible just after runner exit', async () => {
+  await withFakeGoWorkflowTools(async (tempRoot) => {
+    const projectPath = path.join(tempRoot, 'project');
+    const statePath = resolveFlowRunStatePath(projectPath, 'run-abc');
+    await fs.mkdir(projectPath, { recursive: true });
+    await fs.writeFile(
+      path.join(tempRoot, 'bin', 'oz'),
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "flow" ] && [ "$2" = "run" ]; then',
+        '  parent_pid=$$',
+        `  state_dir=${JSON.stringify(path.dirname(statePath))}`,
+        `  state_path=${JSON.stringify(statePath)}`,
+        '  (',
+        '    while kill -0 "$parent_pid" 2>/dev/null; do sleep 0.001; done',
+        '    mkdir -p "$state_dir"',
+        '    echo \'{"run_id":"run-abc","status":"running","stage":"execution"}\' > "$state_path"',
+        '  ) >/dev/null 2>&1 &',
+        '  echo \'{"run_id":"run-abc","change_name":"go-change"}\'',
+        '  exit 0',
+        'fi',
+        'echo "{}"',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+
+    const importKey = encodeURIComponent(`${tempRoot}-exit-write-race`);
+    const { startGoWorkflowRun } = await import(`../../backend/domains/workflows/go-runner-client.js?go=${importKey}`);
+
+    const started = await startGoWorkflowRun(projectPath, 'go-change');
+    assert.equal(started.run_id, 'run-abc');
+    assert.equal(JSON.parse(await fs.readFile(statePath, 'utf8')).run_id, 'run-abc');
+  });
+});
+
 test('Go runner client does not fall back to legacy project .wo state when user-state publish is missing', async () => {
   await withFakeGoWorkflowTools(async (tempRoot) => {
     const projectPath = path.join(tempRoot, 'project');
@@ -742,9 +777,12 @@ test('Go runner client does not fall back to legacy project .wo state when user-
     const importKey = encodeURIComponent(`${tempRoot}-missing-state`);
     const { startGoWorkflowRun } = await import(`../../backend/domains/workflows/go-runner-client.js?go=${importKey}`);
 
+    const startedAt = Date.now();
     await assert.rejects(
       () => startGoWorkflowRun(projectPath, 'go-change'),
       /Go runner did not publish state\.json for run run-abc/,
     );
+    const elapsedMs = Date.now() - startedAt;
+    assert.ok(elapsedMs < 1000, `exited runner should fail promptly, received ${elapsedMs}ms`);
   });
 });

@@ -1,6 +1,6 @@
 /**
- * 文件目的：连接用户自管 Codex daemon 的 stdio proxy，并交给通用 JSON-RPC 行传输。
- * 业务意义：ozw 只持有 proxy 子进程，不改变独立 daemon 的生命周期或配置。
+ * 文件目的：连接系统 Codex 守护进程的 stdio proxy，并交给通用 JSON-RPC 行传输。
+ * 业务意义：ozw 只持有客户端 proxy，不改变独立服务的生命周期或配置。
  */
 
 import { spawn } from 'node:child_process';
@@ -34,22 +34,22 @@ export function buildCodexAppServerCliArgs(socketPath = getCodexDaemonSocketPath
   return ['app-server', 'proxy', '--sock', socketPath];
 }
 
-/** 验证用户自管 daemon 可连接并返回 proxy 参数。 */
-function prepareProductionTransport(): ProductionTransportLaunch {
+/** 异步验证系统服务客户端能力与 Socket，并返回 proxy 参数。 */
+async function prepareProductionTransport(): Promise<ProductionTransportLaunch> {
   const codexHome = process.env.CODEX_HOME || path.join(homedir(), '.codex');
   const socketPath = getCodexDaemonSocketPath();
   const plan = resolveSharedCodexRuntimePlan({
     codexHome,
-    capabilities: probeCodexSharedRuntimeCapabilities(),
+    capabilities: await probeCodexSharedRuntimeCapabilities(),
     socketReady: existsSync(socketPath),
     socketPath,
   });
   if (plan.mode === 'unsupported') {
-    throw new Error('Codex CLI 缺少 daemon/proxy/Unix Socket/remote TUI 能力，请升级 Codex 并由用户启动 daemon');
+    throw new Error('Codex CLI 缺少 proxy/Unix Socket/remote TUI 客户端能力，请升级 Codex 客户端');
   }
 
   if (!plan.ready) {
-    throw new Error(`Codex app-server daemon 不可连接（${plan.socketPath}），请由用户启动或维修 daemon`);
+    throw new Error(`Codex 系统服务不可连接（${plan.socketPath}），请检查独立守护进程状态`);
   }
   return {
     args: plan.proxyArgs || buildCodexAppServerCliArgs(socketPath),
@@ -65,20 +65,24 @@ function spawnSharedProxy(launch: ProductionTransportLaunch, options: JsonRpcLin
 
 /** 创建生产 proxy transport；关闭 transport 只终止 proxy，不停止 daemon。 */
 export function createStdioAppServerTransport(options: StdioTransportOptions = {}): CodexAppServerTransport {
-  const launch = prepareProductionTransport();
   const notificationHandlers: Array<(notification: Parameters<Parameters<CodexAppServerTransport['onNotification']>[0]>[0]) => void> = [];
   let transportPromise: Promise<CodexAppServerTransport> | null = null;
   let liveTransport: CodexAppServerTransport | null = null;
   let closed = false;
-  /** 延迟建立最终 proxy，使网络漂移决策先于任何业务请求完成。 */
+  /** 首次请求才异步探测能力并连接 proxy；并发请求复用同一连接 Promise。 */
   const getTransport = () => {
     if (!transportPromise) {
-      transportPromise = Promise.resolve().then(() => {
+      const attempt = prepareProductionTransport().then((launch) => {
         if (closed) throw new Error('Codex app-server transport already closed');
         const transport = spawnSharedProxy(launch, options);
         for (const handler of notificationHandlers) transport.onNotification(handler);
         liveTransport = transport;
         return transport;
+      });
+      transportPromise = attempt;
+      void attempt.catch(() => {
+        /** 探测或连接准备失败不缓存，下一次业务请求可重新尝试。 */
+        if (transportPromise === attempt) transportPromise = null;
       });
     }
     return transportPromise;
@@ -93,7 +97,7 @@ export function createStdioAppServerTransport(options: StdioTransportOptions = {
     },
     close() {
       closed = true;
-      void transportPromise?.then((transport) => transport.close());
+      void transportPromise?.then((transport) => transport.close(), () => undefined);
     },
   };
 }

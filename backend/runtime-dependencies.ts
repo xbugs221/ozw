@@ -3,15 +3,22 @@
  * PURPOSE: Resolve and diagnose the external oz CLI used by the optional ozw
  * workflow control plane without making server startup depend on it.
  */
-import { execFileSync, spawnSync } from 'child_process';
 import { resolveExecutablePath } from './executable-resolver.js';
+import {
+  createSuccessfulAsyncProbeCache,
+  runAsyncCommandProbe,
+} from './utils/async-command-probe.js';
 
-const REQUIRED_COMMANDS = ['oz'];
 const RUNNER_COMMAND_NAME = 'oz';
 const RUNNER_ARGS_PREFIX = ['flow'];
 const RUNNER_CONTRACT_COMMAND = [...RUNNER_ARGS_PREFIX, 'contract', '--json'];
 const REQUIRED_RUNNER_CAPABILITIES = ['list-changes', 'run', 'resume', 'status', 'abort'];
 const GRAPH_CAPABILITY = 'graph';
+const RUNTIME_DIAGNOSTIC_CACHE_TTL_MS = 5 * 60 * 1000;
+const runtimeDiagnosticCache = createSuccessfulAsyncProbeCache({
+  ttlMs: RUNTIME_DIAGNOSTIC_CACHE_TTL_MS,
+  isSuccess: (value) => Boolean(value?.ok),
+});
 
 /**
  * Build one actionable runtime dependency failure summary.
@@ -33,12 +40,12 @@ function formatCommandFailure(commandName, args, detail = '', env = process.env)
  * Execute a lightweight version command without throwing raw child-process
  * errors into startup logs.
  */
-function readCommandVersion(commandName, commandPath, env = process.env) {
+async function readCommandVersion(commandName, commandPath, env = process.env, timeoutMs = 3000) {
   /**
    * PURPOSE: Execute a CLI version probe using the same environment that was
    * used to resolve the command path.
    */
-  const result = spawnSync(commandPath || commandName, ['--version'], { encoding: 'utf8', env });
+  const result = await runAsyncCommandProbe(commandPath || commandName, ['--version'], { env, timeoutMs });
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
   const detail = result.error ? result.error.message : output || `exit ${result.status}`;
   return {
@@ -52,12 +59,12 @@ function readCommandVersion(commandName, commandPath, env = process.env) {
  * Check that the Go runner exposes the non-interactive commands required by
  * the web adapter.
  */
-function checkRunnerContract(commandPath, env = process.env) {
+async function checkRunnerContract(commandPath, env = process.env, timeoutMs = 3000) {
   /**
    * PURPOSE: Validate the oz workflow contract without depending on ambient
    * process.env during tests or diagnostics.
    */
-  const result = spawnSync(commandPath || RUNNER_COMMAND_NAME, RUNNER_CONTRACT_COMMAND, { encoding: 'utf8', env });
+  const result = await runAsyncCommandProbe(commandPath || RUNNER_COMMAND_NAME, RUNNER_CONTRACT_COMMAND, { env, timeoutMs });
   const output = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
   const contractText = `${RUNNER_COMMAND_NAME} ${RUNNER_CONTRACT_COMMAND.join(' ')}`;
   if (result.error || result.status !== 0) {
@@ -101,7 +108,7 @@ function checkRunnerContract(commandPath, env = process.env) {
  * 1. If oz flow contract declares 'graph' in capabilities, it is available.
  * 2. Otherwise run a lightweight `oz flow graph --help` and check for --format/json support.
  */
-function checkGraphCapability(commandPath, contractCapabilities, env = process.env) {
+async function checkGraphCapability(commandPath, contractCapabilities, env = process.env, timeoutMs = 3000) {
   /**
    * PURPOSE: Check optional graph support using the same PATH context as the
    * required workflow contract probe.
@@ -118,12 +125,12 @@ function checkGraphCapability(commandPath, contractCapabilities, env = process.e
   }
 
   const graphHelpArgs = [...RUNNER_ARGS_PREFIX, 'graph', '--help'];
-  const result = spawnSync(commandPath || RUNNER_COMMAND_NAME, graphHelpArgs, { encoding: 'utf8', env });
+  const result = await runAsyncCommandProbe(commandPath || RUNNER_COMMAND_NAME, graphHelpArgs, { env, timeoutMs });
   const output = `${result.stdout || ''}\n${result.stderr || ''}`.toLowerCase().trim();
 
   // Many CLIs return non-zero for --help while still printing valid usage.
   // Parse the output regardless of exit code; only abort on spawn error.
-  if (result.error) {
+  if (result.error && result.status === null) {
     return {
       ok: false,
       available: false,
@@ -157,12 +164,12 @@ function checkGraphCapability(commandPath, contractCapabilities, env = process.e
 /**
  * Return workflow diagnostics for legacy callers without blocking startup.
  */
-export function checkRequiredRuntimeDependencies() {
+export function checkRequiredRuntimeDependencies(options = {}) {
   /**
    * PURPOSE: Preserve the old export for integrations while treating every
    * dependency as optional capability discovery instead of a startup gate.
    */
-  return getRuntimeDependencyDiagnostics();
+  return getRuntimeDependencyDiagnostics(options);
 }
 
 /**
@@ -175,39 +182,41 @@ export function getRuntimeDependencyDiagnostics(options = {}) {
    * tests and higher-level read models to supply an explicit environment.
    */
   const env = options.env || process.env;
-  const commands = {};
-  for (const commandName of REQUIRED_COMMANDS) {
-    const commandPath = resolveExecutablePath(commandName, { env });
-    commands[commandName] = {
-      name: commandName,
-      command_path: commandPath,
-      path: commandPath,
-      version: commandPath ? readCommandVersion(commandName, commandPath, env) : { ok: false, output: '', error: `${commandName} not found in PATH: ${env.PATH || ''}` },
+  const commandPath = resolveExecutablePath(RUNNER_COMMAND_NAME, { env });
+  const cacheKey = `${commandPath}\0${env.PATH || ''}`;
+  return runtimeDiagnosticCache.run(cacheKey, async () => {
+    /** Run independent version and contract probes together on the diagnostics request path. */
+    const missingVersion = { ok: false, output: '', error: `${RUNNER_COMMAND_NAME} not found in PATH: ${env.PATH || ''}` };
+    const missingContract = { ok: false, required: [`${RUNNER_COMMAND_NAME} ${RUNNER_CONTRACT_COMMAND.join(' ')}`], missing: ['oz'], error: `oz not found in PATH: ${env.PATH || ''}` };
+    const [version, contract] = commandPath
+      ? await Promise.all([
+          readCommandVersion(RUNNER_COMMAND_NAME, commandPath, env, options.timeoutMs),
+          checkRunnerContract(commandPath, env, options.timeoutMs),
+        ])
+      : [missingVersion, missingContract];
+    const graph = commandPath && contract.ok
+      ? await checkGraphCapability(commandPath, contract.capabilities, env, options.timeoutMs)
+      : { ok: false, available: false, contract_declared: false, error: 'oz not available for graph capability check', detail: '' };
+    const commands = {
+      oz: {
+        name: RUNNER_COMMAND_NAME,
+        command_path: commandPath,
+        path: commandPath,
+        version,
+        contract,
+        graph,
+      },
     };
-  }
-  commands.oz.contract = commands.oz.command_path
-    ? checkRunnerContract(commands.oz.command_path, env)
-    : { ok: false, required: [`${RUNNER_COMMAND_NAME} ${RUNNER_CONTRACT_COMMAND.join(' ')}`], missing: ['oz'], error: `oz not found in PATH: ${env.PATH || ''}` };
-  commands.oz.graph = commands.oz.command_path && commands.oz.contract.ok
-    ? checkGraphCapability(commands.oz.command_path, commands.oz.contract.capabilities, env)
-    : { ok: false, available: false, contract_declared: false, error: 'oz not available for graph capability check', detail: '' };
-  return {
-    ok: REQUIRED_COMMANDS.every((commandName) => Boolean(commands[commandName].command_path))
-      && commands.oz.version.ok
-      && commands.oz.contract.ok,
-    commands,
-    path: env.PATH || '',
-  };
+    return {
+      ok: Boolean(commandPath) && version.ok && contract.ok,
+      commands,
+      path: env.PATH || '',
+    };
+  });
 }
 
-/**
- * Run a required binary and parse its JSON stdout contract.
- */
-export function runJsonCommand(commandName, args, options = {}) {
-  const stdout = execFileSync(commandName, args, {
-    cwd: options.cwd,
-    encoding: 'utf8',
-    maxBuffer: options.maxBuffer || 1024 * 1024 * 4,
-  });
-  return JSON.parse(stdout || '{}');
+/** Clear runtime probe state for deterministic cache and retry tests. */
+export function clearRuntimeDependencyDiagnosticsCacheForTest() {
+  /** Tests may change executable contents while keeping a stable temporary PATH. */
+  runtimeDiagnosticCache.clear();
 }

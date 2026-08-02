@@ -1,5 +1,9 @@
+/**
+ * PURPOSE: Render rich Markdown previews inside the on-demand code editor bundle.
+ */
 import { useMemo } from 'react';
 import type { Components } from 'react-markdown';
+import 'katex/dist/katex.min.css';
 import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';

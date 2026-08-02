@@ -5,7 +5,6 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
-import { IS_PLATFORM } from '../constants/config';
 
 export type SocketMessageEnvelope = {
   sequence: number;
@@ -27,13 +26,6 @@ const MAX_MESSAGE_HISTORY = 200;
 const CHAT_RECONNECT_DELAY_MS = 3_000;
 const CHAT_HEARTBEAT_INTERVAL_MS = 15_000;
 
-/**
- * Return whether the current browser session is talking to a loopback host.
- */
-const isLoopbackBrowserHost = () => {
-  const hostname = window.location.hostname.toLowerCase();
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-};
 const CHAT_HEARTBEAT_TIMEOUT_MS = 45_000;
 
 export const useWebSocket = () => {
@@ -45,11 +37,8 @@ export const useWebSocket = () => {
 };
 
 const buildWebSocketUrl = (token: string | null) => {
+  /** Require the internal session token for every deployment and host type. */
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  if (IS_PLATFORM) {
-    return `${protocol}//${window.location.host}/ws`; // Platform mode: Use same domain as the page (goes through proxy)
-  }
-  if (!token && isLoopbackBrowserHost()) return `${protocol}//${window.location.host}/ws`;
   if (!token) return null;
   return `${protocol}//${window.location.host}/ws`;
 };

@@ -27,11 +27,7 @@ export function validateExternalApiKey(req: AgentRequest, res: Response, next: N
   /** Authenticate external agent requests and attach the resolved user. */
   if (IS_PLATFORM) {
     try {
-      const user = userDb.getFirstUser();
-      if (!user) {
-        res.status(500).json({ error: 'Platform mode: No user found in database' });
-        return;
-      }
+      const user = userDb.getSingleUser();
       req.user = user;
       next();
       return;

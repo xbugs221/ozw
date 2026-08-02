@@ -1,12 +1,14 @@
+/**
+ * 文件目的：在单用户访问令牌会话建立后开放应用，并协调首次引导页面。
+ */
 import React from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import SetupForm from './SetupForm';
 import LoginForm from './LoginForm';
 import Onboarding from './Onboarding';
 const MessageSquare = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
-import { IS_PLATFORM } from '../../constants/config';
 
-const LoadingScreen = () => (
+/** Render the stable application loading shell while authentication is checked. */
+export const LoadingScreen = () => (
   <div className="min-h-screen bg-background flex items-center justify-center p-4">
     <div className="text-center">
       <div className="flex justify-center mb-4">
@@ -26,26 +28,11 @@ const LoadingScreen = () => (
 );
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, isLoading, needsSetup, hasCompletedOnboarding, refreshOnboardingStatus } = useAuth();
-
-  if (IS_PLATFORM) {
-    if (isLoading) {
-      return <LoadingScreen />;
-    }
-
-    if (!hasCompletedOnboarding) {
-      return <Onboarding onComplete={refreshOnboardingStatus} />;
-    }
-
-    return children;
-  }
+  /** Keep login, onboarding, and authenticated application states mutually exclusive. */
+  const { user, isLoading, hasCompletedOnboarding, refreshOnboardingStatus } = useAuth();
 
   if (isLoading) {
     return <LoadingScreen />;
-  }
-
-  if (needsSetup) {
-    return <SetupForm />;
   }
 
   if (!user) {

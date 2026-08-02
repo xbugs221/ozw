@@ -11,7 +11,7 @@
 - **Node.js 26.4.0**：推荐版本；最低支持 24.17.0，以 `.nvmrc` 和 `package.json` 为准。
 - **pnpm 11.10.0**：以 `package.json` 的 `packageManager` 字段为准，建议使用 Corepack 固定版本。
 - **oz**：必须安装在服务进程 `PATH` 中。ozw 启动时会检查 `oz flow contract --json`，并通过 `oz list` 发现活跃变更、通过 `oz flow` 执行工作流。
-- **Codex/Pi**：不是服务启动硬依赖；只有使用对应聊天 provider 时，才需要在同一台机器上完成官方安装和登录。
+- **Codex/Pi**：不是 ozw 启动硬依赖；使用 Codex 时，需由系统服务管理器独立运行并维护已认证的 Codex app-server 守护进程，ozw 只连接其 Unix Socket；Pi 仍按官方方式安装和登录。
 
 ```sh
 corepack enable
@@ -30,19 +30,18 @@ cd ozw
 pnpm install
 pnpm run hooks:install
 cp .env.example .env
+openssl rand -hex 16  # 将输出写入 .env 的 OZW_ACCESS_TOKEN
 ```
 
-至少修改 `.env` 中的 `JWT_SECRET`。公网部署还建议设置 `CREDENTIAL_ENCRYPTION_KEY`，并确认 `HOST`、`PORT` 与反向代理配置一致。
+`OZW_ACCESS_TOKEN` 是唯一的浏览器登录凭据，必须恰好为 32 个字符。JWT 签名密钥由 ozw 自动生成并持久化到数据库旁，仅用于内部会话；部署时还需确认 `HOST`、`PORT` 与反向代理配置一致。
 
 | 配置项 | 默认值 | 用途 |
 |---|---:|---|
 | `PORT` | `3001` | 生产 Web 页面、API 和 WebSocket 端口 |
 | `VITE_PORT` | `5173` | 开发模式前端端口 |
 | `HOST` | `0.0.0.0` | 服务监听地址 |
+| `OZW_ACCESS_TOKEN` | 必填 | 32 字符浏览器访问令牌 |
 | `JWT_EXPIRES_IN` | `24h` | 登录令牌有效期 |
-| `OZW_TRUST_LOCALHOST_AUTH` | `true` | 本机访问是否信任首个本地账号 |
-| `CODEX_SANDBOX_MODE` | `danger-full-access` | Codex 默认沙箱策略 |
-| `CODEX_APPROVAL_POLICY` | `never` | Codex 默认审批策略 |
 
 ### 3. 启动方式
 
@@ -70,7 +69,7 @@ pnpm dev
 http://localhost:5173
 ```
 
-首次访问时创建单用户账号。若已经有账号，本机 `localhost` 访问默认可直接复用首个账号；需要强制登录时设置 `OZW_TRUST_LOCALHOST_AUTH=false`。
+首次访问时只输入 `OZW_ACCESS_TOKEN`，不创建或选择账号。本机 `localhost` 与远程访问使用相同认证流程。
 
 ### 4. 实现“编程接力”（推荐配置）
 
@@ -86,9 +85,9 @@ http://localhost:5173
 | 项目 | 建议 |
 |---|---|
 | 协议 | 使用 HTTPS，方便 PWA 和移动端访问 |
-| 认证 | 设置强 `JWT_SECRET`，关闭不需要的本机信任 |
-| Provider | 确认服务进程能访问 `oz`、`codex` 等命令和对应账号文件 |
-| 数据 | 默认数据库在 `~/.ozw/ozw.db`，可用 `DATABASE_PATH` 调整 |
+| 认证 | 妥善保管 `OZW_ACCESS_TOKEN`、数据库及自动生成的签名密钥文件 |
+| Provider | 确认 ozw 能访问 `oz`、`codex` 命令和账号文件；Codex app-server 由系统守护进程独立运行 |
+| 数据 | 数据库默认位于本机 `~/.ozw/ozw.db`；不要把 SQLite 主库放在 NFS/SMB 网络共享盘，远程项目目录不受此限制 |
 
 ### 5. 验证
 
@@ -103,8 +102,8 @@ http://localhost:5173
 
 | 类型 | 普通用户判断方式 |
 |---|---|
-| 新式会话 | 已由共享 Codex 服务管理，可从网页或终端继续同一会话 |
-| 旧式会话 | 来自旧版或独立 Codex 进程，共享服务尚未拥有它 |
+| 新式会话 | 已由独立 Codex 系统服务承载，可从网页或终端继续同一会话 |
+| 旧式会话 | 来自旧版或私有 Codex 进程，系统服务尚未加载它 |
 
 | 卡片状态 | 打开后的处理 |
 |---|---|

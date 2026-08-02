@@ -39,9 +39,9 @@ Then inspect the ozw server logs.
 
 ### 4. Chat provider (Codex/Pi) is not working
 
-ozw does not authenticate providers for you. Codex requires a usable, authenticated local `codex app-server`; Pi requires the native Pi runtime to find its account auth.
+ozw does not authenticate providers or manage the Codex service lifecycle. Codex requires an authenticated `codex app-server` running independently under the system service manager; Pi requires the native Pi runtime to find its account auth.
 
-- **Fix:** Log in through the selected provider's official flow, restart ozw, and check provider diagnostics in Settings.
+- **Fix:** Log in through the selected provider's official flow. For Codex, check the system daemon and Unix socket, then use Settings to inspect ozw's client connectivity diagnostics.
 
 ### 5. Frontend will not open
 
@@ -58,17 +58,13 @@ If a port is taken, change `PORT` or `VITE_PORT` in `.env`.
 
 ozw uses some native packages such as `node-pty`. If `pnpm install` fails, make sure you have a C++ compiler and Node.js headers installed on your machine.
 
-### 7. Login or first setup fails
+### 7. Access-token login fails
 
-Make sure `.env` sets `JWT_SECRET`. It is required for login tokens; deployed instances should use at least 32 random bytes.
+Make sure `.env` contains `OZW_ACCESS_TOKEN` with exactly 32 characters, then restart ozw. Generate one with `openssl rand -hex 16`. The database directory must also be writable so ozw can persist its internal JWT signing secret.
 
-### 8. Localhost bypass works, but public access still requires login
+### 8. Localhost also requires login
 
-By default, `OZW_TRUST_LOCALHOST_AUTH=true`, so `localhost` access trusts the first existing local user. Public access is not automatically bypassed by this setting. To require login locally too, set:
-
-```sh
-OZW_TRUST_LOCALHOST_AUTH=false
-```
+This is expected. Localhost and remote access must both use the same `OZW_ACCESS_TOKEN`; ozw no longer bypasses authentication through the first database user.
 
 ---
 

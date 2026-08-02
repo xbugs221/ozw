@@ -6,7 +6,7 @@ import React, { memo, useMemo, useState, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import type { ChatMessage, Provider } from '../../types/types';
-import { Markdown } from './Markdown';
+import { Markdown } from './DeferredMarkdown';
 import { formatUsageLimitText } from '../../utils/chatFormatting';
 import type { Project } from '../../../../types/app';
 import { ToolRenderer, shouldHideToolResult } from '../../tools';

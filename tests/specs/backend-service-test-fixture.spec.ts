@@ -31,11 +31,11 @@ test('共享 fixture 暴露真实 server 测试所需入口并隔离子进程环
   const helperSource = await readRepoText(HELPER_PATH);
 
   assert.match(helperSource, /export\s+async\s+function\s+startIsolatedBackendServer/);
-  assert.match(helperSource, /export\s+async\s+function\s+registerTestUser/);
+  assert.match(helperSource, /export\s+async\s+function\s+authenticateTestClient/);
+  assert.match(helperSource, /OZW_ACCESS_TOKEN/);
   assert.match(helperSource, /export\s+async\s+function\s+openAuthenticatedWebSocket/);
   assert.match(helperSource, /export\s+async\s+function\s+stopBackendServerFixture/);
   assert.match(helperSource, /DATABASE_PATH/);
-  assert.match(helperSource, /JWT_SECRET/);
   assert.match(helperSource, /HOST:\s*['"]127\.0\.0\.1['"]/);
   assert.match(helperSource, /SESSION_PATH_SCAN_INTERVAL_MS/);
   assert.match(helperSource, /authorization:\s*`Bearer \$\{token\}`|authorization:\s*['"]Bearer /);

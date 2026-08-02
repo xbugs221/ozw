@@ -1,5 +1,8 @@
+/**
+ * PURPOSE: Render tool-result Markdown through the shared deferred rich-text boundary.
+ */
 import React from 'react';
-import { Markdown } from '../../../view/subcomponents/Markdown';
+import { Markdown } from '../../../view/subcomponents/DeferredMarkdown';
 
 interface MarkdownContentProps {
   content: string;
@@ -14,6 +17,7 @@ export const MarkdownContent: React.FC<MarkdownContentProps> = ({
   content,
   className = 'mt-1 prose prose-sm max-w-none dark:prose-invert'
 }) => {
+  /** Preserve the existing tool-card layout while delegating rich rendering. */
   return (
     <Markdown className={className}>
       {content}

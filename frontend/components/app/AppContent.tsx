@@ -2,11 +2,10 @@
  * Application shell composition.
  * Wires shared WebSocket state, project/session selection, and main layout containers together.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from '../sidebar/view/Sidebar';
 import MainContent from '../main-content/view/MainContent';
-import ChatHistorySearchDialog from '../chat/view/ChatHistorySearchDialog';
 
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { useDeviceSettings } from '../../hooks/useDeviceSettings';
@@ -16,6 +15,8 @@ import { useUiPreferences } from '../../hooks/useUiPreferences';
 import type { Project, ProjectSession, SessionProvider } from '../../types/app';
 import { buildProjectSessionRoute, buildWorkflowChildSessionRoute } from '../../utils/projectRoute';
 import { findWorkflowChildSession, hasWorkflowChildSession } from '../../utils/workflowSessions';
+
+const ChatHistorySearchDialog = lazy(() => import('../chat/view/ChatHistorySearchDialog'));
 
 function hasStableSessionRoute(session: Pick<ProjectSession, 'id' | 'routeIndex'>): boolean {
   /**
@@ -397,11 +398,15 @@ export default function AppContent() {
         {mainContent}
       </div>
 
-      <ChatHistorySearchDialog
-        isOpen={isChatSearchOpen}
-        onClose={() => setIsChatSearchOpen(false)}
-        onNavigateToSession={handleNavigateToSession}
-      />
+      {isChatSearchOpen ? (
+        <Suspense fallback={<div className="fixed inset-0 z-50 bg-black/50" role="status" aria-label="Loading chat search" />}>
+          <ChatHistorySearchDialog
+            isOpen={isChatSearchOpen}
+            onClose={() => setIsChatSearchOpen(false)}
+            onNavigateToSession={handleNavigateToSession}
+          />
+        </Suspense>
+      ) : null}
 
     </div>
   );

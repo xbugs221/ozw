@@ -12,6 +12,7 @@ import { resolveFlowRunStatePath } from './flow-runtime-paths.js';
 const execFileAsync = promisify(execFile);
 const RUNNER_COMMAND = 'oz';
 const RUNNER_ARGS_PREFIX = ['flow'];
+const RUNNER_EXIT_STATE_GRACE_MS = 50;
 
 /**
  * Prefix workflow runner subcommands with the current oz flow command group.
@@ -35,7 +36,7 @@ async function runWoJson(args, projectPath) {
 /**
  * Wait briefly for the runner to publish the sealed state file for a run id.
  */
-async function waitForRunStateFile(projectPath, runId) {
+async function waitForRunStateFile(projectPath, runId, child) {
   const statePath = resolveFlowRunStatePath(projectPath, runId);
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
@@ -45,12 +46,59 @@ async function waitForRunStateFile(projectPath, runId) {
       if (error?.code !== 'ENOENT') {
         throw error;
       }
-      await new Promise((resolve) => {
-        setTimeout(resolve, 250);
-      });
+      if (hasRunnerExited(child)) {
+        try {
+          await checkFinalStatePublish(statePath);
+          return;
+        } catch (finalError) {
+          if (finalError?.code !== 'ENOENT') {
+            throw finalError;
+          }
+          break;
+        }
+      }
+      await waitForStateRetryOrRunnerExit(child);
     }
   }
   throw new Error(`Go runner did not publish state.json for run ${runId}`);
+}
+
+/**
+ * Report whether the runner has exited normally or because of a signal.
+ */
+function hasRunnerExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+/**
+ * Allow an exited runner's final filesystem write to become visible, then
+ * perform the last state-file check.
+ */
+async function checkFinalStatePublish(statePath) {
+  await new Promise((resolve) => {
+    setTimeout(resolve, RUNNER_EXIT_STATE_GRACE_MS);
+  });
+  await fs.access(statePath);
+}
+
+/**
+ * Wake the state-file retry loop when either its poll interval passes or the
+ * runner exits and can no longer publish the file.
+ */
+function waitForStateRetryOrRunnerExit(child) {
+  return new Promise((resolve) => {
+    let timeout;
+    const finish = () => {
+      clearTimeout(timeout);
+      child.off('exit', finish);
+      resolve();
+    };
+    timeout = setTimeout(finish, 250);
+    child.once('exit', finish);
+    if (hasRunnerExited(child)) {
+      finish();
+    }
+  });
 }
 
 /**
@@ -93,7 +141,7 @@ async function spawnWoRun(args, projectPath) {
       if (!finishPromise) {
         finishPromise = (async () => {
           const runId = String(payload?.run_id || '').trim();
-          await waitForRunStateFile(projectPath, runId);
+          await waitForRunStateFile(projectPath, runId, child);
           settled = true;
           clearTimeout(timeout);
           resolve({ ...payload, pid: child.pid });

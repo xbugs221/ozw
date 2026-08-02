@@ -66,33 +66,13 @@ test('JSON frontmatter is not parsed through executable engine', async () => {
 // 3. Codex permission and workflow auto-run semantics
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('Codex permission modes still map to expected runtime options', async () => {
+test('Codex client args do not override independent service policy', async () => {
   const { __codexAppServerRuntimeInternalsForTest } =
     await import('../../backend/codex-app-server-runtime.ts');
 
-  // 1. acceptEdits => configured YOLO defaults
-  const accept = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('acceptEdits');
-  assert.deepEqual(accept, { sandbox: 'danger-full-access', approvalPolicy: 'never' });
-
-  // 2. bypassPermissions => danger-full-access + never approval
-  const bypass = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('bypassPermissions');
-  assert.deepEqual(bypass, { sandbox: 'danger-full-access', approvalPolicy: 'never' });
-
-  // 3. default => YOLO defaults
-  const def = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('default');
-  assert.deepEqual(def, { sandbox: 'danger-full-access', approvalPolicy: 'never' });
-
-  // 4. Unknown mode falls back to default semantics.
-  const fallback = __codexAppServerRuntimeInternalsForTest.resolveCodexRuntimePolicy('something-else');
-  assert.deepEqual(fallback, { sandbox: 'danger-full-access', approvalPolicy: 'never' });
-
-  // 5. Resulting app-server CLI args carry sandbox and approval_policy overrides.
   const args = __codexAppServerRuntimeInternalsForTest.buildCodexAppServerCliArgs();
-  assert.ok(args.includes('sandbox_mode=danger-full-access'), 'sandbox override must be emitted');
-  assert.ok(
-    args.some((a) => typeof a === 'string' && a.startsWith('approval_policy=')),
-    'approval_policy override must be emitted',
-  );
+  assert.deepEqual(args.slice(0, 3), ['app-server', 'proxy', '--sock']);
+  assert.equal(args.some((arg) => /sandbox|approval/i.test(arg)), false);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -3,14 +3,8 @@
  * 业务意义：后端手动 Codex 会话通过此 facade 发送新 turn、steer、abort，并允许测试注入 transport 覆盖实时路径。
  */
 
-import { CODEX_APPROVAL_POLICY, CODEX_SANDBOX_MODE } from '../../constants/config.js';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import {
-  normalizeCodexApprovalPolicy,
-  normalizeCodexSandboxMode,
-  resolveCodexPermissionPolicy,
-} from '../../codex-permission-policy.js';
 import {
   CodexAppServerSessionManager,
   type CodexAppServerSession,
@@ -29,11 +23,6 @@ import type { RuntimeWriter } from './types.js';
 
 export type { CodexAppServerTransport };
 export { handleAppServerNotification, transformAppServerItem };
-
-type CodexRuntimePolicy = {
-  sandbox: string;
-  approvalPolicy: string;
-};
 
 const CODEX_MULTI_AGENT_MODE = 'proactive';
 
@@ -94,17 +83,6 @@ function scheduleSharedTransportReconnect(): void {
     }
   }, delayMs);
   reconnectTimer.unref?.();
-}
-
-/**
- * 将 UI 权限意图映射为 app-server thread/start 所需安全参数。
- */
-function resolveCodexRuntimePolicy(permissionMode: string, highPermissionApproved = false): CodexRuntimePolicy {
-  const policy = resolveCodexPermissionPolicy({ permissionMode, highPermissionApproved });
-  return {
-    sandbox: policy.sandboxMode,
-    approvalPolicy: policy.approvalPolicy,
-  };
 }
 
 /**
@@ -255,13 +233,10 @@ export async function ensureCodexAppServerThread(input: {
       await transport.request('thread/resume', { threadId: input.providerSessionId });
       session.providerThreadId = String(input.providerSessionId);
     } else if (!session.providerThreadId) {
-      const { sandbox, approvalPolicy } = resolveCodexRuntimePolicy(input.permissionMode || 'default', input.highPermissionApproved === true);
       const threadResult = await transport.request('thread/start', {
         model: input.model || null,
         serviceTier: input.serviceTier || null,
         cwd: input.projectPath || null,
-        sandbox,
-        approvalPolicy,
         multiAgentMode: CODEX_MULTI_AGENT_MODE,
       });
       const thread = (threadResult as Record<string, any>)?.thread;
@@ -344,6 +319,7 @@ export async function sendCodexAppServerMessage(input: {
     session.activeTurnId = null;
     session.turnStartedAt = null;
     session.status = 'aborted';
+    session.streamingDeltaBatcher?.flushSession(session.providerThreadId || session.ozwSessionId);
   }
 
   const turnResult = await transport.request('turn/start', {
@@ -366,9 +342,6 @@ export async function sendCodexAppServerMessage(input: {
 
 export const __codexAppServerRuntimeInternalsForTest = {
   buildCodexAppServerCliArgs,
-  normalizeCodexApprovalPolicy,
-  normalizeCodexSandboxMode,
-  resolveCodexRuntimePolicy,
 };
 
 /**

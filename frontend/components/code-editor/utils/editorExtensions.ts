@@ -2,13 +2,7 @@
  * PURPOSE: Build CodeMirror language, minimap, and diff positioning extensions
  * used by the workspace text editor.
  */
-import { css } from '@codemirror/lang-css';
-import { html } from '@codemirror/lang-html';
-import { javascript } from '@codemirror/lang-javascript';
-import { json } from '@codemirror/lang-json';
 import { StreamLanguage } from '@codemirror/language';
-import { markdown } from '@codemirror/lang-markdown';
-import { python } from '@codemirror/lang-python';
 import { getChunks } from '@codemirror/merge';
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import { showMinimap } from '@replit/codemirror-minimap';
@@ -32,39 +26,100 @@ const envLanguage = StreamLanguage.define({
   },
 });
 
-export const getLanguageExtensions = (filename: string) => {
+type LanguageKey = 'css' | 'html' | 'javascript' | 'json' | 'markdown' | 'python' | 'typescript';
+
+const languageExtensionCache = new Map<LanguageKey, Promise<CodeEditorExtension[]>>();
+
+/**
+ * PURPOSE: Keep extension typing local to avoid a direct dependency on
+ * CodeMirror state internals.
+ */
+type CodeEditorExtension = any;
+
+/**
+ * Resolve a filename to the smallest syntax package needed by that file.
+ */
+export function getLanguageKey(filename: string): LanguageKey | 'env' | null {
   const lowerName = filename.toLowerCase();
   if (lowerName === '.env' || lowerName.startsWith('.env.')) {
-    return [envLanguage];
+    return 'env';
   }
 
   const ext = filename.split('.').pop()?.toLowerCase();
   switch (ext) {
     case 'js':
     case 'jsx':
+      return 'javascript';
     case 'ts':
     case 'tsx':
-      return [javascript({ jsx: true, typescript: ext.includes('ts') })];
+      return 'typescript';
     case 'py':
-      return [python()];
+      return 'python';
     case 'html':
     case 'htm':
-      return [html()];
+      return 'html';
     case 'css':
     case 'scss':
     case 'less':
-      return [css()];
+      return 'css';
     case 'json':
-      return [json()];
+      return 'json';
     case 'md':
     case 'markdown':
-      return [markdown()];
+      return 'markdown';
     case 'env':
-      return [envLanguage];
+      return 'env';
     default:
-      return [];
+      return null;
   }
-};
+}
+
+/**
+ * Load one syntax package on demand and share concurrent requests for it.
+ */
+function loadLanguageKey(languageKey: LanguageKey): Promise<CodeEditorExtension[]> {
+  const cached = languageExtensionCache.get(languageKey);
+  if (cached) return cached;
+
+  let loading: Promise<CodeEditorExtension[]>;
+  switch (languageKey) {
+    case 'javascript':
+    case 'typescript':
+      loading = import('@codemirror/lang-javascript').then(({ javascript }) => [
+        javascript({ jsx: true, typescript: languageKey === 'typescript' }),
+      ]);
+      break;
+    case 'python':
+      loading = import('@codemirror/lang-python').then(({ python }) => [python()]);
+      break;
+    case 'html':
+      loading = import('@codemirror/lang-html').then(({ html }) => [html()]);
+      break;
+    case 'css':
+      loading = import('@codemirror/lang-css').then(({ css }) => [css()]);
+      break;
+    case 'json':
+      loading = import('@codemirror/lang-json').then(({ json }) => [json()]);
+      break;
+    case 'markdown':
+      loading = import('@codemirror/lang-markdown').then(({ markdown }) => [markdown()]);
+      break;
+  }
+
+  languageExtensionCache.set(languageKey, loading);
+  loading.catch(() => languageExtensionCache.delete(languageKey));
+  return loading;
+}
+
+/**
+ * Load only the syntax extension selected by the current filename.
+ */
+export async function loadLanguageExtensions(filename: string): Promise<CodeEditorExtension[]> {
+  const languageKey = getLanguageKey(filename);
+  if (languageKey === null) return [];
+  if (languageKey === 'env') return [envLanguage];
+  return loadLanguageKey(languageKey);
+}
 
 export const createMinimapExtension = ({
   file,

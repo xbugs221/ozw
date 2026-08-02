@@ -1,7 +1,7 @@
 // @ts-nocheck -- Historical app-server protocol acceptance keeps broad mocked transports; strict migration is tracked by proposal 4 follow-up after shared transport fixture extraction.
 /**
  * PURPOSE: Verify Codex app-server protocol mapping correctness:
- * - production transport ensures a daemon and connects through its stdio proxy
+ * - production transport only connects to the independent daemon through its stdio proxy
  * - cold start resumes existing provider threads instead of creating new ones
  * - abort and abort-and-send include turnId and fail visibly on interrupt errors
  * - app-server notification types and deltas map to frontend-compatible shapes.
@@ -26,30 +26,12 @@ test('production transport connects to the independent daemon through proxy', as
   const args = buildCodexAppServerCliArgs();
   assert.deepEqual(args.slice(0, 3), ['app-server', 'proxy', '--sock']);
   assert.match(args[3], /app-server-control\.sock$/);
-  assert.match(
+  assert.doesNotMatch(
     runtimeSource,
-    /spawnSync\(\s*['"]codex['"][\s\S]*ensureDaemonArgs/,
-    'production transport must ensure the independent daemon before connecting',
+    /daemon['"],\s*['"](?:start|restart)['"]|spawnSync|--listen|stdio:\/\//,
+    'production transport must not manage or replace the independent service',
   );
   assert.match(lineTransportSource, /child\.kill\(['"]SIGTERM['"]\)/, 'closing ozw must only close its proxy');
-});
-
-test('app-server runtime maps every Codex manual permission mode to YOLO', async () => {
-  const policySource = await readFile(
-    new URL('../../../backend/codex-permission-policy.ts', import.meta.url),
-    'utf8',
-  );
-
-  assert.match(
-    policySource,
-    /approvalPolicy:\s*'never'/,
-    'all Codex app-server manual sessions must auto-approve',
-  );
-  assert.match(
-    policySource,
-    /sandboxMode:\s*'danger-full-access'/,
-    'all Codex app-server manual sessions must bypass sandboxing',
-  );
 });
 
 test('production transport initializes app-server before first business request', async () => {

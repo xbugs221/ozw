@@ -1,28 +1,19 @@
+/**
+ * PURPOSE: Authenticate HTTP and WebSocket requests with internal JWT session
+ * tokens backed by the automatically managed signing secret.
+ */
 import jwt, { JwtPayload, SignOptions } from 'jsonwebtoken';
 import express from 'express';
 import { userDb } from '../database/db.js';
-import {
-  IS_PLATFORM,
-  JWT_EXPIRES_IN,
-  TRUST_LOCALHOST_AUTH,
-} from '../constants/config.js';
+import { JWT_EXPIRES_IN } from '../constants/config.js';
+import { getJwtSecret } from '../security/jwt-secret.js';
+
+const SINGLE_USER_NAME = 'ozw';
 
 /**
- * PURPOSE: Fail closed in non-trust mode when JWT secret is missing.
+ * PURPOSE: Reject malformed token lifetime configuration before signing.
  */
-const JWT_SECRET_MISSING_MESSAGE = 'JWT_SECRET is not configured';
 const JWT_EXPIRES_IN_INVALID_MESSAGE = 'JWT_EXPIRES_IN is invalid';
-
-/**
- * PURPOSE: Resolve the configured secret and fail explicitly when required.
- */
-const getJwtSecret = () => {
-  const configuredSecret = process.env.JWT_SECRET?.trim();
-  if (!configuredSecret) {
-    throw new Error(JWT_SECRET_MISSING_MESSAGE);
-  }
-  return configuredSecret;
-};
 
 const getJwtExpiresIn = (): SignOptions['expiresIn'] => {
   /**
@@ -64,127 +55,16 @@ function getBearerToken(req: express.Request): string | undefined {
   return header.trim() || undefined;
 }
 
-interface TrustedUser {
+interface AuthUser {
   id: number;
   username: string;
 }
 
 /**
- * Normalize a host header into a plain hostname without port.
+ * PURPOSE: Hide legacy account names behind the fixed public single-user identity.
  */
-const normalizeHostname = (value: string = ''): string => {
-  const rawHost = String(value).trim().toLowerCase();
-  if (!rawHost) {
-    return '';
-  }
-
-  if (rawHost.startsWith('[')) {
-    const closingBracketIndex = rawHost.indexOf(']');
-    if (closingBracketIndex !== -1) {
-      return rawHost.slice(1, closingBracketIndex);
-    }
-  }
-
-  return rawHost.replace(/:\d+$/, '');
-};
-
-/**
- * Return the first string value from a normal or multi-value HTTP header.
- */
-const getHeaderValue = (value: string | string[] | undefined): string => {
-  if (Array.isArray(value)) {
-    return String(value[0] || '');
-  }
-  return String(value || '');
-};
-
-/**
- * Return the first forwarded host because proxies append comma-separated hops.
- */
-const getForwardedHost = (value: string | string[] | undefined): string => {
-  return getHeaderValue(value).split(',')[0]?.trim() || '';
-};
-
-/**
- * Return whether a hostname is a loopback host allowed for local auth bypass.
- */
-const isLoopbackHostname = (hostname: string): boolean => {
-  const normalizedHost = normalizeHostname(hostname);
-  return normalizedHost === 'localhost' || normalizedHost === '127.0.0.1' || normalizedHost === '::1';
-};
-
-/**
- * Normalize peer address to detect loopback safely without trusting headers.
- */
-const isLoopbackAddress = (address: string | undefined): boolean => {
-  if (!address) {
-    return false;
-  }
-
-  const normalized = address.toLowerCase().replace(/^::ffff:/, '');
-  return normalized === '::1' || normalized === '127.0.0.1' || normalized === 'localhost';
-};
-
-/**
- * Return whether the incoming request was made through a loopback hostname.
- */
-const isLoopbackHostRequest = (req: express.Request): boolean => {
-  if (!TRUST_LOCALHOST_AUTH) {
-    return false;
-  }
-
-  const forwardedHost = getForwardedHost(req?.headers?.['x-forwarded-host']);
-  if (forwardedHost && !isLoopbackHostname(forwardedHost)) {
-    return false;
-  }
-
-  const requestHost = getHeaderValue(req?.headers?.host) || req?.hostname || '';
-  if (!isLoopbackHostname(requestHost)) {
-    return false;
-  }
-
-  const remoteAddress = isLoopbackAddress(req.socket?.remoteAddress);
-  if (remoteAddress) {
-    return true;
-  }
-
-  // Fallback for environments with manual socket injection (tests, mocks).
-  return isLoopbackAddress(req.ip);
-};
-
-/**
- * Resolve the implicit single-user identity for platform mode or trusted localhost requests.
- */
-const resolveTrustedRequestUser = (req: express.Request): TrustedUser | null => {
-  if (!IS_PLATFORM && !isLoopbackHostRequest(req)) {
-    return null;
-  }
-
-  return userDb.getFirstUser() as TrustedUser | null;
-};
-
-/**
- * Build the public auth status so routes can expose whether a request is already trusted.
- */
-const getTrustedRequestAuthState = (req: express.Request) => {
-  const user = resolveTrustedRequestUser(req);
-
-  if (!user) {
-    return {
-      isAuthenticated: false,
-      authBypass: false,
-      user: null,
-    };
-  }
-
-  return {
-    isAuthenticated: true,
-    authBypass: true,
-    user: {
-      id: user.id,
-      username: user.username,
-    },
-  };
+const toSingleUserIdentity = (user: { id: number }): AuthUser => {
+  return { id: user.id, username: SINGLE_USER_NAME };
 };
 
 // Optional API key middleware
@@ -203,18 +83,6 @@ const validateApiKey = (req: express.Request, res: express.Response, next: expre
 
 // JWT authentication middleware
 const authenticateToken = async (req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> => {
-  const trustedUser = resolveTrustedRequestUser(req);
-  if (trustedUser) {
-    try {
-      (req as any).user = trustedUser;
-      return next();
-    } catch (error) {
-      console.error('Trusted auth mode error:', error);
-      res.status(500).json({ error: 'Trusted auth mode: Failed to fetch user' });
-      return;
-    }
-  }
-
   const token = getBearerToken(req);
 
   if (!token) {
@@ -232,7 +100,7 @@ const authenticateToken = async (req: express.Request, res: express.Response, ne
       return;
     }
 
-    (req as any).user = user;
+    (req as any).user = toSingleUserIdentity(user);
     next();
   } catch (error) {
     if (error && (error as { name?: string }).name === 'TokenExpiredError') {
@@ -254,7 +122,7 @@ const generateToken = (user: { id: number; username: string }): string => {
   return jwt.sign(
     {
       userId: user.id,
-      username: user.username,
+      username: SINGLE_USER_NAME,
     },
     secret,
     { expiresIn }
@@ -270,7 +138,6 @@ const __authInternalsForTest = {
   getJwtSecret,
   JWT_EXPIRES_IN,
   JWT_EXPIRES_IN_INVALID_MESSAGE,
-  JWT_SECRET_MISSING_MESSAGE,
 };
 
 // WebSocket authentication function
@@ -279,24 +146,15 @@ function authenticateWebSocket(token: string | undefined, req: express.Request):
     return null;
   }
 
-  const trustedUser = resolveTrustedRequestUser(req);
-  if (trustedUser) {
-    try {
-      return { userId: trustedUser.id, username: trustedUser.username };
-    } catch (error) {
-      console.error('Trusted auth mode WebSocket error:', error);
-      return null;
-    }
-  }
-
   if (!token) {
     return null;
   }
 
   try {
     const secret = getJwtSecret();
-    const decoded = jwt.verify(token, secret) as { userId: number; username: string };
-    return decoded;
+    const decoded = jwt.verify(token, secret) as { userId: number };
+    const user = userDb.getUserById(decoded.userId);
+    return user ? { userId: user.id, username: SINGLE_USER_NAME } : null;
   } catch (error) {
     console.error('WebSocket token verification error:', error);
     return null;
@@ -308,6 +166,5 @@ export {
   authenticateToken,
   generateToken,
   authenticateWebSocket,
-  getTrustedRequestAuthState,
   __authInternalsForTest,
 };

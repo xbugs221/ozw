@@ -1,11 +1,11 @@
+/**
+ * 文件目的：初始化 ozw 的 SQLite 数据库，并提供用户、API 密钥和 provider 凭据的数据访问接口。
+ */
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { resolvePackageRoot } from '../utils/package-root.js';
-import {
-  CREDENTIAL_ENCRYPTION_KEY,
-} from '../constants/config.js';
 
 const PKG_ROOT = resolvePackageRoot();
 const __dirname = path.join(PKG_ROOT, 'backend', 'database');
@@ -25,6 +25,10 @@ const c = {
 };
 
 const API_KEY_PREFIX_LENGTH = 8;
+const SINGLE_USER_NAME = 'ozw';
+const DISABLED_PASSWORD_HASH = '!';
+// Increment together with every init.sql schema change; the contract test pins both.
+const CURRENT_DATABASE_SCHEMA_VERSION = 1;
 
 // Use DATABASE_PATH environment variable if set, otherwise use default location
 const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, 'ozw.db');
@@ -68,6 +72,26 @@ if (DATABASE_PATH_DEFAULTED_BY_LOAD_ENV && DB_PATH !== legacyDbPath && !fs.exist
 // Create database connection
 const db = new Database(DB_PATH);
 
+/**
+ * PURPOSE: Keep many small index updates responsive on low-end local disks
+ * while retaining crash consistency and bounded lock recovery.
+ */
+const configureDatabaseConnection = (): void => {
+  db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 5000');
+  try {
+    const journalMode = String(db.pragma('journal_mode = WAL', { simple: true }) || '').toLowerCase();
+    if (journalMode === 'wal') {
+      db.pragma('synchronous = NORMAL');
+    }
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.warn(`[Database] WAL mode unavailable; retaining SQLite defaults: ${err.message}`);
+  }
+};
+
+configureDatabaseConnection();
+
 // Show app installation path prominently
 console.log('');
 console.log(c.dim('═'.repeat(60)));
@@ -95,45 +119,6 @@ interface UserRow {
   git_email?: string | null;
   has_completed_onboarding?: number;
 }
-
-interface CountRow {
-  count: number;
-}
-
-const normalizeCredentialKey = (): Buffer => {
-  if (!CREDENTIAL_ENCRYPTION_KEY) {
-    throw new Error(CREDENTIAL_KEY_MISSING_MESSAGE);
-  }
-
-  const material = CREDENTIAL_ENCRYPTION_KEY;
-  return crypto.createHash('sha256').update(material).digest();
-};
-
-const CREDENTIAL_KEY_MISSING_MESSAGE = 'CREDENTIAL_ENCRYPTION_KEY is not configured';
-
-let CREDENTIAL_KEY: Buffer | null = null;
-let LEGACY_CREDENTIAL_KEY: Buffer | null = null;
-
-const getCredentialKey = (): Buffer => {
-  if (CREDENTIAL_KEY === null) {
-    CREDENTIAL_KEY = normalizeCredentialKey();
-  }
-
-  return CREDENTIAL_KEY;
-};
-
-const getLegacyCredentialKey = (): Buffer => {
-  if (!CREDENTIAL_ENCRYPTION_KEY) {
-    throw new Error(CREDENTIAL_KEY_MISSING_MESSAGE);
-  }
-
-  if (LEGACY_CREDENTIAL_KEY === null) {
-    const legacyKey = crypto.createHash('sha256').update(CREDENTIAL_ENCRYPTION_KEY).digest('hex').slice(0, 32);
-    LEGACY_CREDENTIAL_KEY = Buffer.from(legacyKey, 'utf8');
-  }
-
-  return LEGACY_CREDENTIAL_KEY;
-};
 
 /**
  * PURPOSE: Return whether a sqlite table contains a specific column.
@@ -181,104 +166,19 @@ const isLegacyApiKeyValue = (storedValue: unknown): boolean => {
 };
 
 /**
- * PURPOSE: Encrypt credential values only when they are not yet encrypted.
+ * PURPOSE: Detect legacy encrypted provider credentials that ozw can no longer decode.
  */
-const isCredentialValueEncrypted = (storedValue: string): boolean => {
-  const [ivHex = '', authTagHex = '', payloadHex = ''] = String(storedValue).split(':');
+const isUnreadableLegacyCredential = (storedValue: string): boolean => {
+  const [ivHex = '', authTagHex = '', payloadHex = '', extraPart] = String(storedValue).split(':');
   return (
+    extraPart === undefined &&
     ivHex.length === 24 &&
     authTagHex.length === 32 &&
+    payloadHex.length > 0 &&
     /^[0-9a-f]+$/i.test(ivHex) &&
     /^[0-9a-f]+$/i.test(authTagHex) &&
-    /^[0-9a-f]+$/i.test(payloadHex) &&
-    payloadHex.length > 0
+    /^[0-9a-f]+$/i.test(payloadHex)
   );
-};
-
-/**
- * Encrypt a credential value before it is persisted.
- */
-const encryptCredential = (plaintext: string): string => {
-  const initializationVector = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', getCredentialKey(), initializationVector);
-  const ciphertext = Buffer.concat([
-    cipher.update(String(plaintext), 'utf8'),
-    cipher.final(),
-  ]);
-  const authTag = cipher.getAuthTag();
-
-  return [
-    initializationVector.toString('hex'),
-    authTag.toString('hex'),
-    ciphertext.toString('hex'),
-  ].join(':');
-};
-
-interface DecryptedCredential {
-  plaintext: string | null;
-  needsReencrypt: boolean;
-}
-
-const decryptCredentialWithKey = (storedValue: string, key: Buffer): string | null => {
-  const [ivHex, authTagHex, ciphertextHex] = String(storedValue).split(':');
-
-  try {
-    const iv = Buffer.from(ivHex, 'hex');
-    const authTag = Buffer.from(authTagHex, 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(authTag);
-    const plaintext = Buffer.concat([
-      decipher.update(Buffer.from(ciphertextHex, 'hex')),
-      decipher.final(),
-    ]);
-    return plaintext.toString('utf8');
-  } catch {
-    return null;
-  }
-};
-
-/**
- * Decrypt a stored credential value and detect legacy key-derived ciphertext.
- */
-const decryptCredential = (storedValue: string): DecryptedCredential => {
-  if (!isCredentialValueEncrypted(storedValue)) {
-    return {
-      plaintext: storedValue,
-      needsReencrypt: Boolean(storedValue),
-    };
-  }
-
-  const currentPlaintext = decryptCredentialWithKey(storedValue, getCredentialKey());
-  if (currentPlaintext !== null) {
-    return {
-      plaintext: currentPlaintext,
-      needsReencrypt: false,
-    };
-  }
-
-  const legacyPlaintext = decryptCredentialWithKey(storedValue, getLegacyCredentialKey());
-  return {
-    plaintext: legacyPlaintext,
-    needsReencrypt: legacyPlaintext !== null,
-  };
-};
-
-const ensureCredentialEncryptionMigrations = (): void => {
-  const legacyRows = db.prepare('SELECT id, credential_value FROM user_credentials').all() as Array<{
-    id: number;
-    credential_value: string;
-  }>;
-
-  const updateStmt = db.prepare('UPDATE user_credentials SET credential_value = ? WHERE id = ?');
-  for (const row of legacyRows) {
-    const parsed = String(row.credential_value || '');
-    if (!parsed || isCredentialValueEncrypted(parsed)) {
-      continue;
-    }
-
-    const encrypted = encryptCredential(parsed);
-    updateStmt.run(encrypted, row.id);
-  }
 };
 
 /**
@@ -328,7 +228,6 @@ const runMigrations = (): void => {
       db.exec('CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(api_key_prefix)');
     }
 
-    ensureCredentialEncryptionMigrations();
     migrateLegacyApiKeys();
 
     console.log('Database migrations completed successfully');
@@ -342,10 +241,15 @@ const runMigrations = (): void => {
 // Initialize database with schema
 const initializeDatabase = async (): Promise<void> => {
   try {
-    const initSQL = fs.readFileSync(INIT_SQL_PATH, 'utf8');
-    db.exec(initSQL);
-    console.log('Database initialized successfully');
-    runMigrations();
+    const schemaVersion = Number(db.pragma('user_version', { simple: true }) || 0);
+    if (schemaVersion < CURRENT_DATABASE_SCHEMA_VERSION) {
+      const initSQL = fs.readFileSync(INIT_SQL_PATH, 'utf8');
+      db.exec(initSQL);
+      console.log('Database initialized successfully');
+      runMigrations();
+      db.pragma(`user_version = ${CURRENT_DATABASE_SCHEMA_VERSION}`);
+    }
+    userDb.getSingleUser();
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     console.error('Error initializing database:', err.message);
@@ -353,44 +257,8 @@ const initializeDatabase = async (): Promise<void> => {
   }
 };
 
-interface UserRecord {
-  id: number;
-  username: string;
-}
-
 // User database operations
 const userDb = {
-  // Check if any users exist
-  hasUsers: (): boolean => {
-    try {
-      const row = db.prepare('SELECT COUNT(*) as count FROM users').get() as CountRow;
-      return row.count > 0;
-    } catch (err) {
-      throw err;
-    }
-  },
-
-  // Create a new user
-  createUser: (username: string, passwordHash: string): UserRecord => {
-    try {
-      const stmt = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)');
-      const result = stmt.run(username, passwordHash);
-      return { id: Number(result.lastInsertRowid), username };
-    } catch (err) {
-      throw err;
-    }
-  },
-
-  // Get user by username
-  getUserByUsername: (username: string): UserRow | undefined => {
-    try {
-      const row = db.prepare('SELECT * FROM users WHERE username = ? AND is_active = 1').get(username) as UserRow | undefined;
-      return row;
-    } catch (err) {
-      throw err;
-    }
-  },
-
   // Update last login time (non-fatal — logged but not thrown)
   updateLastLogin: (userId: number): void => {
     try {
@@ -412,12 +280,36 @@ const userDb = {
   },
 
   getFirstUser: (): Pick<UserRow, 'id' | 'username' | 'created_at' | 'last_login'> | undefined => {
+    /**
+     * PURPOSE: Preserve internal data/test compatibility while public authentication uses getSingleUser.
+     */
     try {
       const row = db.prepare('SELECT id, username, created_at, last_login FROM users WHERE is_active = 1 LIMIT 1').get() as Pick<UserRow, 'id' | 'username' | 'created_at' | 'last_login'> | undefined;
       return row;
     } catch (err) {
       throw err;
     }
+  },
+
+  getSingleUser: (): Pick<UserRow, 'id' | 'username' | 'created_at' | 'last_login'> => {
+    /**
+     * PURPOSE: Reuse the legacy active row as the internal single-user identity,
+     * or create one automatically when a fresh database has no user row.
+     */
+    const existing = db.prepare('SELECT id, created_at, last_login FROM users WHERE is_active = 1 ORDER BY id LIMIT 1')
+      .get() as Pick<UserRow, 'id' | 'created_at' | 'last_login'> | undefined;
+    if (existing) {
+      return { ...existing, username: SINGLE_USER_NAME };
+    }
+
+    db.prepare(`
+      INSERT INTO users (username, password_hash, is_active)
+      VALUES (?, ?, 1)
+      ON CONFLICT(username) DO UPDATE SET is_active = 1
+    `).run(SINGLE_USER_NAME, DISABLED_PASSWORD_HASH);
+    const userId = (db.prepare('SELECT id FROM users WHERE username = ?').get(SINGLE_USER_NAME) as { id: number }).id;
+    const created = db.prepare('SELECT id, created_at, last_login FROM users WHERE id = ?').get(userId) as Pick<UserRow, 'id' | 'created_at' | 'last_login'>;
+    return { ...created, username: SINGLE_USER_NAME };
   },
 
   updateGitConfig: (userId: number, gitName: string, gitEmail: string): void => {
@@ -587,12 +479,6 @@ const apiKeysDb = {
   }
 };
 
-interface CredentialRecord {
-  id: number;
-  credentialName: string;
-  credentialType: string;
-}
-
 interface CredentialRow {
   id: number;
   credential_name: string;
@@ -604,18 +490,6 @@ interface CredentialRow {
 
 // User credentials database operations (for GitHub tokens, GitLab tokens, etc.)
 const credentialsDb = {
-  // Create a new credential
-  createCredential: (userId: number, credentialName: string, credentialType: string, credentialValue: string, description: string | null = null): CredentialRecord => {
-    try {
-      const encryptedValue = encryptCredential(credentialValue);
-      const stmt = db.prepare('INSERT INTO user_credentials (user_id, credential_name, credential_type, credential_value, description) VALUES (?, ?, ?, ?, ?)');
-      const result = stmt.run(userId, credentialName, credentialType, encryptedValue, description);
-      return { id: Number(result.lastInsertRowid), credentialName, credentialType };
-    } catch (err) {
-      throw err;
-    }
-  },
-
   // Get all credentials for a user, optionally filtered by type
   getCredentials: (userId: number, credentialType: string | null = null): CredentialRow[] => {
     try {
@@ -636,53 +510,33 @@ const credentialsDb = {
     }
   },
 
-  // Get active credential value for a user by type (returns most recent active)
+  /**
+   * PURPOSE: Return the most recently saved active credential for a user and provider type.
+   */
   getActiveCredential: (userId: number, credentialType: string): string | null => {
     try {
-      const row = db.prepare('SELECT id, credential_value FROM user_credentials WHERE user_id = ? AND credential_type = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1')
-        .get(userId, credentialType) as { id: number; credential_value: string } | undefined;
-
-      if (!row) {
+      const row = db.prepare('SELECT credential_value FROM user_credentials WHERE user_id = ? AND credential_type = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1')
+        .get(userId, credentialType) as { credential_value: string } | undefined;
+      if (!row || isUnreadableLegacyCredential(row.credential_value)) {
         return null;
       }
-
-      const decrypted = decryptCredential(row.credential_value);
-      if (decrypted.plaintext === null) {
-        return null;
-      }
-
-      if (decrypted.needsReencrypt) {
-        db.prepare('UPDATE user_credentials SET credential_value = ? WHERE id = ?')
-          .run(encryptCredential(decrypted.plaintext), row.id);
-      }
-
-      return decrypted.plaintext;
+      return row.credential_value;
     } catch (err) {
       throw err;
     }
   },
 
-  // Get an active credential by ID and decrypt it before returning it to runtime callers.
+  /**
+   * PURPOSE: Return a specific active credential when it belongs to the requested user and provider type.
+   */
   getCredentialById: (userId: number, credentialId: number, credentialType: string): string | null => {
     try {
-      const row = db.prepare('SELECT id, credential_value FROM user_credentials WHERE id = ? AND user_id = ? AND credential_type = ? AND is_active = 1')
-        .get(credentialId, userId, credentialType) as { id: number; credential_value: string } | undefined;
-
-      if (!row) {
+      const row = db.prepare('SELECT credential_value FROM user_credentials WHERE id = ? AND user_id = ? AND credential_type = ? AND is_active = 1')
+        .get(credentialId, userId, credentialType) as { credential_value: string } | undefined;
+      if (!row || isUnreadableLegacyCredential(row.credential_value)) {
         return null;
       }
-
-      const decrypted = decryptCredential(row.credential_value);
-      if (decrypted.plaintext === null) {
-        return null;
-      }
-
-      if (decrypted.needsReencrypt) {
-        db.prepare('UPDATE user_credentials SET credential_value = ? WHERE id = ?')
-          .run(encryptCredential(decrypted.plaintext), row.id);
-      }
-
-      return decrypted.plaintext;
+      return row.credential_value;
     } catch (err) {
       throw err;
     }
@@ -713,9 +567,6 @@ const credentialsDb = {
 
 // Backward compatibility - keep old names pointing to new system
 const githubTokensDb = {
-  createGithubToken: (userId: number, tokenName: string, githubToken: string, description: string | null = null) => {
-    return credentialsDb.createCredential(userId, tokenName, 'github_token', githubToken, description);
-  },
   getGithubTokens: (userId: number) => {
     return credentialsDb.getCredentials(userId, 'github_token');
   },
@@ -734,13 +585,8 @@ const githubTokensDb = {
 };
 
 const __databaseInternalsForTest = {
-  CREDENTIAL_KEY_MISSING_MESSAGE,
-  normalizeCredentialKey,
   hashApiKey,
   apiKeyPrefix,
-  isCredentialValueEncrypted,
-  encryptCredential,
-  decryptCredential,
   hasTableColumn,
 };
 

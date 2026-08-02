@@ -3,17 +3,36 @@
  * PURPOSE: Build one user-facing capability report for optional oz workflow
  * and agent CLIs, so the UI exposes only sessions users can start.
  */
-import { spawnSync } from 'child_process';
 import { resolveExecutablePath } from './executable-resolver.js';
 import { getRuntimeDependencyDiagnostics } from './runtime-dependencies.js';
+import {
+  createSuccessfulAsyncProbeCache,
+  runAsyncCommandProbe,
+} from './utils/async-command-probe.js';
 
 /** Providers that ozw can create and run as new browser conversations. */
 const AGENT_COMMANDS = ['codex', 'pi', 'claude'];
+const CLI_AVAILABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
+
+export type CliAvailability = {
+  name: string;
+  available: boolean;
+  commandPath: string;
+  version: string;
+  authenticated: 'unknown';
+  requiredAction: string;
+  error: string;
+};
+
+const cliAvailabilityCache = createSuccessfulAsyncProbeCache<CliAvailability>({
+  ttlMs: CLI_AVAILABILITY_CACHE_TTL_MS,
+  isSuccess: (value) => Boolean(value?.available),
+});
 
 /**
  * Probe one non-oz CLI using PATH resolution and a lightweight --version call.
  */
-export function checkCliAvailability(commandName, options = {}) {
+export async function checkCliAvailability(commandName, options = {}): Promise<CliAvailability> {
   /**
    * PURPOSE: Report whether the service process can execute one agent CLI
    * without attempting auth flows or reading private credentials.
@@ -32,23 +51,26 @@ export function checkCliAvailability(commandName, options = {}) {
     };
   }
 
-  const result = spawnSync(commandPath, ['--version'], {
-    encoding: 'utf8',
-    env,
-    timeout: 3000,
+  const cacheKey = `${commandName}\0${commandPath}\0${env.PATH || ''}`;
+  return cliAvailabilityCache.run(cacheKey, async () => {
+    /** Cache only an executable that completed its version command successfully. */
+    const result = await runAsyncCommandProbe(commandPath, ['--version'], {
+      env,
+      timeoutMs: options.timeoutMs,
+    });
+    const version = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    const detail = result.error ? result.error.message : version || `exit ${result.status}`;
+    const available = result.status === 0;
+    return {
+      name: commandName,
+      available,
+      commandPath,
+      version,
+      authenticated: 'unknown',
+      requiredAction: buildRequiredAction(commandName, { available, authenticated: 'unknown' }),
+      error: available ? '' : `${commandName} --version failed; detail: ${detail}; PATH=${env.PATH || ''}`,
+    };
   });
-  const version = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
-  const detail = result.error ? result.error.message : version || `exit ${result.status}`;
-  const available = result.status === 0;
-  return {
-    name: commandName,
-    available,
-    commandPath,
-    version,
-    authenticated: 'unknown',
-    requiredAction: buildRequiredAction(commandName, { available, authenticated: 'unknown' }),
-    error: available ? '' : `${commandName} --version failed; detail: ${detail}; PATH=${env.PATH || ''}`,
-  };
 }
 
 /**
@@ -108,12 +130,15 @@ export async function buildRuntimeReadinessReport(options = {}) {
    * and tests that need oz, Codex, and Pi readiness in one payload.
    */
   const env = options.env || process.env;
-  const ozDiagnostics = getRuntimeDependencyDiagnostics({ env });
+  const [ozDiagnostics, ...agentDiagnostics] = await Promise.all([
+    getRuntimeDependencyDiagnostics({ env, timeoutMs: options.timeoutMs }),
+    ...AGENT_COMMANDS.map((commandName) => checkCliAvailability(commandName, { env, timeoutMs: options.timeoutMs })),
+  ]);
   const commands = {
     oz: buildOzReadiness(ozDiagnostics.commands.oz),
   };
-  for (const commandName of AGENT_COMMANDS) {
-    commands[commandName] = checkCliAvailability(commandName, { env });
+  for (const [index, commandName] of AGENT_COMMANDS.entries()) {
+    commands[commandName] = agentDiagnostics[index];
   }
 
   const manualSessions = AGENT_COMMANDS.filter((commandName) => commands[commandName].available);
@@ -128,4 +153,10 @@ export async function buildRuntimeReadinessReport(options = {}) {
     },
     path: env.PATH || '',
   };
+}
+
+/** Clear agent CLI probe state for deterministic cache and retry tests. */
+export function clearCliAvailabilityCacheForTest() {
+  /** Tests may replace a failing executable at the same path before retrying. */
+  cliAvailabilityCache.clear();
 }

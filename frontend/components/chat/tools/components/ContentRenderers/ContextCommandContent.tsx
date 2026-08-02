@@ -4,10 +4,11 @@
 import React from 'react';
 const Check = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>;
 const Copy = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>;
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PrismAsyncLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { copyTextToClipboard } from '../../../../../utils/clipboard';
 import { useTheme } from '../../../../../contexts/ThemeContext';
+import { normalizeSyntaxLanguage } from '../../../../../utils/syntaxLanguage';
 import type { ContextCommandPayloadViewModel } from './toolPayloadParsers';
 
 interface ContextCommandContentProps {
@@ -29,20 +30,6 @@ export interface ContextCodeCardProps {
   wrapCode?: boolean;
   singleLineUntilWrap?: boolean;
   defaultOutputOpen?: boolean;
-}
-
-/**
- * Normalize context-mode language names to Prism language ids.
- */
-function normalizeSyntaxLanguage(language: string): string {
-  const normalized = language.trim().toLowerCase();
-  if (!normalized) {
-    return 'text';
-  }
-  if (['shell', 'sh', 'zsh'].includes(normalized)) {
-    return 'bash';
-  }
-  return normalized;
 }
 
 /**

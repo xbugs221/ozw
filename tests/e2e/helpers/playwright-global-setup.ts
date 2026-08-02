@@ -381,6 +381,7 @@ export default async function globalSetup() {
     CCFLOW_FAKE_RUNNER: process.env.CCFLOW_FAKE_RUNNER || '1',
     CCFLOW_FAKE_RUNNER_DELAY_MS: process.env.CCFLOW_FAKE_RUNNER_DELAY_MS || '8000',
     CCFLOW_FAKE_CO_DELAY_MS: process.env.CCFLOW_FAKE_CO_DELAY_MS || '8000',
+    OZW_ACCESS_TOKEN: process.env.OZW_ACCESS_TOKEN || '0123456789abcdef0123456789abcdef',
   };
   applyPlaywrightWatcherDefaults(childEnv);
   childEnv.PATH = `${ensureWorkflowToolFixtures(cwd)}:${childEnv.PATH || ''}`;

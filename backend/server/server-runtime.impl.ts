@@ -160,6 +160,7 @@ import {
 } from '../domains/projects/project-index-sync-service.js';
 import { createBroadcastRegistry } from './realtime/broadcast-registry.js';
 import { createProjectInvalidationBus } from './realtime/project-invalidation-bus.js';
+import { scheduleProviderWatchersAfterListen } from './startup-background-work.js';
 import { createRuntimeWriterAdapter } from './realtime/runtime-writer-adapter.js';
 import { createSessionSubscriptionRegistry } from './realtime/session-subscription-registry.js';
 import { createServerRuntimeContext, type ServerRuntimeContext } from './server-runtime-context.js';
@@ -1073,12 +1074,6 @@ async function startServer() {
             console.log(`${c.warn('[WARN]')} Note: Requests will be proxied to Vite dev server at ${c.dim('http://localhost:' + (process.env.VITE_PORT || 5173))}`);
         }
 
-        try {
-            await setupProjectsWatcher();
-        } catch (watcherError: any) {
-            console.error('[ERROR] Failed to setup provider transcript watchers:', watcherError);
-        }
-
         server.listen(PORT, HOST, async () => {
             const appInstallPath = PKG_ROOT;
 
@@ -1087,6 +1082,13 @@ async function startServer() {
                 appInstallPath,
                 displayHost: DISPLAY_HOST,
                 port: PORT,
+            });
+
+            scheduleProviderWatchersAfterListen({
+                setupProviderWatchers: setupProjectsWatcher,
+                onError: (watcherError: any) => {
+                    console.error('[ERROR] Failed to setup provider transcript watchers:', watcherError);
+                },
             });
 
             try {

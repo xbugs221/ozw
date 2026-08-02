@@ -1,19 +1,15 @@
 /**
- * 文件目的：自举隔离的真实 Codex daemon，并用真实浏览器和官方远端终端验证无损接管。
- * 业务意义：验收无需人工注入会话编号，且所有要求的运行证据都由同一次真实执行产生。
+ * 文件目的：连接预先运行的系统 Codex 服务，并用真实浏览器和官方远端终端验证无损接管。
+ * 业务意义：测试只作为客户端验收，不启动、停止或配置独立守护进程。
  */
 import { expect, test } from '@playwright/test';
-import { execFile, execFileSync, spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFile, spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createStdioAppServerTransport, type CodexAppServerTransport } from '../../backend/domains/codex-app-server/stdio-transport.ts';
 import { createJsonRpcLineTransport } from '../../backend/domains/codex-app-server/json-rpc-line-transport.ts';
 import { createTmuxTerminalRuntime } from '../../backend/server/terminal-tmux-runtime.ts';
-import {
-  resolveCodexDaemonNetworkPolicy,
-  writeCodexDaemonNetworkState,
-} from '../../backend/domains/codex-app-server/daemon-network-policy.ts';
 import {
   authHeaders,
   authenticatePage,
@@ -23,10 +19,9 @@ import {
 
 const execFileAsync = promisify(execFile);
 const EVIDENCE_DIR = path.resolve(process.cwd(), 'test-results/codex-shared-runtime');
-const CODEX_HOME = path.join(process.env.HOME || '', '.codex');
-const SOCKET_PATH = path.join(CODEX_HOME, 'app-server-control', 'app-server-control.sock');
 const ORIGINAL_HOME = process.env.PLAYWRIGHT_ORIGINAL_HOME || '/home/zzl';
-let daemonStartedByTest = false;
+const CODEX_HOME = process.env.OZW_TEST_CODEX_HOME || path.join(ORIGINAL_HOME, '.codex');
+const SOCKET_PATH = path.join(CODEX_HOME, 'app-server-control', 'app-server-control.sock');
 
 /** 等待条件成立，超时后给出明确错误。 */
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 20_000): Promise<void> {
@@ -47,42 +42,9 @@ async function daemon(command: string): Promise<string> {
   return String(result.stdout || '').trim();
 }
 
-/** 在 Playwright 隔离 HOME 中准备真实认证与受管 Codex 可执行文件。 */
-async function prepareCodexHome(): Promise<void> {
-  process.env.CODEX_HOME = CODEX_HOME;
-  const managedDir = path.join(CODEX_HOME, 'packages', 'standalone', 'current');
-  await mkdir(managedDir, { recursive: true });
-  await rm(path.join(managedDir, 'codex'), { force: true });
-  await symlink(execFileSync('which', ['codex'], { encoding: 'utf8' }).trim(), path.join(managedDir, 'codex'));
-  for (const fileName of ['auth.json', 'config.toml']) {
-    const target = path.join(ORIGINAL_HOME, '.codex', fileName);
-    const link = path.join(CODEX_HOME, fileName);
-    await rm(link, { force: true });
-    await symlink(target, link);
-  }
-}
-
-/** 准备隔离 HOME，并启动真实共享 daemon。 */
-async function prepareRealDaemon(): Promise<Record<string, unknown>> {
-  await prepareCodexHome();
-  let version: Record<string, unknown> | null = null;
-  try {
-    version = JSON.parse(await daemon('version')) as Record<string, unknown>;
-  } catch {
-    await daemon('enable-remote-control');
-    await daemon('start');
-    version = JSON.parse(await daemon('version')) as Record<string, unknown>;
-  }
-  const networkPolicy = resolveCodexDaemonNetworkPolicy({
-    mode: process.env.OZW_CODEX_PROXY_MODE === 'off' ? 'off' : 'inherit',
-    env: process.env,
-  });
-  writeCodexDaemonNetworkState(CODEX_HOME, {
-    appliedFingerprint: networkPolicy.fingerprint,
-    pendingFingerprint: null,
-  });
-  daemonStartedByTest = true;
-  return version;
+/** 验证外部系统服务已就绪；测试绝不尝试启动或维修它。 */
+async function requireSystemDaemon(): Promise<void> {
+  await daemon('version');
 }
 
 /** 启动不连接共享 daemon 的真实私有 app-server，用于构造迁移前线程。 */
@@ -90,7 +52,6 @@ async function startPrivateAppServer(): Promise<{
   child: ChildProcessWithoutNullStreams;
   transport: CodexAppServerTransport;
 }> {
-  await prepareCodexHome();
   const child = spawn('codex', ['app-server', '--listen', 'stdio://'], {
     env: { ...process.env, CODEX_HOME },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -147,14 +108,6 @@ async function fixtureTmuxExists(projectPath: string, routeSessionId: string): P
   }
 }
 
-/** 读取 Unix Socket 的真实 daemon 进程号，禁止以空值相等冒充生命周期稳定。 */
-async function readDaemonPid(): Promise<number> {
-  const result = await execFileAsync('lsof', ['-t', SOCKET_PATH]);
-  const pid = Number(String(result.stdout || '').trim().split(/\s+/)[0]);
-  if (!Number.isInteger(pid) || pid <= 0) throw new Error('未能从 daemon Socket 读取有效 PID');
-  return pid;
-}
-
 /** 从 thread/read 快照核实同一活动轮次仍由共享 daemon 承载。 */
 function assertActiveTurnSnapshot(snapshot: unknown, threadId: string, turnId: string): void {
   const serialized = JSON.stringify(snapshot);
@@ -165,22 +118,17 @@ function assertActiveTurnSnapshot(snapshot: unknown, threadId: string, turnId: s
 
 test.describe.configure({ mode: 'serial' });
 
-test.afterAll(async () => {
-  /** 测试只停止自己启动的隔离 daemon，不触碰用户真实 daemon。 */
-  if (daemonStartedByTest) await daemon('stop').catch(() => '');
-});
-
 test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn', async ({ page, request }) => {
   test.setTimeout(120_000);
   await mkdir(EVIDENCE_DIR, { recursive: true });
-  const beforeDaemon = await prepareRealDaemon();
+  await requireSystemDaemon();
   const owner = createStdioAppServerTransport();
   const observer = createStdioAppServerTransport();
   const notifications: Array<{ method: string; params: unknown }> = [];
   owner.onNotification((notification) => notifications.push(notification));
 
   const threadResult = await owner.request('thread/start', {
-    cwd: PRIMARY_FIXTURE_PROJECT_PATH, sandbox: 'danger-full-access', approvalPolicy: 'never', model: null,
+    cwd: PRIMARY_FIXTURE_PROJECT_PATH, model: null,
   }) as { thread: { id: string } };
   const turnResult = await owner.request('turn/start', {
     threadId: threadResult.thread.id,
@@ -190,7 +138,6 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
   const turnId = turnResult.turn.id;
   expect(threadId).toBeTruthy();
   expect(turnId).toBeTruthy();
-  const beforePid = await readDaemonPid();
   const beforeSnapshot = await observer.request('thread/read', { threadId, includeTurns: true });
   assertActiveTurnSnapshot(beforeSnapshot, threadId, turnId);
 
@@ -255,18 +202,6 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
   await expect(page.getByRole('textbox', { name: /Terminal input|消息输入|Message input/i })).toBeVisible();
   await page.screenshot({ path: path.join(EVIDENCE_DIR, 'ozw-new-session-mobile-refresh-rebound.png'), fullPage: true });
 
-  const diagnosticsResponse = await request.get('/api/diagnostics/codex-shared-runtime', { headers: authHeaders() });
-  const diagnostics = await diagnosticsResponse.json() as { network?: { fingerprint?: string } };
-  writeCodexDaemonNetworkState(CODEX_HOME, {
-    appliedFingerprint: 'previous-network-fingerprint',
-    pendingFingerprint: diagnostics.network?.fingerprint || null,
-  });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => window.openSettings?.('diagnostics'));
-  await expect(page.getByTestId('codex-runtime-mode')).toContainText('shared-daemon', { timeout: 30_000 });
-  await expect(page.getByTestId('codex-proxy-restart-warning')).toContainText(/活动会话|active turn/i);
-  await page.screenshot({ path: path.join(EVIDENCE_DIR, 'proxy-restart-warning.png'), fullPage: true });
-
   await waitFor(() => notifications.some((item) => item.method === 'turn/completed'), 60_000);
   const afterSnapshot = await observer.request('thread/read', { threadId, includeTurns: true });
   expect(JSON.stringify(afterSnapshot)).toContain(threadId);
@@ -285,15 +220,9 @@ test('共享 daemon 增加 ozw 与官方终端连接时保持同一 active turn'
   stopRemoteTui(tui);
   closeTransport(observer);
   closeTransport(owner);
-  const afterDaemon = JSON.parse(await daemon('version')) as Record<string, unknown>;
-  const afterPid = await readDaemonPid();
-  expect(beforePid).toBeGreaterThan(0);
-  expect(afterPid).toBeGreaterThan(0);
-  expect(afterPid).toBe(beforePid);
   const serialized = JSON.stringify(notifications);
   expect(serialized).not.toMatch(/turn\/interrupt|"status":"aborted"/);
 
-  await writeFile(path.join(EVIDENCE_DIR, 'daemon-lifecycle.log'), `${JSON.stringify({ beforePid, afterPid, beforeDaemon, afterDaemon, stopDaemonOnClose: false }, null, 2)}\n`);
   await writeFile(path.join(EVIDENCE_DIR, 'active-turn-continuity.log'), `${JSON.stringify({
     threadId, turnId, beforeSnapshot, ozwSnapshot, afterSnapshot,
     shellInitObserved: shellFrames.some((frame) => frame.includes(threadId)),
@@ -311,8 +240,6 @@ test('未加载的历史空闲线程从会话卡片迁入共享 daemon', async (
   legacyRuntime.transport.onNotification((notification) => legacyNotifications.push(notification));
   const threadResult = await legacyRuntime.transport.request('thread/start', {
     cwd: PRIMARY_FIXTURE_PROJECT_PATH,
-    sandbox: 'danger-full-access',
-    approvalPolicy: 'never',
     model: null,
   }) as { thread: { id: string } };
   const threadId = threadResult.thread.id;
@@ -326,7 +253,7 @@ test('未加载的历史空闲线程从会话卡片迁入共享 daemon', async (
   expect(JSON.stringify(legacyRead)).toContain('completed');
   await stopPrivateAppServer(legacyRuntime);
 
-  await prepareRealDaemon();
+  await requireSystemDaemon();
   const observer = createStdioAppServerTransport();
   const beforeLoaded = await observer.request('thread/loaded/list', {});
   expect(JSON.stringify(beforeLoaded)).not.toContain(threadId);
@@ -379,8 +306,6 @@ test('旧式外部活动会话警告后可由用户强制接入共享 daemon', a
   legacyRuntime.transport.onNotification((notification) => notifications.push(notification));
   const threadResult = await legacyRuntime.transport.request('thread/start', {
     cwd: PRIMARY_FIXTURE_PROJECT_PATH,
-    sandbox: 'danger-full-access',
-    approvalPolicy: 'never',
     model: null,
   }) as { thread: { id: string } };
   const threadId = threadResult.thread.id;
@@ -398,7 +323,7 @@ test('旧式外部活动会话警告后可由用户强制接入共享 daemon', a
     return (await readFile(rolloutPath).catch(() => Buffer.alloc(0))).length > 0;
   }, 20_000);
 
-  await prepareRealDaemon();
+  await requireSystemDaemon();
   const observer = createStdioAppServerTransport();
   const sharedRead = await observer.request('thread/read', { threadId, includeTurns: true });
   expect(JSON.stringify(sharedRead)).toContain('interrupted');
@@ -493,7 +418,3 @@ test('旧式外部活动会话警告后可由用户强制接入共享 daemon', a
   await stopPrivateAppServer(legacyRuntime);
   await killFixtureTmux(projectPath, routeSessionId);
 });
-
-declare global {
-  interface Window { openSettings?: (tab?: string) => void }
-}

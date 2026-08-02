@@ -1,9 +1,12 @@
+/**
+ * PURPOSE: Host the selected file editor in mobile, docked, or expanded layouts.
+ */
 import { useState } from 'react';
 import type { MouseEvent, MutableRefObject } from 'react';
 import type { CodeEditorFile } from '../types/types';
 import CodeEditor from './CodeEditor';
 
-type EditorSidebarProps = {
+export type EditorSidebarProps = {
   editingFile: CodeEditorFile | null;
   isMobile: boolean;
   editorExpanded: boolean;

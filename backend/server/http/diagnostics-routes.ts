@@ -38,8 +38,8 @@ export function registerDiagnosticsRoutes(deps: DiagnosticsRouteDeps): void {
     });
 
     app.get('/api/diagnostics/codex-shared-runtime', authenticateToken, async (_req: any, res: any) => {
-        /** 返回只读、已脱敏的共享 daemon 诊断，不触发启动或重启。 */
-        res.json(getCodexSharedRuntimeDiagnostics());
+        /** 只报告客户端能力与 Socket 连通条件，不查询或管理独立服务进程。 */
+        res.json(await getCodexSharedRuntimeDiagnostics());
     });
 
     app.get('/api/agents/status', authenticateToken, async (_req: any, res: any) => {

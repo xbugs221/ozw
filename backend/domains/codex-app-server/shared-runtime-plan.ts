@@ -1,6 +1,6 @@
 /**
- * 文件目的：规划连接用户自管 Codex daemon 的 stdio proxy 与 Unix Socket。
- * 业务意义：ozw 只拥有客户端 proxy，不启动、重启或守护用户 daemon。
+ * 文件目的：规划连接系统 Codex 守护进程的 stdio proxy 与 Unix Socket。
+ * 业务意义：ozw 只验证客户端连接条件，服务生命周期和配置完全由系统管理。
  */
 
 import path from 'node:path';
@@ -11,8 +11,6 @@ export type SharedCodexRuntimePlan = {
   endpoint: string | null;
   socketPath: string | null;
   proxyArgs: string[] | null;
-  privateStdioArgs: string[] | null;
-  stopDaemonOnClose: false;
   ready: boolean;
   reason: string | null;
 };
@@ -33,7 +31,7 @@ export function resolveSharedCodexRuntimePlan(input: {
   if (!supported) {
     return {
       mode: 'unsupported', endpoint: null, socketPath: null,
-      proxyArgs: null, privateStdioArgs: null, stopDaemonOnClose: false,
+      proxyArgs: null,
       ready: false, reason: 'codex-shared-runtime-capability-missing',
     };
   }
@@ -43,8 +41,6 @@ export function resolveSharedCodexRuntimePlan(input: {
     endpoint: `unix://${socketPath}`,
     socketPath,
     proxyArgs: ['app-server', 'proxy', '--sock', socketPath],
-    privateStdioArgs: null,
-    stopDaemonOnClose: false,
     ready: input.socketReady,
     reason: input.socketReady ? null : 'user-managed-daemon-unavailable',
   };

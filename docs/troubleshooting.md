@@ -39,9 +39,9 @@ oz flow status --run-id <run-id> --json
 
 ### 4. AI 聊天（Codex/Pi）没反应
 
-ozw 不替 provider 完成登录。Codex 需要本机 `codex app-server` 可用并已认证；Pi 需要 Pi 原生运行时能读取到账号认证。
+ozw 不替 provider 完成登录，也不管理 Codex 服务生命周期。Codex 需要已认证的 `codex app-server` 由系统服务管理器独立运行；Pi 需要 Pi 原生运行时能读取到账号认证。
 
-- **解决方法：** 先按对应 provider 的官方方式登录，再重启 ozw，并在设置页查看 provider 诊断。
+- **解决方法：** 先按对应 provider 的官方方式登录；Codex 请检查系统守护进程和 Unix Socket，再在 ozw 设置页查看客户端连通性诊断。
 
 ### 5. 网页打不开
 
@@ -58,17 +58,13 @@ ozw 不替 provider 完成登录。Codex 需要本机 `codex app-server` 可用�
 
 ozw 用到了一些原生库（比如 `node-pty`）。如果 `pnpm install` 报错，请确保你的电脑上安装了 C++ 编译器和 Node.js 的头文件（Headers）。
 
-### 7. 登录或首次注册失败
+### 7. 访问令牌登录失败
 
-确认 `.env` 里已经设置 `JWT_SECRET`。这是生成登录令牌的必需配置；公网部署建议使用至少 32 字节随机值。
+确认 `.env` 中存在恰好 32 个字符的 `OZW_ACCESS_TOKEN`，修改后重启 ozw。可运行 `openssl rand -hex 16` 生成令牌。数据库目录也必须可写，以便 ozw 自动持久化内部 JWT 签名密钥。
 
-### 8. 本机无需登录但公网需要登录
+### 8. 本机也要求登录
 
-默认 `OZW_TRUST_LOCALHOST_AUTH=true`，本机 `localhost` 访问会信任已有首个本地账号。公网访问不会因为这个配置自动绕过登录。若你希望本机也强制登录，设置：
-
-```sh
-OZW_TRUST_LOCALHOST_AUTH=false
-```
+这是预期行为。本机与远程访问都必须输入同一个 `OZW_ACCESS_TOKEN`，ozw 不再通过首个数据库用户绕过认证。
 
 ---
 

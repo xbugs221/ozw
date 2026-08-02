@@ -3,7 +3,8 @@
  * browser renders live output at a stable cadence instead of token frequency.
  */
 
-export const DEFAULT_STREAMING_DELTA_BATCH_MS = 1000;
+export const DEFAULT_STREAMING_FIRST_BATCH_MS = 60;
+export const DEFAULT_STREAMING_DELTA_BATCH_MS = 200;
 
 export type StreamingDeltaEnvelopeType = 'codex-response' | 'pi-response';
 export type StreamingDeltaItemType = 'agent_message' | 'reasoning' | 'thinking';
@@ -32,10 +33,12 @@ type StreamingDeltaBuffer = {
  */
 export class StreamingDeltaBatcher {
   private readonly buffers = new Map<string, StreamingDeltaBuffer>();
+  private readonly emittedSessions = new Map<string, string>();
 
   constructor(
     private readonly send: (event: Record<string, unknown>) => void,
     private readonly batchMs = DEFAULT_STREAMING_DELTA_BATCH_MS,
+    private readonly firstBatchMs = DEFAULT_STREAMING_FIRST_BATCH_MS,
   ) {}
 
   /**
@@ -62,7 +65,8 @@ export class StreamingDeltaBatcher {
       text,
       timer: null,
     };
-    buffer.timer = setTimeout(() => this.flushKey(key), this.batchMs);
+    const delayMs = this.emittedSessions.has(key) ? this.batchMs : this.firstBatchMs;
+    buffer.timer = setTimeout(() => this.flushKey(key), delayMs);
     this.buffers.set(key, buffer);
   }
 
@@ -73,6 +77,7 @@ export class StreamingDeltaBatcher {
     for (const key of Array.from(this.buffers.keys())) {
       this.flushKey(key);
     }
+    this.emittedSessions.clear();
   }
 
   /**
@@ -84,18 +89,18 @@ export class StreamingDeltaBatcher {
         this.flushKey(key);
       }
     }
+    for (const [key, emittedSessionId] of Array.from(this.emittedSessions.entries())) {
+      if (emittedSessionId === sessionId) {
+        this.emittedSessions.delete(key);
+      }
+    }
   }
 
   /**
-   * Clear timers without emitting, used only when a runtime is being discarded.
+   * Emit pending text once, then clear timers and cadence state.
    */
   dispose(): void {
-    for (const buffer of this.buffers.values()) {
-      if (buffer.timer) {
-        clearTimeout(buffer.timer);
-      }
-    }
-    this.buffers.clear();
+    this.flushAll();
   }
 
   /**
@@ -122,6 +127,7 @@ export class StreamingDeltaBatcher {
       clearTimeout(buffer.timer);
     }
     this.buffers.delete(key);
+    this.emittedSessions.set(key, buffer.sessionId);
 
     this.send({
       type: buffer.envelopeType,

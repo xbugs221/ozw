@@ -1,8 +1,6 @@
 /**
  * PURPOSE: Centralize authenticated HTTP calls used by the web client.
  */
-import { IS_PLATFORM } from "../constants/config";
-
 export const getAuthToken = (): string | null => {
   if (typeof window === 'undefined') {
     return null;
@@ -21,7 +19,7 @@ export const authenticatedFetch = (url: string, options: RequestInit = {}): Prom
     defaultHeaders['Content-Type'] = 'application/json';
   }
 
-  if (!IS_PLATFORM && token) {
+  if (token) {
     defaultHeaders['Authorization'] = `Bearer ${token}`;
   }
 
@@ -81,15 +79,10 @@ export const api = {
   // Auth endpoints (no token required)
   auth: {
     status: (): Promise<Response> => fetch('/api/auth/status'),
-    login: (username: string, password: string): Promise<Response> => fetch('/api/auth/login', {
+    login: (accessToken: string): Promise<Response> => fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    }),
-    register: (username: string, password: string): Promise<Response> => fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ accessToken }),
     }),
     user: (): Promise<Response> => authenticatedFetch('/api/auth/user'),
     logout: (): Promise<Response> => authenticatedFetch('/api/auth/logout', { method: 'POST' }),

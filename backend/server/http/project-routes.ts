@@ -48,14 +48,35 @@ export interface ProjectRouteDeps {
  */
 export function registerProjectRoutes(deps: ProjectRouteDeps): void {
     const { app, authenticateToken, heavyReadCoalescer, getProjects, broadcastProgress, summarizeProjectForList, ensureGoRunnerWatchersForProjects, watchGoWorkflowRun, resolveProjectOverviewTarget, buildProjectOverviewReadModel, attachWorkflowMetadata, attachProjectOverviewWorkflowMetadata, syncProjectWorkflowOverviewIndex, getCodexSessions, getPiSessions, getClaudeSessions, extractProjectDirectory, renameProject, deleteProject, addProjectManually, broadcastProjectListInvalidated, listUnscopedHermesSessions } = deps;
+    let cachedUnscopedHermes = { sessions: [] as unknown[], diagnostics: [] as unknown[] };
+    let unscopedHermesRefresh: Promise<{ sessions: unknown[]; diagnostics: unknown[] }> | null = null;
+
+    /**
+     * Refresh optional Hermes history once without putting its disk scan on the
+     * lightweight project-list response path.
+     */
+    const refreshUnscopedHermes = async () => {
+        /** PURPOSE: Coalesce slow NAS reads while keeping the last complete snapshot visible. */
+        if (unscopedHermesRefresh) {
+            return unscopedHermesRefresh;
+        }
+        unscopedHermesRefresh = Promise.resolve(listUnscopedHermesSessions())
+            .then((snapshot) => {
+                cachedUnscopedHermes = snapshot;
+                return snapshot;
+            })
+            .finally(() => {
+                unscopedHermesRefresh = null;
+            });
+        return unscopedHermesRefresh;
+    };
 
 const listProjectsHandler = async (req: any, res: any) => {
     try {
         const projectSummaries = await heavyReadCoalescer.run('projects:list', async () => {
             const projects = await getProjects(broadcastProgress, { lightweightList: true });
-            const unscoped = await listUnscopedHermesSessions();
             const summaries = projects.map(summarizeProjectForList);
-            if (unscoped.sessions.length > 0) {
+            if (cachedUnscopedHermes.sessions.length > 0) {
                 summaries.push({
                     name: 'hermes-unscoped',
                     displayName: '未归属 Hermes 会话',
@@ -65,15 +86,28 @@ const listProjectsHandler = async (req: any, res: any) => {
                     source: 'hermes-unscoped',
                     readOnlyProviderCollection: true,
                     sessions: [],
-                    sessionMeta: { hasMore: false, total: unscoped.sessions.length },
+                    sessionMeta: { hasMore: false, total: cachedUnscopedHermes.sessions.length },
                 });
             }
             return summaries;
         });
         res.json(projectSummaries);
 
-        void ensureGoRunnerWatchersForProjects(projectSummaries, watchGoWorkflowRun).catch((error: any) => {
-            console.warn('[projects] Background watcher registration failed:', error?.message || error);
+        const previousHermesCount = cachedUnscopedHermes.sessions.length;
+        setImmediate(() => {
+            /** PURPOSE: Let the HTTP response flush before optional SQLite, filesystem, and watcher work starts. */
+            void refreshUnscopedHermes()
+                .then((snapshot) => {
+                    if (snapshot.sessions.length !== previousHermesCount) {
+                        void broadcastProjectListInvalidated({ reason: 'hermes-unscoped-refresh' });
+                    }
+                })
+                .catch((error: any) => {
+                    console.warn('[projects] Background Hermes refresh failed:', error?.message || error);
+                });
+            void ensureGoRunnerWatchersForProjects(projectSummaries, watchGoWorkflowRun).catch((error: any) => {
+                console.warn('[projects] Background watcher registration failed:', error?.message || error);
+            });
         });
     } catch (error: any) {
         res.status(error.statusCode || 500).json({ error: error.message });
@@ -85,7 +119,7 @@ const getProjectOverviewHandler = async (req: any, res: any) => {
         const scopeProjectPath = typeof req.query?.projectPath === 'string' ? req.query.projectPath.trim() : '';
         const overview = await heavyReadCoalescer.run(`projects:overview:${scopeProjectPath || req.params.projectName}`, async () => {
             if (req.params.projectName === 'hermes-unscoped') {
-                const unscoped = await listUnscopedHermesSessions();
+                const unscoped = await refreshUnscopedHermes();
                 return {
                     name: 'hermes-unscoped',
                     displayName: '未归属 Hermes 会话',
@@ -127,8 +161,11 @@ const getProjectOverviewHandler = async (req: any, res: any) => {
         }
         res.json(overview);
 
-        void ensureGoRunnerWatchersForProjects([overview], watchGoWorkflowRun).catch((error: any) => {
-            console.warn('[projects:overview] Background watcher registration failed:', error?.message || error);
+        setImmediate(() => {
+            /** PURPOSE: Flush the overview response before watcher setup touches project storage. */
+            void ensureGoRunnerWatchersForProjects([overview], watchGoWorkflowRun).catch((error: any) => {
+                console.warn('[projects:overview] Background watcher registration failed:', error?.message || error);
+            });
         });
     } catch (error: any) {
         res.status(error.statusCode || 500).json({ error: error.message });
@@ -194,7 +231,7 @@ const createProjectHandler = async (req: any, res: any) => {
     app.get('/api/projects', authenticateToken, listProjectsHandler);
     app.get('/api/hermes/unscoped-sessions', authenticateToken, async (_req: any, res: any) => {
         try {
-            res.json(await listUnscopedHermesSessions());
+            res.json(await refreshUnscopedHermes());
         } catch (error: any) {
             res.status(500).json({ error: error.message });
         }

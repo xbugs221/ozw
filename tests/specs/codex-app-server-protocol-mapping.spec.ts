@@ -49,29 +49,21 @@ test('production transport connects to the independent daemon through proxy', as
     new URL('../../backend/domains/codex-app-server/json-rpc-line-transport.ts', import.meta.url),
     'utf8',
   );
+  const capabilityProbeSource = await readFile(
+    new URL('../../backend/domains/codex-app-server/capability-probe.ts', import.meta.url),
+    'utf8',
+  );
+  const diagnosticsSource = await readFile(
+    new URL('../../backend/domains/codex-app-server/shared-runtime-diagnostics.ts', import.meta.url),
+    'utf8',
+  );
   const args = buildCodexAppServerCliArgs();
   assert.deepEqual(args.slice(0, 3), ['app-server', 'proxy', '--sock']);
   assert.match(args[3], /app-server-control\.sock$/);
   assert.doesNotMatch(runtimeSource, /daemon['"],\s*['"](?:start|restart)['"]|spawnSync|--listen|stdio:\/\/|OZW_CODEX_ALLOW_PRIVATE_STDIO/, 'production transport must only connect to the user-managed daemon');
+  assert.doesNotMatch(`${capabilityProbeSource}\n${diagnosticsSource}`, /\bspawnSync\b/, 'Codex capability and diagnostics paths must not block the Node event loop');
+  assert.match(capabilityProbeSource, /execFile/, 'capability probing must use an asynchronous child process API');
   assert.match(lineTransportSource, /child\.kill\(['"]SIGTERM['"]\)/, 'closing ozw must only close its proxy');
-});
-
-test('app-server runtime maps every Codex manual permission mode to YOLO', async () => {
-  const policySource = await readFile(
-    new URL('../../backend/codex-permission-policy.ts', import.meta.url),
-    'utf8',
-  );
-
-  assert.match(
-    policySource,
-    /approvalPolicy:\s*'never'/,
-    'all Codex app-server manual sessions must auto-approve',
-  );
-  assert.match(
-    policySource,
-    /sandboxMode:\s*'danger-full-access'/,
-    'all Codex app-server manual sessions must bypass sandboxing',
-  );
 });
 
 test('production transport initializes app-server before first business request', async () => {

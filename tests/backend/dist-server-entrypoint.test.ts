@@ -13,6 +13,7 @@ import test from 'node:test';
 import { writeFakeWorkflowTools } from './helpers/workflow-tools.ts';
 
 const REPO_ROOT = process.cwd();
+const TSC_CLI_PATH = path.join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
 const DIST_RUNTIME_COMPAT_PATH = path.join(
   REPO_ROOT,
   'dist-node/backend/domains/projects/project-domain-runtime-compat.js',
@@ -83,12 +84,12 @@ async function stopChild(child: ManagedChildProcess): Promise<void> {
 test('compiled backend entrypoint starts after build', async () => {
   fs.rmSync(DIST_RUNTIME_COMPAT_PATH, { force: true });
 
-  const build = execFileSync('pnpm', ['run', 'build:server'], {
+  execFileSync(process.execPath, [TSC_CLI_PATH, '-p', 'tsconfig.build.json'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  // pnpm 11 在非 TTY 下不输出生命周脚本，直接验证编译产物
+  // 编译结果是本测试的业务对象；直接启动 TypeScript 编译器以避免包管理器冷启动。
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'dist-node', 'backend', 'index.js')), true);
   assert.equal(fs.existsSync(DIST_RUNTIME_COMPAT_PATH), false);
 

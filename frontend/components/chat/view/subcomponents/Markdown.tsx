@@ -3,11 +3,12 @@
  * link interception for assistant replies inside the active project.
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import 'katex/dist/katex.min.css';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PrismAsyncLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useTranslation } from 'react-i18next';
 import { normalizeChatMarkdownFences } from '../../utils/chatFormatting';
@@ -19,6 +20,7 @@ import { parseMarkdownFrontmatter } from '../../../../utils/markdownFrontmatter'
 import type { ProjectFileNode } from '../../utils/fileMentionTree';
 import { MarkdownFrontmatterBlock } from '../../../markdown/MarkdownFrontmatterBlock';
 import MarkdownMermaidBlock from '../../../code-editor/view/subcomponents/markdown/MarkdownMermaidBlock';
+import { getSyntaxLanguageFromClassName } from '../../../../utils/syntaxLanguage';
 
 type MarkdownProps = {
   children: React.ReactNode;
@@ -98,8 +100,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
     );
   }
 
-  const match = /language-(\w+)/.exec(className || '');
-  const language = match ? match[1].toLowerCase() : 'text';
+  const language = getSyntaxLanguageFromClassName(className);
   const lines = raw.split(/\r?\n/);
   const isLargeCodeBlock = lines.length > LARGE_CODE_BLOCK_LINE_THRESHOLD || raw.length > LARGE_CODE_BLOCK_CHAR_THRESHOLD;
 

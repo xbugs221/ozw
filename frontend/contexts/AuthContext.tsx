@@ -1,22 +1,23 @@
 // @ts-nocheck -- Complex type dependencies; needs dedicated pass.
+/**
+ * 文件目的：管理浏览器内部会话、访问令牌登录、退出与首次引导状态。
+ */
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api, getAuthToken } from '../utils/api';
-import { IS_PLATFORM } from '../constants/config';
 
 const AuthContext = createContext({
   user: null,
   token: null,
   login: () => {},
-  register: () => {},
   logout: () => {},
   isLoading: true,
-  needsSetup: false,
   hasCompletedOnboarding: true,
   refreshOnboardingStatus: () => {},
   error: null
 });
 
 export const useAuth = () => {
+  /** Expose the single authentication state shared by protected application views. */
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
@@ -25,22 +26,14 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
+  /** Coordinate persisted JWT restoration and access-token login without account setup. */
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(() => getAuthToken());
   const [isLoading, setIsLoading] = useState(true);
-  const [needsSetup, setNeedsSetup] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (IS_PLATFORM) {
-      setUser({ username: 'platform-user' });
-      setNeedsSetup(false);
-      checkOnboardingStatus();
-      setIsLoading(false);
-      return;
-    }
-
     checkAuthStatus();
   }, []);
 
@@ -75,7 +68,6 @@ export const AuthProvider = ({ children }) => {
           if (userResponse.ok) {
             const userData = await userResponse.json();
             setUser(userData.user);
-            setNeedsSetup(false);
             await checkOnboardingStatus();
             return;
           }
@@ -83,30 +75,18 @@ export const AuthProvider = ({ children }) => {
           console.warn('Token verification was interrupted:', error);
         }
 
-        // Token 无效或已过期时，回退到 /auth/status 进行首次初始化判断
+        // Token 无效或已过期时，回退到公开状态接口检查部署配置。
         localStorage.removeItem('auth-token');
         setToken(null);
         setUser(null);
       }
 
-      // Check if system needs setup
       const statusResponse = await api.auth.status();
       const statusData = await statusResponse.json();
-
-      if (statusData.needsSetup) {
-        setNeedsSetup(true);
-        setIsLoading(false);
-        return;
-      }
-
-      if (statusData.isAuthenticated && statusData.user) {
-        setUser(statusData.user);
-        setNeedsSetup(false);
-        await checkOnboardingStatus();
-        return;
-      }
-
       setUser(null);
+      if (!statusData.accessTokenConfigured) {
+        setError(statusData.error || 'OZW_ACCESS_TOKEN is not configured');
+      }
     } catch (error) {
       console.warn('[AuthContext] Auth status check failed:', error);
       setError('Failed to check authentication status');
@@ -115,10 +95,10 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const login = async (username, password) => {
+  const login = async (accessToken) => {
     try {
       setError(null);
-      const response = await api.auth.login(username, password);
+      const response = await api.auth.login(accessToken);
 
       const data = await response.json();
 
@@ -133,31 +113,6 @@ export const AuthProvider = ({ children }) => {
       }
     } catch (error) {
       console.error('Login error:', error);
-      const errorMessage = 'Network error. Please try again.';
-      setError(errorMessage);
-      return { success: false, error: errorMessage };
-    }
-  };
-
-  const register = async (username, password) => {
-    try {
-      setError(null);
-      const response = await api.auth.register(username, password);
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setToken(data.token);
-        setUser(data.user);
-        setNeedsSetup(false);
-        localStorage.setItem('auth-token', data.token);
-        return { success: true };
-      } else {
-        setError(data.error || 'Registration failed');
-        return { success: false, error: data.error || 'Registration failed' };
-      }
-    } catch (error) {
-      console.error('Registration error:', error);
       const errorMessage = 'Network error. Please try again.';
       setError(errorMessage);
       return { success: false, error: errorMessage };
@@ -181,10 +136,8 @@ export const AuthProvider = ({ children }) => {
     user,
     token,
     login,
-    register,
     logout,
     isLoading,
-    needsSetup,
     hasCompletedOnboarding,
     refreshOnboardingStatus,
     error

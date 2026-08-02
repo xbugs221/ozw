@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   openAuthenticatedWebSocket,
-  registerTestUser,
+  authenticateTestClient,
   startIsolatedBackendServer,
   stopBackendServerFixture,
 } from './helpers/backend-service-fixture.ts';
@@ -92,7 +92,7 @@ test('idle check-session-status sends only session-status over the real WebSocke
         PATH: `${binDir}:${process.env.PATH || ''}`,
       },
     });
-    const registerPayload = await registerTestUser(fixture, { username: 'tester', password: 'password' });
+    const registerPayload = await authenticateTestClient(fixture);
 
     const received = [];
     const ws = await openAuthenticatedWebSocket(fixture, registerPayload.token);

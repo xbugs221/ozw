@@ -1,16 +1,20 @@
-import { useMemo } from 'react';
+/**
+ * PURPOSE: Compose sidebar dialogs while deferring non-first-screen modal bundles.
+ */
+import { lazy, Suspense, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 const AlertTriangle = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 const Trash2 = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>;
 import type { TFunction } from 'i18next';
 import { Button } from '../../../ui/button';
-import ProjectCreationWizard from '../../../projects/view/ProjectCreationWizard';
-import Settings from '../../../settings/view/Settings';
-import VersionUpgradeModal from '../modals/VersionUpgradeModal';
 import type { Project } from '../../../../types/app';
 import type { InstallMode } from '../../../../hooks/useVersionCheck';
 import { normalizeProjectForSettings } from '../../utils/utils';
 import type { DeleteProjectConfirmation, SettingsProject } from '../../types/types';
+
+const ProjectCreationWizard = lazy(() => import('../../../projects/view/ProjectCreationWizard'));
+const Settings = lazy(() => import('../../../settings/view/Settings'));
+const VersionUpgradeModal = lazy(() => import('../modals/VersionUpgradeModal'));
 
 type SidebarModalsProps = {
   projects: Project[];
@@ -39,7 +43,13 @@ type TypedSettingsProps = {
 
 const SettingsComponent = Settings as (props: TypedSettingsProps) => JSX.Element;
 
+function DeferredModalFallback() {
+  /** Keep the modal backdrop stable while a non-first-screen bundle loads. */
+  return <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" role="status" aria-label="Loading dialog" />;
+}
+
 function TypedSettings(props: TypedSettingsProps) {
+  /** Adapt normalized sidebar projects to the settings component contract. */
   return <SettingsComponent {...props} />;
 }
 
@@ -70,21 +80,25 @@ export default function SidebarModals({
     <>
       {showNewProject &&
         ReactDOM.createPortal(
-          <ProjectCreationWizard
-            onClose={onCloseNewProject}
-            onProjectCreated={onProjectCreated}
-          />,
+          <Suspense fallback={<DeferredModalFallback />}>
+            <ProjectCreationWizard
+              onClose={onCloseNewProject}
+              onProjectCreated={onProjectCreated}
+            />
+          </Suspense>,
           document.body,
         )}
 
       {showSettings &&
         ReactDOM.createPortal(
-          <TypedSettings
-            isOpen={showSettings}
-            onClose={onCloseSettings}
-            projects={settingsProjects}
-            initialTab={settingsInitialTab}
-          />,
+          <Suspense fallback={<DeferredModalFallback />}>
+            <TypedSettings
+              isOpen={showSettings}
+              onClose={onCloseSettings}
+              projects={settingsProjects}
+              initialTab={settingsInitialTab}
+            />
+          </Suspense>,
           document.body,
         )}
 
@@ -142,12 +156,16 @@ export default function SidebarModals({
           document.body,
         )}
 
-      <VersionUpgradeModal
-        isOpen={showVersionModal}
-        onClose={onCloseVersionModal}
-        currentVersion={currentVersion}
-        installMode={installMode}
-      />
+      {showVersionModal ? (
+        <Suspense fallback={<DeferredModalFallback />}>
+          <VersionUpgradeModal
+            isOpen={showVersionModal}
+            onClose={onCloseVersionModal}
+            currentVersion={currentVersion}
+            installMode={installMode}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }

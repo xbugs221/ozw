@@ -48,7 +48,7 @@ const PROVIDER_ONLY_PROJECT_LIMIT = 50;
 const LIGHTWEIGHT_PROVIDER_PROJECT_FILE_LIMIT = PROVIDER_ONLY_PROJECT_LIMIT * 4;
 const PROVIDER_INDEX_HOME_BUDGET_MS = (() => {
   const parsed = Number.parseInt(process.env.PROVIDER_INDEX_HOME_BUDGET_MS || '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 2500;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
 })();
 
 /**
@@ -421,7 +421,8 @@ async function resolveProviderIndexWithinHomeBudget(readIndex: () => Promise<Map
 }
 
 /**
- * Bound expensive provider HOME scans so manual projects still render quickly.
+ * Bound foreground waiting for provider HOME scans. The shared scan keeps
+ * running after this soft deadline, so later reads reuse the completed index.
  */
 async function runWithinHomeBudget<T>(operation: () => Promise<T>, fallback: T): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;

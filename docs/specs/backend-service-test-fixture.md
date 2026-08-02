@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | 真实 server 测试通过共享 helper 启动 | `tests/specs/backend-service-test-fixture.spec.ts` | `test-results/backend-service-fixture/source-audit.json` |
 | WebSocket 测试统一使用 Authorization header | `tests/specs/backend-service-test-fixture.spec.ts` | `test-results/backend-service-fixture/source-audit.json` |
-| 子进程环境统一隔离数据库和 JWT 密钥 | `tests/specs/backend-service-test-fixture.spec.ts` | `test-results/backend-service-fixture/source-audit.json` |
+| 子进程环境通过数据库统一隔离认证状态 | `tests/specs/backend-service-test-fixture.spec.ts` | `test-results/backend-service-fixture/source-audit.json` |
 
 ### 需求：真实后端服务测试必须复用共享夹具
 
@@ -28,10 +28,10 @@
 
 ### 需求：测试子进程必须隔离本机状态
 
-#### 场景：子进程环境统一隔离数据库和 JWT 密钥
+#### 场景：子进程环境通过数据库统一隔离认证状态
 
 - **测试文件**：`tests/specs/backend-service-test-fixture.spec.ts`
 - **真实数据来源**：读取 helper 源码
 - **入口路径**：`startIsolatedBackendServer`
-- **关键断言**：helper 显式设置 `DATABASE_PATH`、`JWT_SECRET`、`HOST`、`SESSION_PATH_SCAN_INTERVAL_MS`
+- **关键断言**：helper 显式设置 `DATABASE_PATH`、`HOST`、`SESSION_PATH_SCAN_INTERVAL_MS`；JWT 密钥由数据库路径自动隔离
 - **剩余风险**：不覆盖外部 provider 真账号，仅保证测试 server 不读取本机默认 auth.db

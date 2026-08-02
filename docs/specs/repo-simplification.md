@@ -162,8 +162,8 @@
 
 ### 场景：运行环境变量读取逻辑
 
-- **当** server 启动时读取 `TRUST_LOCALHOST_AUTH`
-- **则** 应当读取 `OZW_TRUST_LOCALHOST_AUTH` 环境变量，而不是 `CCFLOW_TRUST_LOCALHOST_AUTH`
+- **当** server 启动时读取 Web 认证配置
+- **则** 只应读取恰好 32 个字符的 `OZW_ACCESS_TOKEN`，不得通过 localhost 首用户逻辑绕过登录
 - **且** co 客户端已在 49 号提案中彻底移除，不应存在 `CCFLOW_CO_HOME` 或 `OZW_CO_HOME` 的读取逻辑
 
 ### 场景：前端读取浏览器本地设置

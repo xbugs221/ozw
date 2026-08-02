@@ -10,7 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { buildRuntimeReadinessReport } from '../../backend/runtime-readiness.ts';
+import {
+  buildRuntimeReadinessReport,
+  checkCliAvailability,
+  clearCliAvailabilityCacheForTest,
+} from '../../backend/runtime-readiness.ts';
 
 async function writeExecutable(filePath: string, lines: string[]): Promise<void> {
   /**
@@ -137,6 +141,57 @@ test('oz flow contract 缺少能力时只禁用工作流，不阻止已安装 Ag
     assert.equal((report as any).capabilities.workflows, false);
     assert.deepEqual((report as any).capabilities.manualSessions.sort(), ['codex', 'pi']);
   } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Agent CLI 探测不阻塞事件循环，并复用并发和成功结果', async () => {
+  /** 业务场景：多个诊断组件同时刷新时，不应重复执行同一个慢 CLI。 */
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-agent-probe-cache-'));
+  const binDir = path.join(tempRoot, 'bin');
+  const countPath = path.join(tempRoot, 'count');
+  await writeExecutable(path.join(binDir, 'pi'), [
+    '#!/bin/sh',
+    `printf x >> '${countPath}'`,
+    '/bin/sleep 0.15',
+    'echo "pi async"',
+  ]);
+  clearCliAvailabilityCacheForTest();
+  try {
+    const env = { ...process.env, PATH: binDir };
+    let timerFired = false;
+    setTimeout(() => { timerFired = true; }, 20);
+    const [first, second] = await Promise.all([
+      checkCliAvailability('pi', { env }),
+      checkCliAvailability('pi', { env }),
+    ]);
+    assert.equal(timerFired, true, 'CLI probe must leave timers responsive');
+    assert.equal(first.available, true);
+    assert.deepEqual(second, first);
+    assert.equal((await fs.readFile(countPath, 'utf8')).length, 1, 'concurrent requests must share one command');
+
+    await checkCliAvailability('pi', { env });
+    assert.equal((await fs.readFile(countPath, 'utf8')).length, 1, 'successful probe must use the bounded cache');
+  } finally {
+    clearCliAvailabilityCacheForTest();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('失败的 Agent CLI 探测可在同一路径立即恢复', async () => {
+  /** 业务场景：用户修复 CLI 后不必等待成功缓存期限。 */
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-agent-probe-retry-'));
+  const binDir = path.join(tempRoot, 'bin');
+  const commandPath = path.join(binDir, 'pi');
+  const env = { ...process.env, PATH: binDir };
+  clearCliAvailabilityCacheForTest();
+  try {
+    await writeExecutable(commandPath, ['#!/bin/sh', 'exit 1']);
+    assert.equal((await checkCliAvailability('pi', { env })).available, false);
+    await writeExecutable(commandPath, ['#!/bin/sh', 'echo "pi recovered"']);
+    assert.equal((await checkCliAvailability('pi', { env })).available, true);
+  } finally {
+    clearCliAvailabilityCacheForTest();
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });

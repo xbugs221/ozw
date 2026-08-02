@@ -32,6 +32,7 @@ authdb/
 *.db
 *.sqlite
 *.sqlite3
+*.jwt-secret
 pids/
 *.pid
 *.seed

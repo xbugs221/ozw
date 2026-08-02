@@ -1,7 +1,6 @@
 /**
  * PURPOSE: Provide shell websocket URL helpers and low-level message parsing.
  */
-import { IS_PLATFORM } from '../../../constants/config';
 import type { ShellIncomingMessage, ShellOutgoingMessage } from '../types/types';
 
 type ShellSocketConnection = {
@@ -9,28 +8,10 @@ type ShellSocketConnection = {
   protocol: string | null;
 };
 
-function isLoopbackBrowserHost(): boolean {
-  const hostname = window.location.hostname.toLowerCase();
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-}
-
 export function getShellWebSocketUrl(): ShellSocketConnection | null {
+  /** Require the same internal session token for local, hosted, and remote shells. */
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const token = localStorage.getItem('auth-token');
-
-  if (IS_PLATFORM) {
-    return {
-      url: `${protocol}//${window.location.host}/shell`,
-      protocol: null,
-    };
-  }
-
-  if (!token && isLoopbackBrowserHost()) {
-    return {
-      url: `${protocol}//${window.location.host}/shell`,
-      protocol: null,
-    };
-  }
 
   if (!token) {
     console.error('No authentication token found for Shell WebSocket connection');

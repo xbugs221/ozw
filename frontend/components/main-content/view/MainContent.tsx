@@ -5,10 +5,8 @@
 import React, { useEffect } from 'react';
 const Plus = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
 const Trash2 = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>;
-import ChatInterface from '../../chat/view/ChatInterface';
 import FileTree from '../../file-tree/view/FileTree';
 import { FileTreeDockViewModeControls } from '../../file-tree/view/FileTreeViewModeControls';
-import StandaloneShell from '../../standalone-shell/view/StandaloneShell';
 import ErrorBoundary from '../../ui/ErrorBoundary';
 import SessionAttentionBoard from '../../session-attention/SessionAttentionBoard';
 
@@ -21,10 +19,47 @@ import { useWorkspaceLayoutState } from '../hooks/useWorkspaceLayoutState';
 
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useEditorSidebar } from '../../code-editor/hooks/useEditorSidebar';
-import EditorSidebar from '../../code-editor/view/EditorSidebar';
+import type { EditorSidebarProps } from '../../code-editor/view/EditorSidebar';
+import type { StandaloneShellProps } from '../../standalone-shell/view/StandaloneShell';
 import type { AppTab, Project, ProjectSession } from '../../../types/app';
-import WorkflowDetailView from './subcomponents/WorkflowDetailView';
 import { getAllSessions } from '../../sidebar/utils/utils';
+
+const ChatInterface = React.lazy(() => import('../../chat/view/ChatInterface'));
+const LazyEditorSidebar = React.lazy(() => import('../../code-editor/view/EditorSidebar'));
+const LazyStandaloneShell = React.lazy(() => import('../../standalone-shell/view/StandaloneShell'));
+const WorkflowDetailView = React.lazy(() => import('./subcomponents/WorkflowDetailView'));
+
+function DeferredPanelFallback({ label }: { label: string }) {
+  /** Preserve the workspace panel geometry while a feature bundle downloads. */
+  return (
+    <div className="flex h-full min-h-24 w-full items-center justify-center bg-background text-sm text-muted-foreground" role="status">
+      <span className="animate-pulse">{label}</span>
+    </div>
+  );
+}
+
+function EditorSidebar(props: EditorSidebarProps) {
+  /** Load the editor only after a file has been selected. */
+  if (!props.editingFile) return null;
+  return (
+    <ErrorBoundary showDetails>
+      <React.Suspense fallback={<DeferredPanelFallback label="Loading editor…" />}>
+        <LazyEditorSidebar {...props} />
+      </React.Suspense>
+    </ErrorBoundary>
+  );
+}
+
+function StandaloneShell(props: StandaloneShellProps) {
+  /** Keep terminal-sized layout and error handling stable during lazy loading. */
+  return (
+    <ErrorBoundary showDetails>
+      <React.Suspense fallback={<DeferredPanelFallback label="Loading terminal…" />}>
+        <LazyStandaloneShell {...props} />
+      </React.Suspense>
+    </ErrorBoundary>
+  );
+}
 
 type TerminalInstance = {
   id: string;
@@ -504,13 +539,17 @@ function MainContent({
     const workflowCenterContent = activeTab === 'shell' ? renderTerminalMainView() : (
       <>
         <div className={`flex flex-col min-h-0 min-w-0 overflow-hidden flex-1 ${editorExpanded ? 'hidden' : ''}`}>
-          <WorkflowDetailView
-            project={selectedProject}
-            workflow={selectedWorkflow}
-            onNavigateToSession={onNavigateToSession}
-            onOpenArtifactFile={handleFileOpen}
-            onOpenArtifactDirectory={openFilesDock}
-          />
+          <ErrorBoundary showDetails>
+            <React.Suspense fallback={<DeferredPanelFallback label="Loading workflow…" />}>
+              <WorkflowDetailView
+                project={selectedProject}
+                workflow={selectedWorkflow}
+                onNavigateToSession={onNavigateToSession}
+                onOpenArtifactFile={handleFileOpen}
+                onOpenArtifactDirectory={openFilesDock}
+              />
+            </React.Suspense>
+          </ErrorBoundary>
         </div>
         <EditorSidebar
           editingFile={editingFile}
@@ -702,29 +741,31 @@ function MainContent({
         ) : (
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
             <ErrorBoundary showDetails>
-              <ChatInterface
-                selectedProject={selectedProject}
-                selectedSession={selectedSession}
-                ws={ws}
-                sendMessage={sendMessage}
-                latestMessage={latestMessage}
-                messageHistory={messageHistory}
-                onFileOpen={handleFileOpen}
-                onInputFocusChange={onInputFocusChange}
-                onSessionActive={onSessionActive}
-                onSessionInactive={onSessionInactive}
-                onReplaceTemporarySession={onReplaceTemporarySession}
-                onNavigateToSession={onNavigateToSession}
-                onNewSession={onNewSession}
-                onShowSettings={onShowSettings}
-                autoExpandTools={autoExpandTools}
-                showRawParameters={showRawParameters}
-                showThinking={showThinking}
-                autoScrollToBottom={autoScrollToBottom}
-                externalMessageUpdate={externalMessageUpdate}
-                renderSnapshotRequestId={renderSnapshotRequestId}
-                onRenderSnapshotLoadingChange={setIsRenderingSnapshot}
-              />
+              <React.Suspense fallback={<DeferredPanelFallback label="Loading chat…" />}>
+                <ChatInterface
+                  selectedProject={selectedProject}
+                  selectedSession={selectedSession}
+                  ws={ws}
+                  sendMessage={sendMessage}
+                  latestMessage={latestMessage}
+                  messageHistory={messageHistory}
+                  onFileOpen={handleFileOpen}
+                  onInputFocusChange={onInputFocusChange}
+                  onSessionActive={onSessionActive}
+                  onSessionInactive={onSessionInactive}
+                  onReplaceTemporarySession={onReplaceTemporarySession}
+                  onNavigateToSession={onNavigateToSession}
+                  onNewSession={onNewSession}
+                  onShowSettings={onShowSettings}
+                  autoExpandTools={autoExpandTools}
+                  showRawParameters={showRawParameters}
+                  showThinking={showThinking}
+                  autoScrollToBottom={autoScrollToBottom}
+                  externalMessageUpdate={externalMessageUpdate}
+                  renderSnapshotRequestId={renderSnapshotRequestId}
+                  onRenderSnapshotLoadingChange={setIsRenderingSnapshot}
+                />
+              </React.Suspense>
             </ErrorBoundary>
           </div>
         )}

@@ -9,6 +9,7 @@
  *   (no args)     - Start the server (default)
  *   start         - Start the server
  *   status        - Show configuration and data locations
+ *   update         - Show manual update instructions
  *   help          - Show help information
  *   version       - Show version information
  */
@@ -50,6 +51,7 @@ const c = {
 // Load package.json for version info
 const packageJsonPath = path.join(PKG_ROOT, 'package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+const RELEASES_URL = 'https://github.com/xbugs221/ozw/releases/latest';
 
 // Load environment variables from .env file if it exists
 function loadEnvFile() {
@@ -145,7 +147,7 @@ Usage:
 Commands:
   start          Start the ozw server (default)
   status         Show configuration and data locations
-  update         Update to the latest version
+  update         Show manual update instructions
   help           Show this help information
   version        Show version information
 
@@ -180,68 +182,24 @@ function showVersion() {
     console.log(`${packageJson.version}`);
 }
 
-// Compare semver versions, returns true if v1 > v2
-function isNewerVersion(v1, v2) {
-    const parts1 = v1.split('.').map(Number);
-    const parts2 = v2.split('.').map(Number);
-    for (let i = 0; i < 3; i++) {
-        if (parts1[i] > parts2[i]) return true;
-        if (parts1[i] < parts2[i]) return false;
-    }
-    return false;
-}
-
-// Check for updates
-async function checkForUpdates(silent = false) {
-    try {
-        const { execSync } = await import('child_process');
-        const latestVersion = execSync('npm show ozw version', { encoding: 'utf8' }).trim();
-        const currentVersion = packageJson.version;
-
-        if (isNewerVersion(latestVersion, currentVersion)) {
-            console.log(`\n${c.warn('[UPDATE]')} New version available: ${c.bright(latestVersion)} (current: ${currentVersion})`);
-            console.log(`         Run ${c.bright('ozw update')} to update\n`);
-            return { hasUpdate: true, latestVersion, currentVersion };
-        } else if (!silent) {
-            console.log(`${c.ok('[OK]')} You are on the latest version (${currentVersion})`);
-        }
-        return { hasUpdate: false, latestVersion, currentVersion };
-    } catch (e) {
-        if (!silent) {
-            console.log(`${c.warn('[WARN]')} Could not check for updates`);
-        }
-        return { hasUpdate: false, error: e.message };
-    }
-}
-
-// Update the package
-async function updatePackage() {
-    try {
-        const { execSync } = await import('child_process');
-        console.log(`${c.info('[INFO]')} Checking for updates...`);
-
-        const { hasUpdate, latestVersion, currentVersion } = await checkForUpdates(true);
-
-        if (!hasUpdate) {
-            console.log(`${c.ok('[OK]')} Already on the latest version (${currentVersion})`);
-            return;
-        }
-
-        console.log(`${c.info('[INFO]')} Updating from ${currentVersion} to ${latestVersion}...`);
-        execSync('npm update -g ozw', { stdio: 'inherit' });
-        console.log(`${c.ok('[OK]')} Update complete! Restart ozw to use the new version.`);
-    } catch (e) {
-        console.error(`${c.error('[ERROR]')} Update failed: ${e.message}`);
-        console.log(`${c.tip('[TIP]')} Try running manually: npm update -g ozw`);
-    }
+// Show update guidance without performing network or installation work.
+function showUpdateInstructions() {
+    /**
+     * PURPOSE: Keep update behavior explicit and distribution-neutral. The
+     * public npm package is unavailable, so the CLI must not query or mutate it.
+     */
+    console.log(`${c.info('[INFO]')} Automatic CLI updates are not supported.`);
+    console.log(`${c.info('[INFO]')} Current version: ${c.bright(packageJson.version)}`);
+    console.log(`${c.tip('[TIP]')} Download the latest release from:`);
+    console.log(`      ${RELEASES_URL}`);
 }
 
 // Start the server
 async function startServer() {
-    // Check for updates silently on startup
-    checkForUpdates(true);
-
-    // Import and run the server
+    /**
+     * PURPOSE: Start exclusively from local files so offline launches never
+     * wait for an update service or package registry.
+     */
     await import('./index.js');
 }
 
@@ -304,7 +262,7 @@ async function main() {
             showVersion();
             break;
         case 'update':
-            await updatePackage();
+            showUpdateInstructions();
             break;
         default:
             console.error(`\n❌ Unknown command: ${command}`);

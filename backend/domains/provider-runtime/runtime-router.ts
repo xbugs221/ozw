@@ -42,7 +42,6 @@ import {
   toProviderSessionQueueStateEvent,
   toProviderSessionStatusEvent,
 } from './provider-runtime-events.js';
-import { resolveCodexPermissionPolicy } from '../../codex-permission-policy.js';
 import { transformPiEvent } from './provider-event-mappers.js';
 type PiThinkingLevel = NonNullable<import('@earendil-works/pi-coding-agent').AgentSession['thinkingLevel']>;
 import { runFakePiTurn, shouldUseFakePiRuntime } from './fake-pi-runtime.js';
@@ -182,10 +181,6 @@ export {
   getProviderLiveTranscriptSnapshot,
   getProviderCompletedTranscriptSnapshot,
   clearProviderLiveTranscriptSnapshot,
-};
-
-export const __nativeAgentRuntimeInternalsForTest = {
-  resolveCodexPermissionPolicy,
 };
 
 function isCbwRouteSessionId(sessionId: string | null | undefined): boolean {

@@ -63,18 +63,18 @@
    oz --version
    ```
 
-3. **准备聊天 provider：** ozw 的服务启动只强制依赖 `oz`。如果要使用 Codex 或 Pi 手动聊天，请在同一台机器上按对应 provider 的官方方式完成安装和登录；Codex 会话通过 `codex app-server` 运行，Pi 会话通过 Pi 原生运行时运行。
+3. **准备聊天 provider：** ozw 的服务启动只强制依赖 `oz`。使用 Codex 时，请先由系统服务管理器独立运行并维护已认证的 `codex app-server` 守护进程；ozw 只作为客户端连接，不负责其启动、停止、重启或权限策略。Pi 会话通过 Pi 原生运行时运行。
 
 4. **启动 ozw：**
 
    ```sh
    pnpm install
    cp .env.example .env
-   # 至少设置 JWT_SECRET，公网部署还建议设置 CREDENTIAL_ENCRYPTION_KEY
+   openssl rand -hex 16  # 将输出写入 .env 的 OZW_ACCESS_TOKEN
    pnpm start
    ```
 
-   `pnpm start` 会先构建前端和后端，再在默认 `PORT=3001` 上提供 Web 页面、API 和 WebSocket。首次访问时创建单用户账号；本机 `localhost` 访问默认信任已有首个账号，可用 `OZW_TRUST_LOCALHOST_AUTH=false` 关闭。
+   `OZW_ACCESS_TOKEN` 必须恰好为 32 个字符。`pnpm start` 会先构建前端和后端，再在默认 `PORT=3001` 上提供 Web 页面、API 和 WebSocket；首次访问时直接输入该访问令牌，不创建或选择账号。JWT 签名密钥由 ozw 自动生成，仅用于内部会话。
 
    开发模式使用双服务：
 

@@ -28,10 +28,7 @@ type CodexSharedRuntimeDiagnostics = {
   mode?: string;
   ready?: boolean;
   endpoint?: string;
-  activeTurnCount?: number;
   reason?: string | null;
-  daemonError?: string | null;
-  network?: { networkMode?: string; drift?: boolean; restartAction?: string };
 };
 
 function StatusPill({ ok }: { ok: boolean }) {
@@ -147,18 +144,8 @@ export default function RuntimeDiagnosticsTab() {
             {t('diagnostics.codexShared.mode')}: {codexRuntime.mode || t('diagnostics.unknown')}
           </div>
           <div className="break-all text-xs text-muted-foreground">
-            {codexRuntime.daemonError || codexRuntime.endpoint || codexRuntime.reason || t('diagnostics.notFound')}
+            {codexRuntime.endpoint || codexRuntime.reason || t('diagnostics.notFound')}
           </div>
-          <div className="text-sm text-muted-foreground">
-            {t('diagnostics.codexShared.network')}: {codexRuntime.network?.networkMode || t('diagnostics.unknown')}
-          </div>
-          {codexRuntime.mode === 'shared-daemon'
-            && codexRuntime.network?.drift === true
-            && codexRuntime.network?.restartAction === 'confirm-after-turn' && (
-            <div className="rounded border border-amber-400/50 bg-amber-50 p-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" data-testid="codex-proxy-restart-warning">
-              {t('diagnostics.codexShared.activeTurnWarning', { count: codexRuntime.activeTurnCount })}
-            </div>
-          )}
         </div>
       )}
       {!diagnostics && !error && <div className="text-sm text-muted-foreground">{t('diagnostics.loading')}</div>}

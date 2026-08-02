@@ -7,6 +7,7 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import jwt from 'jsonwebtoken';
+import { getJwtSecret } from '../../backend/security/jwt-secret.ts';
 import {
   PLAYWRIGHT_FIXTURE_HOME,
   PLAYWRIGHT_FIXTURE_PROJECT_PATHS,
@@ -42,7 +43,7 @@ function createLocalAuthToken() {
    * PURPOSE: Avoid importing backend database modules in the browser test
    * process; the isolated server owns the SQLite connection during e2e runs.
    */
-  const secret = process.env.JWT_SECRET || 'playwright-jwt-secret';
+  const secret = getJwtSecret();
   return jwt.sign(
     {
       userId: 1,

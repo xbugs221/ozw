@@ -4,13 +4,13 @@
  */
 import { EditorView } from '@codemirror/view';
 import { unifiedMergeView } from '@codemirror/merge';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useCodeEditorDocument } from '../hooks/useCodeEditorDocument';
 import { useCodeEditorSettings } from '../hooks/useCodeEditorSettings';
 import { useEditorKeyboardShortcuts } from '../hooks/useEditorKeyboardShortcuts';
 import type { CodeEditorFile } from '../types/types';
-import { createMinimapExtension, createScrollToFirstChunkExtension, getLanguageExtensions } from '../utils/editorExtensions';
+import { createMinimapExtension, createScrollToFirstChunkExtension, loadLanguageExtensions } from '../utils/editorExtensions';
 import { getEditorStyles } from '../utils/editorStyles';
 import { createEditorToolbarPanelExtension } from '../utils/editorToolbarPanel';
 import CodeEditorFooter from './subcomponents/CodeEditorFooter';
@@ -50,6 +50,26 @@ export default function CodeEditor({
   const [showDiff, setShowDiff] = useState(Boolean(file.diffInfo));
   const [markdownPreview, setMarkdownPreview] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [loadedLanguage, setLoadedLanguage] = useState<{
+    filename: string;
+    extensions: CodeEditorExtension[];
+  }>({ filename: '', extensions: [] });
+
+  useEffect(() => {
+    /** Load syntax support without blocking the editable plain-text surface. */
+    let disposed = false;
+    void loadLanguageExtensions(file.name)
+      .then((extensions) => {
+        if (!disposed) setLoadedLanguage({ filename: file.name, extensions });
+      })
+      .catch(() => {
+        if (!disposed) setLoadedLanguage({ filename: file.name, extensions: [] });
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [file.name]);
 
   const {
     isDarkMode,
@@ -130,7 +150,7 @@ export default function CodeEditor({
 
   const extensions = useMemo(() => {
     const allExtensions: CodeEditorExtension[] = [
-      ...getLanguageExtensions(file.name),
+      ...(loadedLanguage.filename === file.name ? loadedLanguage.extensions : []),
       ...toolbarPanelExtension,
     ];
 
@@ -156,6 +176,7 @@ export default function CodeEditor({
   }, [
     file.diffInfo,
     file.name,
+    loadedLanguage,
     minimapExtension,
     scrollToFirstChunkExtension,
     showDiff,

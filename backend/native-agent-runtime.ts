@@ -16,7 +16,6 @@ export {
   seedRunningPiSessionForTest,
   sendNativeMessage,
   sendNativeMessage as sendProviderRuntimeMessage,
-  __nativeAgentRuntimeInternalsForTest,
 } from './domains/provider-runtime/runtime-router.js';
 
 export {

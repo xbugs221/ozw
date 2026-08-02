@@ -59,18 +59,18 @@ ozw turns your coding tasks into persistent, resumable Web sessions. When combin
    oz --version
    ```
 
-3. **Prepare chat providers:** ozw only requires `oz` to start. To use Codex or Pi manual chat, install and authenticate the selected provider on the same machine using that provider's official flow. Codex sessions run through `codex app-server`; Pi sessions run through the native Pi runtime.
+3. **Prepare chat providers:** ozw only requires `oz` to start. For Codex, first run an authenticated `codex app-server` daemon independently under the system service manager; ozw only connects as a client and never starts, stops, restarts, or configures its permission policy. Pi sessions use the native Pi runtime.
 
 4. **Launch ozw:**
 
    ```sh
    pnpm install
    cp .env.example .env
-   # set JWT_SECRET at minimum; set CREDENTIAL_ENCRYPTION_KEY for deployed use
+   openssl rand -hex 16  # copy the output to OZW_ACCESS_TOKEN in .env
    pnpm start
    ```
 
-   `pnpm start` builds the frontend and backend, then serves the Web UI, API, and WebSocket from `PORT=3001` by default. On first visit, create the single local user. Localhost access trusts the first existing user by default; set `OZW_TRUST_LOCALHOST_AUTH=false` to require login locally.
+   `OZW_ACCESS_TOKEN` must contain exactly 32 characters. `pnpm start` builds the frontend and backend, then serves the Web UI, API, and WebSocket from `PORT=3001` by default. Enter that token on first access; there is no account creation or selection. ozw generates the JWT signing secret automatically for internal sessions only.
 
    For development, run the split dev servers:
 

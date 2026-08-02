@@ -11,7 +11,7 @@ This guide will get **ozw** up and running on your local machine or server.
 - **Node.js 26.4.0**: recommended; minimum 24.17.0, matching `.nvmrc` and `package.json`.
 - **pnpm 11.10.0**: match the `packageManager` field in `package.json`; Corepack is recommended.
 - **oz**: must be available on the service process `PATH`. ozw checks `oz flow contract --json` during startup, uses `oz list` to discover active changes, and uses `oz flow` to run workflows.
-- **Codex/Pi**: not required for the server to start; install and authenticate the selected provider only when you use that chat provider.
+- **Codex/Pi**: not required for ozw to start. For Codex, an authenticated app-server daemon must run independently under the system service manager; ozw only connects to its Unix socket. Install and authenticate Pi through its official flow.
 
 ```sh
 corepack enable
@@ -30,19 +30,18 @@ cd ozw
 pnpm install
 pnpm run hooks:install
 cp .env.example .env
+openssl rand -hex 16  # copy the output to OZW_ACCESS_TOKEN in .env
 ```
 
-Set `JWT_SECRET` in `.env` at minimum. For deployed use, also set `CREDENTIAL_ENCRYPTION_KEY` and confirm `HOST`, `PORT`, and reverse proxy settings.
+`OZW_ACCESS_TOKEN` is the only browser login credential and must contain exactly 32 characters. ozw generates and persists the JWT signing secret beside the database for internal sessions only. For deployment, also confirm `HOST`, `PORT`, and reverse proxy settings.
 
 | Setting | Default | Purpose |
 |---|---:|---|
 | `PORT` | `3001` | Production Web UI, API, and WebSocket port |
 | `VITE_PORT` | `5173` | Frontend dev-server port |
 | `HOST` | `0.0.0.0` | Bind address |
+| `OZW_ACCESS_TOKEN` | required | 32-character browser access token |
 | `JWT_EXPIRES_IN` | `24h` | Login token lifetime |
-| `OZW_TRUST_LOCALHOST_AUTH` | `true` | Trust the first local user for localhost access |
-| `CODEX_SANDBOX_MODE` | `danger-full-access` | Default Codex sandbox policy |
-| `CODEX_APPROVAL_POLICY` | `never` | Default Codex approval policy |
 
 ### 3. Run
 
@@ -70,7 +69,7 @@ Default development URL:
 http://localhost:5173
 ```
 
-On first visit, create the single local user. Once a user exists, localhost access trusts the first local user by default. Set `OZW_TRUST_LOCALHOST_AUTH=false` to require login locally.
+On first visit, enter `OZW_ACCESS_TOKEN`; there is no account creation or selection. Localhost and remote access use the same authentication flow.
 
 ### 4. Enable "Relay Coding" (Recommended)
 
@@ -86,9 +85,9 @@ Deployment checklist:
 | Item | Recommendation |
 |---|---|
 | Protocol | Use HTTPS for PWA and mobile access |
-| Auth | Set a strong `JWT_SECRET`; disable localhost trust when not needed |
-| Providers | Make sure the service process can access `oz`, `codex`, and provider auth files |
-| Data | Default database path is `~/.ozw/ozw.db`; override with `DATABASE_PATH` |
+| Auth | Protect `OZW_ACCESS_TOKEN`, the database, and the generated signing-secret file |
+| Providers | Ensure ozw can access `oz`, `codex`, and provider auth files; run Codex app-server independently as a system daemon |
+| Data | Keep the default SQLite database on local storage at `~/.ozw/ozw.db`; do not place it on an NFS/SMB share (remote project directories are fine) |
 
 ### 5. Verification
 
@@ -103,8 +102,8 @@ Open ozw in your browser.
 
 | Type | What it means to a user |
 |---|---|
-| Shared session | Already managed by the shared Codex service and safe to continue from web or terminal |
-| Legacy session | Created by an older or private Codex process that the shared service does not own yet |
+| Shared session | Already hosted by the independent Codex system service and safe to continue from web or terminal |
+| Legacy session | Created by an older or private Codex process and not loaded by the system service yet |
 
 | Card state | What happens when opened |
 |---|---|

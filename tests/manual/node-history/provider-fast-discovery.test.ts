@@ -238,20 +238,35 @@ test('OpenCode project discovery reads SQLite session table without CLI fallback
   });
 });
 
-test('getProjects returns manual projects when a provider index exceeds the home budget', async () => {
+test('getProjects returns quickly, then reuses a slow provider index without losing projects', async () => {
   await withTemporaryHome(async (homeDir) => {
     const projectPath = path.join(homeDir, 'work', 'manual-budget-project');
+    const providerProjectPath = path.join(homeDir, 'work', 'provider-budget-project');
     const codexSessionsRoot = path.join(homeDir, '.codex', 'sessions');
+    const sessionPath = path.join(codexSessionsRoot, '2026', '05', '18', 'rollout-2026-05-18T07-00-00-codex-budget.jsonl');
     const originalReaddir = fs.readdir;
+    let rootIndexReadCount = 0;
+    let releaseSlowRead;
+    const slowReadGate = new Promise((resolve) => {
+      releaseSlowRead = resolve;
+    });
 
     await fs.mkdir(projectPath, { recursive: true });
-    await fs.mkdir(codexSessionsRoot, { recursive: true });
+    await fs.mkdir(providerProjectPath, { recursive: true });
+    await writeJsonl(sessionPath, [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-05-18T07:00:00.000Z',
+        payload: { id: 'source-codex-budget', cwd: providerProjectPath },
+      }),
+    ]);
     await addProjectManually(projectPath, 'Manual Budget Project');
     clearProjectDirectoryCache();
 
     fs.readdir = async (...args) => {
       if (path.resolve(String(args[0])) === path.resolve(codexSessionsRoot)) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        rootIndexReadCount += 1;
+        await slowReadGate;
       }
       return originalReaddir(...args);
     };
@@ -262,8 +277,16 @@ test('getProjects returns manual projects when a provider index exceeds the home
       const durationMs = Date.now() - startedAt;
 
       assert.equal(projects.some((project) => project.fullPath === projectPath), true);
-      assert.ok(durationMs < 3500, `manual project discovery should degrade within the home budget, got ${durationMs}ms`);
+      assert.equal(projects.some((project) => project.fullPath === providerProjectPath), false);
+      assert.ok(durationMs < 750, `manual project discovery should degrade quickly, got ${durationMs}ms`);
+
+      releaseSlowRead();
+      await buildCodexSessionsIndex();
+      const refreshedProjects = await getProjects();
+      assert.equal(refreshedProjects.some((project) => project.fullPath === providerProjectPath), true);
+      assert.equal(rootIndexReadCount, 1, 'the completed slow index should be reused');
     } finally {
+      releaseSlowRead();
       fs.readdir = originalReaddir;
     }
   });

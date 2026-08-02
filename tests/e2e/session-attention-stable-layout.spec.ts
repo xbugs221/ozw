@@ -13,7 +13,6 @@ declare global {
 }
 
 process.env.DATABASE_PATH = PLAYWRIGHT_FIXTURE_AUTH_DB;
-process.env.JWT_SECRET ||= 'session-attention-scroll-preservation-secret';
 
 const [{ generateToken }, { db, userDb }, { providerSessionIndexDb }] = await Promise.all([
   import('../../backend/middleware/auth.ts'),

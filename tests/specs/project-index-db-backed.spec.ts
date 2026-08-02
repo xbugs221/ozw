@@ -39,7 +39,7 @@ function runTsxEval(source: string, env: NodeJS.ProcessEnv): string {
    * PURPOSE: Validate startup-time module behavior without reusing imports
    * already cached by the current test worker.
    */
-  const result = spawnSync('pnpm', ['exec', 'tsx', '-e', source], {
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', source], {
     cwd: REPO_ROOT,
     env,
     encoding: 'utf8',
@@ -64,7 +64,7 @@ test('默认数据库路径和 CLI status 使用 ~/.ozw/ozw.db', async () => {
     );
     assert.equal(loadedPath, path.join(homeDir, '.ozw', 'ozw.db'));
 
-    const status = spawnSync('pnpm', ['exec', 'tsx', 'backend/cli.ts', 'status'], {
+    const status = spawnSync(process.execPath, ['--import', 'tsx', 'backend/cli.ts', 'status'], {
       cwd: REPO_ROOT,
       env,
       encoding: 'utf8',
@@ -351,6 +351,23 @@ test('启动 backfill 同步写入 provider_session_index 和 project_index', as
 
     const output = runTsxEval(`
       (async () => {
+        const nodeFs = await import('node:fs');
+        const originalReadFile = nodeFs.promises.readFile;
+        const originalStat = nodeFs.promises.stat;
+        let configReadCount = 0;
+        const configReadPaths = [];
+        let projectStatCount = 0;
+        nodeFs.promises.readFile = async function(filePath, ...args) {
+          if (String(filePath).endsWith('conf.json')) {
+            configReadCount += 1;
+            configReadPaths.push(String(filePath));
+          }
+          return originalReadFile.call(this, filePath, ...args);
+        };
+        nodeFs.promises.stat = async function(filePath, ...args) {
+          if (String(filePath) === process.env.PROJECT_PATH) projectStatCount += 1;
+          return originalStat.call(this, filePath, ...args);
+        };
         await import('./backend/projects.ts');
         const { backfillProjectIndex } = await import('./backend/domains/projects/project-index-sync-service.ts');
         const { db } = await import('./backend/database/db.ts');
@@ -366,7 +383,7 @@ test('启动 backfill 同步写入 provider_session_index 和 project_index', as
           FROM project_index
           WHERE normalized_project_path = ? AND visible = 1
         \`).all(process.env.PROJECT_PATH);
-        console.log(JSON.stringify({ result, providerRows, projectRows }));
+        console.log(JSON.stringify({ result, providerRows, projectRows, configReadCount, configReadPaths, projectStatCount }));
       })();
     `, {
       ...process.env,
@@ -384,5 +401,7 @@ test('启动 backfill 同步写入 provider_session_index 和 project_index', as
       { project_path: path.resolve(projectPath) },
     ]);
     assert.equal(result.result.providerCount, 2);
+    assert.equal(result.configReadCount, 2, JSON.stringify(result.configReadPaths));
+    assert.equal(result.projectStatCount, 2, 'same-project transcripts share one stat before one reconciliation stat');
   });
 });

@@ -1,3 +1,6 @@
+/**
+ * 文件目的：使用部署者配置的 32 字符访问令牌创建 ozw 浏览器会话。
+ */
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 const MessageSquare = ({ className: cls }: { className?: string }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
@@ -5,25 +8,27 @@ import { useTranslation } from 'react-i18next';
 
 const LoginForm = () => {
   const { t } = useTranslation('auth');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [accessToken, setAccessToken] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const { login } = useAuth() as any;
+  const { login, error: configurationError } = useAuth() as any;
 
   const handleSubmit = async (e: React.FormEvent) => {
+    /**
+     * PURPOSE: Validate the fixed token length locally before requesting an internal session.
+     */
     e.preventDefault();
     setError('');
 
-    if (!username || !password) {
-      setError(t('errors.requiredFields'));
+    if (Array.from(accessToken).length !== 32) {
+      setError(t('login.errors.invalidLength'));
       return;
     }
 
     setIsLoading(true);
 
-  const result = await (login as any)(username, password);
+    const result = await (login as any)(accessToken);
 
     if (!result.success) {
       setError(result.error);
@@ -52,40 +57,25 @@ const LoginForm = () => {
           {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-foreground mb-1">
-                {t('login.username')}
-              </label>
-              <input
-                type="text"
-                id="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder={t('login.placeholders.username')}
-                required
-                disabled={isLoading}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-foreground mb-1">
-                {t('login.password')}
+              <label htmlFor="accessToken" className="block text-sm font-medium text-foreground mb-1">
+                {t('login.accessToken')}
               </label>
               <input
                 type="password"
-                id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                id="accessToken"
+                value={accessToken}
+                onChange={(e) => setAccessToken(e.target.value)}
                 className="w-full px-3 py-2 border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder={t('login.placeholders.password')}
+                placeholder={t('login.placeholders.accessToken')}
+                autoComplete="current-password"
                 required
                 disabled={isLoading}
               />
             </div>
 
-            {error && (
+            {(error || configurationError) && (
               <div className="p-3 bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-md">
-                <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+                <p className="text-sm text-red-700 dark:text-red-400">{error || configurationError}</p>
               </div>
             )}
 
@@ -100,7 +90,7 @@ const LoginForm = () => {
 
           <div className="text-center">
             <p className="text-sm text-muted-foreground">
-              Enter your credentials to access ozw
+              {t('login.configurationHint')}
             </p>
           </div>
         </div>

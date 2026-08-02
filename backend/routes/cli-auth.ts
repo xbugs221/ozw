@@ -3,8 +3,7 @@ import express from 'express';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { spawnSync } from 'child_process';
-import { resolveExecutablePath } from '../executable-resolver.js';
+import { checkCliAvailability } from '../runtime-readiness.js';
 
 const router = express.Router();
 
@@ -22,8 +21,8 @@ router.get('/claude/status', async (req: express.Request, res: express.Response)
  */
 router.get('/pi/status', async (req: express.Request, res: express.Response) => {
   try {
-    const commandPath = resolveExecutablePath('pi');
-    if (!commandPath) {
+    const status = await checkCliAvailability('pi');
+    if (!status.commandPath) {
       return res.json({
         available: false,
         authenticated: null,
@@ -32,20 +31,12 @@ router.get('/pi/status', async (req: express.Request, res: express.Response) => 
       });
     }
 
-    // Lightweight version check only - no sensitive data
-    const result = spawnSync(commandPath, ['--version'], {
-      encoding: 'utf8',
-      timeout: 3000,
-    });
-
-    const version = (result.stdout || '').trim() || 'unknown';
-
     res.json({
-      available: true,
+      available: status.available,
       authenticated: null,
-      commandPath,
-      version,
-      error: null,
+      commandPath: status.commandPath,
+      version: status.version || 'unknown',
+      error: status.error || null,
     });
   } catch (error) {
     res.json({

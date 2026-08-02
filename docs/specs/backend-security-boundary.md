@@ -2,13 +2,22 @@
 
 ## 需求：认证默认安全
 
-后端不得在生产路径使用弱默认 JWT secret，也不得签发永不过期 token。
+部署者必须配置固定 32 字符访问令牌；后端以恒定时间比较该令牌，并自动管理仅供内部会话使用的 JWT secret。
 
-### 场景：JWT 缺少强 secret 时 fail closed
+### 场景：固定访问令牌换取内部会话
 
-- **给定** 后端认证模块加载配置
-- **当** 未配置强 `JWT_SECRET`
-- **则** 生产路径不得签发可用 token
+- **给定** `.env` 中配置了恰好 32 个字符的 `OZW_ACCESS_TOKEN`
+- **当** 用户在登录界面提交访问令牌
+- **则** 后端必须以恒定时间比较并只在匹配时签发内部 JWT
+- **且** 不得提供注册、用户名选择或 localhost 首用户绕过路径
+- **且** 配置缺失或长度错误时必须明确拒绝认证
+
+### 场景：JWT secret 自动安全生成
+
+- **给定** 后端认证模块首次为当前数据库签发 token
+- **当** 尚未生成 JWT secret
+- **则** 运行时必须自动生成并以仅所有者可读写的权限持久化强 secret
+- **且** 重启或多个服务进程必须复用同一 secret
 - **且** token 签发必须包含有效期
 
 ## 需求：Agent 和 Git 路径必须限制在允许工作区
@@ -23,29 +32,30 @@ Agent API、Git route 和 provider runtime 不得把任意客户端传入路径�
 - **则** 请求必须被拒绝
 - **且** 不得进入高权限执行或 Git 操作
 
-## 需求：Codex 默认权限遵循本地 YOLO 预期
+## 需求：Codex 权限策略由独立系统服务负责
 
-Codex app-server、SDK runtime 和 CLI fallback 的默认 sandbox/approval policy 必须保持 ozw 本地开发预期：`danger-full-access` 和 `never`。
+ozw 只作为 Codex app-server 客户端，不得覆盖独立系统服务的沙箱或审批策略。
 
-### 场景：默认运行使用 YOLO 权限
+### 场景：创建线程时不注入服务权限
 
-- **给定** 用户以默认权限启动 Agent 或 Codex app-server
-- **当** 后端构造 thread/start 或 CLI 参数
-- **则** sandbox 必须为 `danger-full-access`
-- **且** approval policy 必须为 `never`
+- **给定** 用户通过 ozw 启动 Codex 会话
+- **当** 后端构造 `thread/start` 或客户端 proxy 参数
+- **则** 不得传入 sandbox 或 approval policy 覆盖
+- **且** 系统管理员应在独立 Codex 服务侧维护所需权限策略
 
 ## 需求：Token 和凭据不得通过易泄漏路径传播
 
-认证 token、API key 和 GitHub token 不得出现在 URL query 或 Git 进程参数；新写入凭据不得明文持久化。
+认证 token、API key 和 GitHub token 不得出现在 URL query 或 Git 进程参数。
 
-### 场景：URL query token 被移除且凭据不明文落库
+### 场景：URL query token 被移除且 API key 摘要落库
 
 - **给定** HTTP、WebSocket、SSE、Shell、Agent API 和 Git clone 入口
-- **当** 用户登录、连接实时通道、保存 provider 凭据或使用已保存 GitHub token clone 项目
+- **当** 用户登录、连接实时通道或使用已保存 GitHub token clone 项目
 - **则** URL query 不得包含 `token`、`apiKey` 或 GitHub token
 - **且** GitHub token 不得出现在 clone URL、进程参数或直接环境变量值中
-- **且** 新增 API key 必须摘要保存，recoverable credential 必须加密保存
-- **且** 旧明文或旧密文凭据读取后必须兼容迁移
+- **且** 新增 API key 必须摘要保存
+
+ozw 不再管理可恢复凭据的应用层加密密钥，也不提供新的持久化写入入口。若数据库中已有历史 provider 凭据，部署者必须使用操作系统访问控制保护数据库文件；使用旧密钥加密的记录升级后无法继续解密，需要在运行时重新提供凭据。
 
 对应规格测试：`tests/specs/backend-security-boundary.spec.ts`。
 
