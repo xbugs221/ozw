@@ -7,6 +7,7 @@ import { dedupeAdjacentChatMessages } from './messageDedup';
 import { getIntrinsicMessageKey } from './messageKeys';
 import { convertSessionMessages } from './messageTransforms';
 import { isSubagentToolCall } from '../../../../shared/subagent-tool-utils.js';
+import { normalizeCodexToolOutput } from '../../../../shared/codex-message-normalizer.js';
 import {
   canRenderLiveRowForAcceptedTurn,
   shouldPreserveAcceptedOptimisticUser,
@@ -283,32 +284,7 @@ function getIncomingToolCallId(value: Record<string, unknown> | null | undefined
  * Normalize result payloads into the same displayable content shape as persisted conversion.
  */
 function normalizeIncomingToolResultContent(value: unknown): string {
-  /**
-   * Tool outputs may arrive as strings, arrays of chunks, or structured records
-   * with nested content/output fields.
-   */
-  if (value === null || value === undefined) {
-    return '';
-  }
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeIncomingToolResultContent(item)).filter(Boolean).join('\n');
-  }
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const nested = record.content ?? record.output ?? record.result ?? record.stdout ?? record.stderr ?? record.text;
-    if (nested !== undefined && nested !== value) {
-      return normalizeIncomingToolResultContent(nested);
-    }
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-  return String(value);
+  return normalizeCodexToolOutput(value);
 }
 
 /**

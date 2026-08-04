@@ -938,6 +938,57 @@ test('Codex commentary phase history collapses before the final answer body', as
   assert.equal(assistantBodies.length, 1, 'only final agent_message stays outside the process disclosure');
 });
 
+test('Hermes tool result envelopes render their output text and stay collapsed by default', async () => {
+  /**
+   * Hermes stores some tool results as JSON strings such as
+   * {"output":"..."}. The transcript should show the nested output value,
+   * while the pre-body process group follows the persisted Codex disclosure
+   * default instead of forcing Hermes history open.
+   */
+  const converted = convertSessionMessages([
+    {
+      type: 'user',
+      provider: 'hermes',
+      timestamp: FIXED_TIMESTAMP,
+      messageKey: 'hermes-tool-user',
+      message: { role: 'user', content: '运行 Hermes 工具' },
+    },
+    {
+      type: 'tool_use',
+      provider: 'hermes',
+      timestamp: FIXED_TIMESTAMP,
+      messageKey: 'hermes-tool-use',
+      toolName: 'exec_command',
+      toolInput: { cmd: 'printf hermes-output' },
+      toolCallId: 'hermes-tool-call',
+    },
+    {
+      type: 'tool_result',
+      provider: 'hermes',
+      timestamp: FIXED_TIMESTAMP,
+      messageKey: 'hermes-tool-result',
+      toolCallId: 'hermes-tool-call',
+      output: JSON.stringify({ output: 'hermes-output', exit_code: 0 }),
+    },
+    {
+      type: 'assistant',
+      provider: 'hermes',
+      timestamp: FIXED_TIMESTAMP,
+      messageKey: 'hermes-tool-body',
+      message: { role: 'assistant', content: 'Hermes 已完成。' },
+    },
+  ]);
+  const toolCard = converted.find((message) => message.toolCallId === 'hermes-tool-call');
+  const nonBodyGroup = buildTurnDisplayBlocks(converted)
+    .find((block) => block.kind === 'turn-non-body-group');
+  const turnGroupSource = await readSource('frontend/components/chat/view/subcomponents/TurnNonBodyGroup.tsx');
+
+  assert.equal(toolCard?.toolResult?.content, 'hermes-output');
+  assert.doesNotMatch(String(toolCard?.toolResult?.content), /"output"/);
+  assert.equal(nonBodyGroup?.defaultOpen, false);
+  assert.doesNotMatch(turnGroupSource, /provider === ['"]hermes['"]/);
+});
+
 test('plain assistant body rows without tool activity stay visible', async () => {
   /**
    * Multiple normal assistant body rows are still answer content when the turn

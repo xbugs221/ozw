@@ -81,7 +81,7 @@ export default function TurnNonBodyGroup({
   selectedProject,
   provider,
 }: TurnNonBodyGroupProps) {
-  const [isOpen, setIsOpen] = useState(block.defaultOpen || provider === 'hermes');
+  const [isOpen, setIsOpen] = useState(block.defaultOpen);
   const [, setElapsedTick] = useState(0);
   const isToolOnlyBlock = block.items.every((item) => item.kind === 'tool-group');
   const toolInvocationCount = block.items.filter((item) => item.kind === 'tool-group').length;
@@ -108,7 +108,7 @@ export default function TurnNonBodyGroup({
     : undefined;
 
   useEffect(() => {
-    setIsOpen(block.defaultOpen || provider === 'hermes');
+    setIsOpen(block.defaultOpen);
   }, [block.defaultOpen, block.turnKey, provider]);
 
   /**
@@ -164,7 +164,7 @@ export default function TurnNonBodyGroup({
         </summary>
 
         {isOpen && (
-          <details data-testid="turn-tool-list" className="mt-2 pl-[18px]" open={provider === 'hermes'}>
+          <details data-testid="turn-tool-list" className="mt-2 pl-[18px]">
             <summary className="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-300">
               {toolInvocationLabel}
             </summary>
@@ -243,7 +243,7 @@ export default function TurnNonBodyGroup({
             }
 
             return (
-              <details key={item.groupKey} data-testid="turn-tool-group" className="rounded border border-gray-200/70 px-2 py-1 dark:border-gray-700/60" open={provider === 'hermes'}>
+              <details key={item.groupKey} data-testid="turn-tool-group" className="rounded border border-gray-200/70 px-2 py-1 dark:border-gray-700/60">
                 <summary className="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-300">
                   {item.commandCount === 1 ? '一次工具调用' : `${item.commandCount}次工具调用`}
                 </summary>

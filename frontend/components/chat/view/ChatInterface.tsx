@@ -1872,9 +1872,9 @@ function ChatInterface({
             createDiff={createDiff}
             onFileOpen={onFileOpen}
             onShowSettings={onShowSettings}
-            autoExpandTools={effectiveProvider === 'hermes' ? true : autoExpandTools}
+            autoExpandTools={autoExpandTools}
             showRawParameters={showRawParameters}
-            showThinking={effectiveProvider === 'hermes' ? true : showThinking}
+            showThinking={showThinking}
             isFollowingLatest={isFollowingLatest}
             selectedProject={selectedProject}
             scrollTargetMessageKey={bookmarkScrollTargetKey}

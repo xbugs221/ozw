@@ -275,49 +275,7 @@ const toCodexAssistantChatMessage = (
  * Convert tool outputs from mixed transport shapes into renderable text.
  */
 const normalizeToolResultContent = (value: unknown): string => {
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    const joined = value
-      .map((item) => {
-        if (typeof item === 'string') {
-          return item;
-        }
-        if (item && typeof item === 'object') {
-          return normalizeToolResultContent((item as Record<string, unknown>).text
-            ?? (item as Record<string, unknown>).content
-            ?? (item as Record<string, unknown>).output);
-        }
-        return String(item ?? '');
-      })
-      .filter(Boolean)
-      .join('\n');
-
-    if (joined) {
-      return joined;
-    }
-  }
-
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const nestedText = record.content ?? record.output ?? record.text ?? record.stdout ?? record.stderr;
-    if (nestedText !== undefined && nestedText !== value) {
-      return normalizeToolResultContent(nestedText);
-    }
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-
-  return String(value);
+  return normalizeCodexToolOutput(value);
 };
 
 const toAbsolutePath = (projectPath: string, filePath?: string) => {
