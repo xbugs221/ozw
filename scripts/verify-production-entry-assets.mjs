@@ -1,6 +1,10 @@
 /**
  * PURPOSE: Guard production route and interaction boundaries against eager
  * editor, terminal, Markdown, or full syntax-highlighter downloads.
+ *
+ * OUTPUT: Silently passes when every budget holds and throws with a detailed
+ * error when a boundary or budget is violated. Set OZW_VERIFY_ENTRY_REPORT=1
+ * to also print the full per-graph asset report on success.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -275,7 +279,7 @@ function verifyProductionEntry() {
   }
   const prismRuntime = inspectPrismRuntime(manifest, plainTextEditorAssets);
 
-  console.log(JSON.stringify({
+  const summary = {
     entry: { assets: report, totalGzipBytes, budgetBytes: ENTRY_GZIP_BUDGET_BYTES },
     authenticatedHome: {
       assets: authenticatedHomeReport,
@@ -296,7 +300,10 @@ function verifyProductionEntry() {
       representativeLanguageGzipBytes: prismRuntime.languageRequestGzipBytes,
       representativeLanguageBudgetBytes: PRISM_LANGUAGE_REQUEST_GZIP_BUDGET_BYTES,
     },
-  }, null, 2));
+  };
+  if (process.env.OZW_VERIFY_ENTRY_REPORT === '1') {
+    console.log(JSON.stringify(summary, null, 2));
+  }
 }
 
 verifyProductionEntry();
