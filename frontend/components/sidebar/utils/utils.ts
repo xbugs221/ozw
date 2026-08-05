@@ -112,30 +112,20 @@ const compareDescendingNumber = (left: number, right: number): number => {
 };
 
 /**
- * Find a comparable sort key for a manual session, newest first.
+ * Sort manual sessions by creation time, newest first.
  *
- * ozw-routed sessions (codex/pi with a `c<number>` route id) sort by their route
- * number. Provider-discovered sessions such as Claude carry only a UUID and lack
- * a route index; pinning them to -Infinity would sink fresh Claude sessions
- * below days-old codex cards, hiding them under the default 5-card preview.
- * Fall back to activity/creation time for those so they interleave correctly.
+ * Creation time is the primary key so provider-discovered sessions (Claude,
+ * which carries only a UUID) interleave with ozw-routed sessions (codex/pi,
+ * which carry `c<number>` route ids) by real recency. The route number only
+ * breaks ties between sessions created at the same instant; without this
+ * tie-breaker, routeIndex-less sessions would collapse to -Infinity and sink
+ * below days-old routed cards, hiding fresh Claude sessions under the default
+ * 5-card preview.
  */
 export const compareSessionsByCreationNumber = (
   sessionA: SessionWithProvider,
   sessionB: SessionWithProvider,
 ): number => {
-  const routeIndexA = getSessionRouteIndex(sessionA);
-  const routeIndexB = getSessionRouteIndex(sessionB);
-
-  if (routeIndexA !== null && routeIndexB !== null) {
-    return routeIndexB - routeIndexA;
-  }
-
-  // Mixed identifier schemes (e.g. a routed codex session against a
-  // provider-discovered Claude UUID session) are not comparable by route
-  // number, so fall back to creation time. Without this, routeIndex-less
-  // sessions collapse to -Infinity and sink below days-old routed cards,
-  // hiding fresh Claude sessions under the default 5-card preview.
   const byTime = compareDescendingNumber(
     getSessionCreatedTime(sessionA),
     getSessionCreatedTime(sessionB),
@@ -144,6 +134,8 @@ export const compareSessionsByCreationNumber = (
     return byTime;
   }
 
+  const routeIndexA = getSessionRouteIndex(sessionA);
+  const routeIndexB = getSessionRouteIndex(sessionB);
   return (routeIndexB ?? Number.NEGATIVE_INFINITY) - (routeIndexA ?? Number.NEGATIVE_INFINITY);
 };
 
