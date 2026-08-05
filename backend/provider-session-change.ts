@@ -90,6 +90,14 @@ function extractProviderSessionMetadata(
     };
   }
 
+  if (provider === 'claude') {
+    return {
+      routeSessionId,
+      providerSessionId: stringValue(firstRecord?.sessionId) || fallbackProviderSessionId,
+      projectPath: stringValue(firstRecord?.cwd),
+    };
+  }
+
   return {
     routeSessionId,
     providerSessionId: fallbackProviderSessionId,

@@ -112,7 +112,13 @@ const compareDescendingNumber = (left: number, right: number): number => {
 };
 
 /**
- * Sort manual sessions by fixed creation number, newest first.
+ * Find a comparable sort key for a manual session, newest first.
+ *
+ * ozw-routed sessions (codex/pi with a `c<number>` route id) sort by their route
+ * number. Provider-discovered sessions such as Claude carry only a UUID and lack
+ * a route index; pinning them to -Infinity would sink fresh Claude sessions
+ * below days-old codex cards, hiding them under the default 5-card preview.
+ * Fall back to activity/creation time for those so they interleave correctly.
  */
 export const compareSessionsByCreationNumber = (
   sessionA: SessionWithProvider,
@@ -121,11 +127,24 @@ export const compareSessionsByCreationNumber = (
   const routeIndexA = getSessionRouteIndex(sessionA);
   const routeIndexB = getSessionRouteIndex(sessionB);
 
-  if (routeIndexA !== null || routeIndexB !== null) {
-    return (routeIndexB ?? Number.NEGATIVE_INFINITY) - (routeIndexA ?? Number.NEGATIVE_INFINITY);
+  if (routeIndexA !== null && routeIndexB !== null) {
+    return routeIndexB - routeIndexA;
   }
 
-  return getSessionCreatedTime(sessionB) - getSessionCreatedTime(sessionA);
+  // Mixed identifier schemes (e.g. a routed codex session against a
+  // provider-discovered Claude UUID session) are not comparable by route
+  // number, so fall back to creation time. Without this, routeIndex-less
+  // sessions collapse to -Infinity and sink below days-old routed cards,
+  // hiding fresh Claude sessions under the default 5-card preview.
+  const byTime = compareDescendingNumber(
+    getSessionCreatedTime(sessionA),
+    getSessionCreatedTime(sessionB),
+  );
+  if (byTime !== 0) {
+    return byTime;
+  }
+
+  return (routeIndexB ?? Number.NEGATIVE_INFINITY) - (routeIndexA ?? Number.NEGATIVE_INFINITY);
 };
 
 /**

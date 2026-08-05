@@ -210,6 +210,7 @@ export default function AppContent() {
       || (project.sessions || []).some((session) => session.id === targetSessionId)
       || (project.codexSessions || []).some((session) => session.id === targetSessionId)
       || (project.piSessions || []).some((session) => session.id === targetSessionId)
+      || (project.claudeSessions || []).some((session) => session.id === targetSessionId)
       || (project.workflows || []).some((workflow) => (
         workflowHasTargetChildSession(workflow)
       ))
@@ -219,6 +220,7 @@ export default function AppContent() {
           ...(matchingProject.sessions || []),
           ...(matchingProject.codexSessions || []),
           ...(matchingProject.piSessions || []),
+          ...(matchingProject.claudeSessions || []),
         ].find((session) => (
           session.id === targetSessionId
           && (!requestedProvider || getSessionProvider(session, requestedProvider) === requestedProvider)

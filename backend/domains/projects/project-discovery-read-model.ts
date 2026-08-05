@@ -352,7 +352,7 @@ function filterAndDisambiguateProjects(projects: LooseRecord[]): LooseRecord[] {
  */
 function isEmptyGoTestProject(project: LooseRecord): boolean {
   const projectPath = String(project.fullPath || project.path || '');
-  const hasSessions = ['sessions', 'codexSessions', 'piSessions', 'opencodeSessions']
+  const hasSessions = ['sessions', 'codexSessions', 'piSessions', 'claudeSessions', 'opencodeSessions']
     .some((key) => Array.isArray(project[key]) && project[key].length > 0);
   return !hasSessions && __projectDiscoveryForTest.isGoTestTempProjectPath(projectPath);
 }

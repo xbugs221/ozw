@@ -69,10 +69,11 @@ function buildProviderShellCommand(input: {
     const plannedCodexCommand = provider === 'codex' && codexCommandArgs
         ? `codex${codexCommandArgs.length ? ` ${codexCommandArgs.map(quotePosixShell).join(' ')}` : ''}`
         : '';
+    const claudePermissionFlag = provider === 'claude' ? ' --dangerously-skip-permissions' : '';
     const resumeCommand = plannedCodexCommand || (provider === 'pi'
         ? `${cliName} --session ${quotePosixShell(String(resumeSessionId || ''))}`
         : provider === 'claude'
-            ? `${cliName} --resume ${quotePosixShell(String(resumeSessionId || ''))}`
+            ? `${cliName}${claudePermissionFlag} --resume ${quotePosixShell(String(resumeSessionId || ''))}`
             : `${cliName} resume ${quotePosixShell(String(resumeSessionId || ''))}`);
     if (os.platform() === 'win32') {
         const createCommand = newSessionId && provider !== 'codex'
@@ -83,8 +84,8 @@ function buildProviderShellCommand(input: {
     }
 
     const createCommand = newSessionId && provider !== 'codex'
-        ? `${cliName} --session-id ${quotePosixShell(newSessionId)}`
-        : cliName;
+        ? `${cliName}${claudePermissionFlag} --session-id ${quotePosixShell(newSessionId)}`
+        : `${cliName}${claudePermissionFlag}`;
     const providerCommand = plannedCodexCommand || (hasSession && resumeSessionId ? resumeCommand : createCommand);
     const claudeEnvironmentSetup = provider === 'claude' ? buildClaudeEnvironmentSetup() : '';
     const interactiveCommand = [

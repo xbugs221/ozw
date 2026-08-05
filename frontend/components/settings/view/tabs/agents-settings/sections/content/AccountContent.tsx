@@ -33,6 +33,13 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
     textClass: 'text-violet-900 dark:text-violet-100',
     subtextClass: 'text-violet-700 dark:text-violet-300',
   },
+  claude: {
+    name: 'Claude',
+    bgClass: 'bg-orange-50 dark:bg-orange-900/20',
+    borderClass: 'border-orange-200 dark:border-orange-800',
+    textClass: 'text-orange-900 dark:text-orange-100',
+    subtextClass: 'text-orange-700 dark:text-orange-300',
+  },
 };
 
 type AgentStatus = {
