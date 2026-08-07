@@ -82,7 +82,7 @@ ozw turns your coding tasks into persistent, resumable Web sessions. When combin
 
 5. **Go Global (Recommended):** Map the service port to an HTTPS domain with `frp`, `nps`, or Cloudflare Tunnel to enable cross-device relay.
 
-See [docs/quickstart_en.md](docs/quickstart_en.md) for more details.
+See [docs/quickstart_en.md](docs/quickstart_en.md) for more details, and [CHANGELOG.md](CHANGELOG.md) for per-release changes.
 
 ---
 

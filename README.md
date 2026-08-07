@@ -88,7 +88,7 @@
 
 6. **安装到手机桌面：** ozw 发布了 PWA 入口。手机浏览器打开 HTTPS 地址后，可以通过“添加到主屏幕”保存桌面图标；相关资源位于 `/manifest.webmanifest`、`/sw.js`、`/pwa/icon-192.png` 和 `/pwa/icon-512.png`。
 
-更多技术细节请参考 [docs/quickstart.md](docs/quickstart.md)。
+更多技术细节请参考 [docs/quickstart.md](docs/quickstart.md)，各版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
