@@ -75,12 +75,64 @@ export function createProviderWatcherController(deps: any) {
     }
 
     /**
-     * Use polling for provider transcript trees by default so large Codex/Pi
-     * histories do not exhaust inotify descriptors and silently disable realtime.
+     * Provider transcript trees default to native inotify (fs.watch) instead of
+     * polling. ozw's four watch roots need only ~280 directory watches total —
+     * a rounding error against fs.inotify.max_user_watches (~524k) — so the
+     * historical "inotify exhaustion" that motivated polling was a host-wide
+     * max_user_instances pool issue, not an ozw footprint problem. Polling every
+     * 1s stat's thousands of session files (~7400 syscalls/s) and shows up as a
+     * constant kernel-time (stime) CPU drain; inotify is event-driven at ~0 idle
+     * cost with millisecond latency.
+     *
+     * Opt back into polling only when the watch root lives on a filesystem that
+     * can't deliver inotify events reliably (NFS/remote mounts), or when a host
+     * genuinely cannot raise its inotify pool. Set OZW_PROVIDER_WATCH_USE_POLLING=1.
      */
     function shouldUseProviderPolling() {
         const rawValue = String(process.env.OZW_PROVIDER_WATCH_USE_POLLING || process.env.CHOKIDAR_USEPOLLING || '').trim().toLowerCase();
-        return rawValue !== '0' && rawValue !== 'false' && rawValue !== 'no';
+        return rawValue === '1' || rawValue === 'true' || rawValue === 'yes';
+    }
+
+    /**
+     * Build one provider root watcher, falling back from native inotify to
+     * polling only for the single root that fails to arm (e.g. ENOSPC when the
+     * host inotify pool is genuinely exhausted). Other roots keep using inotify
+     * so a single deficit doesn't force full-tree polling across every provider.
+     */
+    async function createProviderRootWatcher(rootPath: string, provider: string) {
+        const usePolling = shouldUseProviderPolling();
+        const baseOptions: LooseRecord = {
+            ignored: WATCHER_IGNORED_PATTERNS,
+            persistent: true,
+            ignoreInitial: true,
+            followSymlinks: false,
+            depth: 10,
+            awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
+        };
+        const buildOptions = (polling: boolean): LooseRecord => {
+            const opts: LooseRecord = { ...baseOptions, usePolling: polling };
+            if (polling) {
+                const pollIntervalMs = Number.isFinite(PROVIDER_WATCH_POLLING_INTERVAL_MS) && PROVIDER_WATCH_POLLING_INTERVAL_MS > 0
+                    ? PROVIDER_WATCH_POLLING_INTERVAL_MS
+                    : 1000;
+                opts.interval = pollIntervalMs;
+                opts.binaryInterval = pollIntervalMs;
+            }
+            return opts;
+        };
+        try {
+            return { watcher: (await import('chokidar')).default.watch(rootPath, buildOptions(usePolling)), fellBackToPolling: false };
+        } catch (setupError: any) {
+            if (usePolling) throw setupError;
+            // inotify arm failed (typical: ENOSPC/EMFILE on a host-wide pool).
+            // Degrade this one root to polling rather than losing realtime, and
+            // surface it so the operator can raise fs.inotify.* limits.
+            console.warn(
+                `[WARN] ${provider} inotify watcher failed (${setupError?.message || setupError}); falling back to polling for ${rootPath}. ` +
+                `Raising fs.inotify.max_user_watches / max_user_instances restores event-driven realtime.`,
+            );
+            return { watcher: (await import('chokidar')).default.watch(rootPath, buildOptions(true)), fellBackToPolling: true };
+        }
     }
 
     /**
@@ -288,25 +340,12 @@ export function createProviderWatcherController(deps: any) {
                 // Ensure provider folders exist before creating the watcher so watching stays active.
                 await fsPromises.mkdir(rootPath, { recursive: true });
 
-                // Initialize chokidar watcher with optimized settings
-                const watcher = chokidar.watch(rootPath, {
-                    ignored: WATCHER_IGNORED_PATTERNS,
-                    persistent: true,
-                    ignoreInitial: true, // Don't fire events for existing files on startup
-                    followSymlinks: false,
-                    depth: 10, // Reasonable depth limit
-                    usePolling: shouldUseProviderPolling(),
-                    interval: Number.isFinite(PROVIDER_WATCH_POLLING_INTERVAL_MS) && PROVIDER_WATCH_POLLING_INTERVAL_MS > 0
-                        ? PROVIDER_WATCH_POLLING_INTERVAL_MS
-                        : 1000,
-                    binaryInterval: Number.isFinite(PROVIDER_WATCH_POLLING_INTERVAL_MS) && PROVIDER_WATCH_POLLING_INTERVAL_MS > 0
-                        ? PROVIDER_WATCH_POLLING_INTERVAL_MS
-                        : 1000,
-                    awaitWriteFinish: {
-                        stabilityThreshold: 100, // Wait 100ms for file to stabilize
-                        pollInterval: 50
-                    }
-                });
+                // Initialize chokidar watcher. Default is native inotify
+                // (event-driven, ~0 idle CPU); createProviderRootWatcher handles
+                // the per-root inotify→polling fallback if a host pool is
+                // genuinely exhausted. Polling can be forced per deployment via
+                // OZW_PROVIDER_WATCH_USE_POLLING for non-inotify filesystems.
+                const { watcher } = await createProviderRootWatcher(rootPath, provider);
 
                 const readyPromise = new Promise<void>((resolve) => {
                     const readyTimer = setTimeout(resolve, 1000);
