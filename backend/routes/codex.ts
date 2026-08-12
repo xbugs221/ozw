@@ -14,6 +14,7 @@ import {
   formatCodexCliNotFoundMessage,
   resolveCodexCliPath,
 } from '../codex-cli.js';
+import { buildPortableCodexSpawnEnv } from '../domains/codex-app-server/stdio-transport.js';
 
 const router = express.Router();
 
@@ -32,8 +33,10 @@ function createCliResponder(res: express.Response) {
  * Spawn the resolved Codex CLI for MCP management routes.
  */
 function spawnCodexCli(args: string[]) {
-  const cliPath = resolveCodexCliPath();
-  const proc = spawn(cliPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  /** 用补齐了用户级 bin 的 env 解析并启动 codex，避免 systemd 受限 PATH 导致 ENOENT。 */
+  const spawnEnv = buildPortableCodexSpawnEnv();
+  const cliPath = resolveCodexCliPath({ env: spawnEnv });
+  const proc = spawn(cliPath, args, { stdio: ['pipe', 'pipe', 'pipe'], env: spawnEnv });
   return { proc, cliPath };
 }
 

@@ -98,9 +98,21 @@ function mergeSessionTitle(
   const legacyPrefix = Array.from(providerTitle).slice(0, 50).join('');
   const isLegacyAutoSummary = providerTitle.length > legacyPrefix.length
     && routeTitle === `${legacyPrefix}...`;
-  return isGeneratedManualRouteTitle(routeValue, routeSession) || isLegacyAutoSummary
+  return isGeneratedManualRouteTitle(routeValue, routeSession)
+    || isLegacyAutoSummary
+    || isProviderFallbackPlaceholder(routeValue)
     ? (providerValue || routeValue)
     : routeValue;
+}
+
+/**
+ * Identify provider fallback placeholders persisted into route metadata before
+ * first-user-message extraction was complete, so a repaired provider header can
+ * replace the stale "Codex Session" / "Pi Session" / "Claude Session" label.
+ */
+function isProviderFallbackPlaceholder(value: unknown): boolean {
+  const title = String(value || '').trim();
+  return title === 'Codex Session' || title === 'Pi Session' || title === 'Claude Session';
 }
 
 /**

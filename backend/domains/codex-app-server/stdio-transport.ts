@@ -34,6 +34,39 @@ export function buildCodexAppServerCliArgs(socketPath = getCodexDaemonSocketPath
   return ['app-server', 'proxy', '--sock', socketPath];
 }
 
+/**
+ * 把用户级 bin（pnpm/bin、.local/bin、cargo/bin 等）合并进 spawn env 的 PATH。
+ * 业务意义：systemd 用户服务 PATH 不含 pnpm/bin，spawn('codex') 会 ENOENT，
+ * 使 shared-thread probe 永远 not-ready，从而导致所有接管按钮被隐藏。
+ */
+const PORTABLE_BIN_SEGMENTS = [
+  '.local/share/pnpm/bin',
+  '.local/share/pnpm',
+  '.local/bin',
+  '.bun/bin',
+  '.cargo/bin',
+  'bin',
+];
+
+/** 解析包含用户级 bin 目录的 PATH，保留入参 PATH 中已有的段。 */
+export function resolvePortableCodexPath(baseEnv: NodeJS.ProcessEnv = process.env): string {
+  const home = typeof baseEnv.HOME === 'string' && baseEnv.HOME ? baseEnv.HOME : homedir();
+  const inheritedPath = typeof baseEnv.PATH === 'string' && baseEnv.PATH ? baseEnv.PATH : '';
+  const merged = PORTABLE_BIN_SEGMENTS.map((segment) => path.join(home, segment));
+  for (const segment of inheritedPath.split(':')) {
+    const trimmed = segment.trim();
+    if (trimmed && !merged.includes(trimmed)) {
+      merged.push(trimmed);
+    }
+  }
+  return merged.join(':');
+}
+
+/** 给 spawn/execFile 用的 env，克隆后只替换 PATH。 */
+export function buildPortableCodexSpawnEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...baseEnv, PATH: resolvePortableCodexPath(baseEnv) };
+}
+
 /** 异步验证系统服务客户端能力与 Socket，并返回 proxy 参数。 */
 async function prepareProductionTransport(): Promise<ProductionTransportLaunch> {
   const codexHome = process.env.CODEX_HOME || path.join(homedir(), '.codex');
@@ -53,13 +86,13 @@ async function prepareProductionTransport(): Promise<ProductionTransportLaunch> 
   }
   return {
     args: plan.proxyArgs || buildCodexAppServerCliArgs(socketPath),
-    env: process.env,
+    env: buildPortableCodexSpawnEnv(),
   };
 }
 
 /** 启动一条连接共享 daemon 的 proxy transport。 */
 function spawnSharedProxy(launch: ProductionTransportLaunch, options: JsonRpcLineTransportOptions): CodexAppServerTransport {
-  const child = spawn('codex', launch.args, { stdio: ['pipe', 'pipe', 'pipe'], env: launch.env });
+  const child = spawn('codex', launch.args, { stdio: ['pipe', 'pipe', 'pipe'], env: buildPortableCodexSpawnEnv(launch.env) });
   return createWebSocketProxyTransport(child, options);
 }
 

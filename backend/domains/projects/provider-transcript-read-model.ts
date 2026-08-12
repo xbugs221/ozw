@@ -119,6 +119,23 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     if (record.type === 'response_item' && record.payload?.type === 'message') {
       messageCount += 1;
     }
+    /**
+     * docstring: 0.147+ Codex rollouts persist user turns only as
+     * response_item.message.role=user, without emitting event_msg.user_message.
+     * Extract the first visible user request from that shape too, otherwise
+     * newly created sessions fall back to "Codex Session" until they are
+     * reformatted by a later Codex version.
+     */
+    if (
+      record.type === 'response_item'
+      && record.payload?.type === 'message'
+      && record.payload?.role === 'user'
+    ) {
+      const content = cleanCodexUserContent(stringifyMessageContent(record.payload.content));
+      if (content && !isCodexInternalUserContent(content)) {
+        firstUserMessage ||= content;
+      }
+    }
   }
   if (!cwd) {
     return null;

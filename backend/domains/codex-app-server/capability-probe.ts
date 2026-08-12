@@ -4,6 +4,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { buildPortableCodexSpawnEnv } from './stdio-transport.js';
 
 const DEFAULT_CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_CAPABILITY_PROBE_TIMEOUT_MS = 5000;
@@ -47,7 +48,7 @@ function readHelp(command: string, args: string[], options: CodexCapabilityProbe
   return new Promise((resolve, reject) => {
     execFile(command, args, {
       encoding: 'utf8',
-      env: options.env || process.env,
+      env: buildPortableCodexSpawnEnv(options.env || process.env),
       timeout: options.timeoutMs ?? DEFAULT_CAPABILITY_PROBE_TIMEOUT_MS,
     }, (error, stdout, stderr) => {
       if (error) {

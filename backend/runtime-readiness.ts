@@ -9,6 +9,7 @@ import {
   createSuccessfulAsyncProbeCache,
   runAsyncCommandProbe,
 } from './utils/async-command-probe.js';
+import { buildPortableCodexSpawnEnv } from './domains/codex-app-server/stdio-transport.js';
 
 /** Providers that ozw can create and run as new browser conversations. */
 const AGENT_COMMANDS = ['codex', 'pi', 'claude'];
@@ -37,7 +38,8 @@ export async function checkCliAvailability(commandName, options = {}): Promise<C
    * PURPOSE: Report whether the service process can execute one agent CLI
    * without attempting auth flows or reading private credentials.
    */
-  const env = options.env || process.env;
+  /** systemd 单元 PATH 不含 pnpm/bin 等用户级 bin，默认注入便携 PATH 以正确解析 codex/pi/claude。 */
+  const env = options.env ? { ...options.env } : buildPortableCodexSpawnEnv();
   const commandPath = resolveExecutablePath(commandName, { env });
   if (!commandPath) {
     return {
@@ -127,9 +129,10 @@ function buildOzReadiness(ozDiagnostics) {
 export async function buildRuntimeReadinessReport(options = {}) {
   /**
    * PURPOSE: Provide a stable single report for settings, startup diagnostics,
-   * and tests that need oz, Codex, and Pi readiness in one payload.
-   */
-  const env = options.env || process.env;
+  * and tests that need oz, Codex, and Pi readiness in one payload.
+  */
+  /** 与 checkCliAvailability 同步注入便携 PATH，避免 systemd 受限环境误报 CLI 不可用。 */
+  const env = options.env ? { ...options.env } : buildPortableCodexSpawnEnv();
   const [ozDiagnostics, ...agentDiagnostics] = await Promise.all([
     getRuntimeDependencyDiagnostics({ env, timeoutMs: options.timeoutMs }),
     ...AGENT_COMMANDS.map((commandName) => checkCliAvailability(commandName, { env, timeoutMs: options.timeoutMs })),
