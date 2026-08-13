@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { sanitizeChildProcessEnv } from '../security/child-process-env.js';
 import {
     probeSharedCodexThread,
 } from '../domains/codex-app-server/shared-thread-probe.js';
@@ -25,6 +26,11 @@ import {
     takeShellReplay,
 } from './shell-output-batcher.js';
 import { createTmuxTerminalRuntime } from './terminal-tmux-runtime.js';
+import {
+    loadNodePtyRuntime,
+    TerminalUnavailableError,
+    type NodePtyRuntime,
+} from './optional-node-pty.js';
 
 type LooseRecord = Record<string, any>;
 type PendingForceHandoffOffer = {
@@ -173,8 +179,8 @@ async function diagnoseExternalProvider(provider: 'pi' | 'claude'): Promise<stri
  * 业务逻辑：Codex 执行环境可能注入 NO_COLOR；tmux 会在首次创建时固化该变量，
  * 因此在创建 PTY 前移除它，同时明确保留 Ozw 所需的彩色终端能力。
  */
-function buildManagedTerminalEnvironment(): NodeJS.ProcessEnv {
-    const environment = { ...process.env };
+export function buildManagedTerminalEnvironment(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+    const environment = sanitizeChildProcessEnv(baseEnv);
     delete environment.NO_COLOR;
 
     return {
@@ -310,7 +316,8 @@ export function closeShellPtySessions(runtime: any): void {
  * 处理 shell WebSocket 连接、PTY spawn、buffer、resize 和断连保活。
  */
 export function handleShellConnection(deps: any, ws: WebSocket): void {
-    const { ptySessionsMap, PTY_SESSION_TIMEOUT, SHELL_URL_PARSE_BUFFER_LIMIT, stripAnsiSequences, normalizeDetectedUrl, extractUrlsFromText, shouldAutoOpenUrlFromOutput, os, pty, WebSocket } = deps;
+    const { ptySessionsMap, PTY_SESSION_TIMEOUT, SHELL_URL_PARSE_BUFFER_LIMIT, stripAnsiSequences, normalizeDetectedUrl, extractUrlsFromText, shouldAutoOpenUrlFromOutput, os, WebSocket } = deps;
+    const loadPty: () => Promise<NodePtyRuntime> = deps.loadNodePtyRuntime ?? loadNodePtyRuntime;
     // Handle shell WebSocket connections
     function runShellConnection(ws: WebSocket) {
         console.log('🐚 Shell client connected');
@@ -326,6 +333,25 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                 console.log('📨 Shell message received:', data.type);
 
                 if (data.type === 'init') {
+                    let ptyRuntime: NodePtyRuntime;
+                    try {
+                        ptyRuntime = await loadPty();
+                    } catch (error) {
+                        const terminalError = error instanceof TerminalUnavailableError
+                            ? error
+                            : new TerminalUnavailableError(error);
+                        console.warn('[Shell] Optional terminal runtime is unavailable:', terminalError.message);
+                        ws.send(JSON.stringify({
+                            type: 'terminal-unavailable',
+                            reason: 'node-pty-unavailable',
+                            message: terminalError.message,
+                        }));
+                        ws.send(JSON.stringify({
+                            type: 'output',
+                            data: `\x1b[31m${terminalError.message}\x1b[0m\r\n`,
+                        }));
+                        return;
+                    }
                     const projectPath = data.projectPath || process.cwd();
                     const identity = resolveShellSessionIdentity(data);
                     const {
@@ -727,7 +753,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         const termRows = data.rows || 24;
                         console.log('📐 Using terminal dimensions:', termCols, 'x', termRows);
 
-                        shellProcess = pty.spawn(shell, shellArgs, {
+                        shellProcess = ptyRuntime.spawn(shell, shellArgs, {
                             name: 'xterm-256color',
                             cols: termCols,
                             rows: termRows,

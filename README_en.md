@@ -18,6 +18,10 @@ ozw turns your coding tasks into persistent, resumable Web sessions. When combin
 2. **On the Move:** Check the agent's real-time logs and tool calls via your phone's browser.
 3. **At Home:** Pick up exactly where you left off on your laptop, review the code, and finalize the PR.
 
+![Main interface](assets/1.png)
+
+![File manager, terminal, and main interface](assets/2.png)
+
 ### Current Capabilities
 
 | Area | What it does |
@@ -30,59 +34,40 @@ ozw turns your coding tasks into persistent, resumable Web sessions. When combin
 
 ### Quick Start
 
-1. **Prepare the base runtime:** Node.js 26.4.0 is recommended (minimum 24.17.0), with pnpm 11.10.0, matching `.nvmrc` and the `packageManager` field in `package.json`.
+> **Release status:** `ozw` is the current candidate package name. The public NPM package has not been published, and package ownership and release acceptance are still pending. The registry commands below are the **post-release interface**; do not install the same name from the public registry yet.
 
-   ```sh
-   corepack enable
-   corepack prepare pnpm@11.10.0 --activate
-   node --version
-   pnpm --version
-   ```
+After publication, use the global install path:
 
-2. **Install `oz`:** ozw checks `oz flow contract --json` during startup, uses `oz list` to discover active changes, and uses `oz flow` to run workflows, so `oz` must be available on the service process `PATH`.
+```sh
+npm install -g ozw
+ozw
+```
 
-   Option A: download the binary for your OS and architecture from [oz Releases](https://github.com/xbugs221/oz/releases), then make it executable:
+Before publication, install only a candidate tarball supplied by the maintainers:
 
-   ```sh
-   mkdir -p ~/.local/bin
-   mv ~/Downloads/oz ~/.local/bin/oz
-   chmod +x ~/.local/bin/oz
-   oz --version
-   ```
+```sh
+npm install -g ./ozw-VERSION.tgz
+ozw
+```
 
-   If your shell still cannot find `oz`, add `~/.local/bin` to `PATH`.
+The first run creates `~/.ozw`, generates a 32-character `OZW_ACCESS_TOKEN`, and prints the login URL. An interactive terminal prints a newly generated token once; non-interactive runs such as systemd or redirected output never write it to logs. Read it from `~/.ozw/.env`. The default URL is `http://127.0.0.1:3001` and is local-only.
 
-   Option B: install directly with Go:
+`oz`, Codex, and Pi are optional, capability-specific dependencies. Missing tools do not prevent the workbench from starting; they disable only the corresponding workflows or sessions. Check runtime diagnostics in Settings after startup.
 
-   ```sh
-   go install github.com/xbugs221/oz@latest
-   oz --version
-   ```
+`node-pty` is an optional Web-terminal dependency: without it, the base HTTP/Web UI starts normally but terminals are unavailable; reinstall optional dependencies to restore them.
 
-3. **Prepare chat providers:** ozw only requires `oz` to start. For Codex, first run an authenticated `codex app-server` daemon independently under the system service manager; ozw only connects as a client and never starts, stops, restarts, or configures its permission policy. Pi sessions use the native Pi runtime.
+Remote access requires an explicit bind-address change and a trusted HTTPS reverse proxy or tunnel. Never expose ozw directly to the public Internet: it can access repositories, terminals, and provider credentials.
 
-4. **Launch ozw:**
+Upgrade and uninstall with:
 
-   ```sh
-   pnpm install
-   cp .env.example .env
-   openssl rand -hex 16  # copy the output to OZW_ACCESS_TOKEN in .env
-   pnpm start
-   ```
+```sh
+npm update -g ozw
+npm uninstall -g ozw
+```
 
-   `OZW_ACCESS_TOKEN` must contain exactly 32 characters. `pnpm start` builds the frontend and backend, then serves the Web UI, API, and WebSocket from `PORT=3001` by default. Enter that token on first access; there is no account creation or selection. ozw generates the JWT signing secret automatically for internal sessions only.
+Both upgrade and uninstall preserve configuration and databases under `~/.ozw`. See the [Quick Start](docs/quickstart_en.md) for source development, candidate-package acceptance, remote access, and data removal; see [Troubleshooting](docs/troubleshooting_en.md) for common failures and [CHANGELOG.md](CHANGELOG.md) for release changes.
 
-   For development, run the split dev servers:
-
-   ```sh
-   pnpm dev
-   ```
-
-   Development mode defaults to frontend `5173` and backend `3001`; production mode usually only needs `3001` exposed.
-
-5. **Go Global (Recommended):** Map the service port to an HTTPS domain with `frp`, `nps`, or Cloudflare Tunnel to enable cross-device relay.
-
-See [docs/quickstart_en.md](docs/quickstart_en.md) for more details, and [CHANGELOG.md](CHANGELOG.md) for per-release changes.
+When accessed over HTTPS, the PWA can be added to a phone's home screen.
 
 ---
 

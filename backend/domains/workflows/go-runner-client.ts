@@ -8,6 +8,7 @@ import { promises as fs } from 'fs';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { resolveFlowRunStatePath } from './flow-runtime-paths.js';
+import { sanitizeChildProcessEnv } from '../../security/child-process-env.js';
 
 const execFileAsync = promisify(execFile);
 const RUNNER_COMMAND = 'oz';
@@ -27,6 +28,7 @@ function runnerArgs(args) {
 async function runWoJson(args, projectPath) {
   const { stdout } = await execFileAsync(RUNNER_COMMAND, runnerArgs(args), {
     cwd: projectPath,
+    env: sanitizeChildProcessEnv(process.env),
     timeout: 10000,
     maxBuffer: 1024 * 1024 * 4,
   });
@@ -107,6 +109,7 @@ function waitForStateRetryOrRunnerExit(child) {
 async function spawnWoRun(args, projectPath) {
   const child = spawn(RUNNER_COMMAND, runnerArgs(args), {
     cwd: projectPath,
+    env: sanitizeChildProcessEnv(process.env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

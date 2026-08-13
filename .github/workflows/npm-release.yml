@@ -1,0 +1,420 @@
+name: NPM release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      confirm_version:
+        description: Exact package version to publish (for example, 1.3.5)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: Build candidate once
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+       startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    outputs:
+      package_version: ${{ steps.package.outputs.version }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 11.17.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run quality gate
+        run: pnpm run test:ci
+
+      - name: Check release version and tag
+        id: package
+        shell: bash
+        env:
+          CONFIRM_VERSION: ${{ inputs.confirm_version }}
+        run: |
+          package_version="$(node --input-type=module -e "import pkg from './package.json' with { type: 'json' }; process.stdout.write(pkg.version)")"
+          if [[ "${GITHUB_REF_TYPE}" != "tag" || "${GITHUB_REF_NAME}" != "v${package_version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${package_version}" >&2
+            exit 1
+          fi
+          if [[ ! "${package_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must be stable SemVer (x.y.z): ${package_version}" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${CONFIRM_VERSION}" != "${package_version}" ]]; then
+            echo "Confirmed version ${CONFIRM_VERSION} does not match package version ${package_version}" >&2
+            exit 1
+          fi
+          echo "version=${package_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build production assets once
+        run: pnpm run build
+
+      - name: Exercise the real global-install lifecycle
+        run: pnpm run test:npm:package
+
+      - name: Create candidate tarball
+        id: pack
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          npm pack --ignore-scripts --json > npm-pack.json
+          tarball="$(node --input-type=module -e "import fs from 'node:fs'; const result = JSON.parse(fs.readFileSync('npm-pack.json', 'utf8')); const candidate = result[0]; if (result.length !== 1 || candidate.name !== 'ozw' || candidate.version !== process.argv[1]) throw new Error('Packed identity does not match ozw@' + process.argv[1]); process.stdout.write(candidate.filename)" "${PACKAGE_VERSION}")"
+          pnpm run verify:npm-package -- "${tarball}"
+          node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const file = process.argv[1]; const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); fs.writeFileSync('npm-package.sha256.json', JSON.stringify({ name: 'ozw', version: process.argv[2], filename: path.basename(file), sha256 }, null, 2) + '\n')" "${tarball}" "${PACKAGE_VERSION}"
+          echo "tarball=${tarball}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload immutable candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-candidate
+          path: |
+            ${{ steps.pack.outputs.tarball }}
+            npm-package.sha256.json
+          if-no-files-found: error
+          retention-days: 14
+
+  install-matrix:
+    name: Install / ${{ matrix.os }} / Node ${{ matrix.node }}
+    needs: candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['24.17.0', '26.4.0']
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out verifier
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install npm with explicit install-script policy support
+        run: npm install --global npm@11.18.0
+
+      - name: Download immutable candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-candidate
+          path: candidate
+
+      - name: Verify candidate identity and contents
+        id: candidate
+        run: node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync(path.join('candidate', 'npm-package.sha256.json'), 'utf8')); if (manifest.name !== 'ozw' || manifest.version !== process.argv[1] || path.basename(manifest.filename) !== manifest.filename || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Invalid candidate manifest'); const tarball = path.join('candidate', manifest.filename); const actual = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'); if (actual !== manifest.sha256) throw new Error('Candidate SHA-256 mismatch'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tarball=' + tarball + '\n')" "${{ needs.candidate.outputs.package_version }}"
+
+      - name: Audit candidate contents
+        run: node scripts/verify-npm-package.mjs "${{ steps.candidate.outputs.tarball }}"
+
+      - name: Install candidate globally
+        env:
+          OZW_TEST_PREFIX: ${{ runner.temp }}/ozw-global
+        run: >-
+          npm install --global --prefix "${{ env.OZW_TEST_PREFIX }}"
+          "${{ steps.candidate.outputs.tarball }}"
+
+      - name: Exercise native modules, user state, and startup
+        env:
+          EXPECTED_VERSION: ${{ needs.candidate.outputs.package_version }}
+          OZW_TEST_PREFIX: ${{ runner.temp }}/ozw-global
+        run: >-
+          node --input-type=module -e "import crypto from 'node:crypto';
+          import { execFileSync, spawn } from 'node:child_process'; import fs from 'node:fs';
+          import net from 'node:net'; import os from 'node:os'; import path from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const installPrefix = path.resolve(process.env.OZW_TEST_PREFIX);
+          const globalRoot = process.platform === 'win32' ? path.join(installPrefix, 'node_modules') : path.join(installPrefix, 'lib', 'node_modules');
+          const packageRoot = path.join(globalRoot, 'ozw');
+          const cliPath = path.join(packageRoot, 'dist-node', 'backend', 'cli.js');
+          const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ozw-release-'));
+          const isolatedHome = path.join(probeRoot, 'home'); const ozwHome = path.join(isolatedHome, '.ozw');
+          fs.mkdirSync(isolatedHome, { recursive: true });
+          const port = await new Promise((resolve, reject) => { const server = net.createServer();
+          server.once('error', reject); server.listen(0, '127.0.0.1', () => { const address = server.address();
+          if (!address || typeof address === 'string') { server.close(); reject(new Error('Could not reserve a probe port')); return; }
+          server.close(error => error ? reject(error) : resolve(address.port)); }); });
+          const runtimeEnv = { ...process.env, HOME: isolatedHome, USERPROFILE: isolatedHome,
+          OZW_HOME: ozwHome, XDG_STATE_HOME: path.join(isolatedHome, '.local', 'state'),
+          HOST: '127.0.0.1', PORT: String(port), SESSION_PATH_SCAN_INTERVAL_MS: '0' };
+          delete runtimeEnv.OZW_ACCESS_TOKEN; delete runtimeEnv.DATABASE_PATH;
+          const listFiles = directory => { const files = [];
+          const visit = current => { for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+          const absolute = path.join(current, entry.name); const relative = path.relative(directory, absolute);
+          if (entry.isDirectory()) visit(absolute); else files.push(relative); } };
+          visit(directory); return files.sort(); };
+          const installDigest = () => { const hash = crypto.createHash('sha256');
+          for (const relative of listFiles(installPrefix)) { const file = path.join(installPrefix, relative);
+          const stats = fs.lstatSync(file); hash.update(relative); hash.update(String(stats.mode & 0o777));
+          if (stats.isSymbolicLink()) hash.update('link:' + fs.readlinkSync(file));
+          else if (stats.isFile()) { hash.update(String(stats.size)); hash.update(fs.readFileSync(file)); }
+          else throw new Error('Unexpected package entry: ' + relative); } return hash.digest('hex'); };
+          if (process.platform === 'darwin') { const runtimeUrl = pathToFileURL(path.join(packageRoot,
+          'dist-node', 'backend', 'server', 'node-pty-runtime.js')).href;
+          const { prepareNodePtyRuntime } = await import(runtimeUrl); prepareNodePtyRuntime(); }
+          const beforeDigest = installDigest();
+          let child;
+          try {
+          const version = execFileSync(process.execPath, [cliPath, '--version'], { env: runtimeEnv, encoding: 'utf8' }).trim();
+          if (version !== process.env.EXPECTED_VERSION) throw new Error('Installed version mismatch: ' + version);
+          const status = execFileSync(process.execPath, [cliPath, 'status'], { env: runtimeEnv, encoding: 'utf8', timeout: 5000 });
+          if (!status.includes('Not configured') || fs.existsSync(ozwHome)) throw new Error('ozw status must be read-only');
+          const ptyUrl = pathToFileURL(path.join(packageRoot, 'node_modules', 'node-pty', 'lib', 'index.js')).href;
+          const { spawn: spawnPty } = await import(ptyUrl); const marker = 'ozw-node-pty-ok';
+          const shell = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : (process.env.SHELL || '/bin/sh');
+          if (process.platform === 'darwin') { const helper = path.join(packageRoot, 'node_modules', 'node-pty',
+          'prebuilds', process.platform + '-' + process.arch, 'spawn-helper'); const mode = fs.statSync(helper).mode;
+          if ((mode & 0o111) === 0) throw new Error('node-pty spawn-helper is not executable after npm install'); }
+          const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'echo ' + marker] : ['-c', 'printf ' + marker];
+          await new Promise((resolve, reject) => { const terminal = spawnPty(shell, shellArgs,
+          { name: 'xterm-color', cols: 80, rows: 24, cwd: probeRoot, env: runtimeEnv }); let output = ''; let settled = false;
+          const timer = setTimeout(() => { if (!settled) { settled = true; terminal.kill(); reject(new Error('node-pty probe timed out')); } }, 10000);
+          terminal.onData(data => { output += data; }); terminal.onExit(({ exitCode }) => { if (settled) return; settled = true;
+          clearTimeout(timer); if (exitCode === 0 && output.includes(marker)) resolve(); else reject(new Error('node-pty probe failed')); }); });
+          child = spawn(process.execPath, [cliPath, 'start'], { env: runtimeEnv, stdio: ['ignore', 'ignore', 'pipe'] });
+          let stderr = ''; child.stderr.on('data', chunk => { stderr += String(chunk); });
+          const exitPromise = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
+          const deadline = Date.now() + 30000; let health;
+          while (Date.now() < deadline) { const exited = await Promise.race([exitPromise, new Promise(resolve => setTimeout(() => resolve(null), 250))]);
+          if (exited) throw new Error('ozw exited before health check: ' + stderr.slice(-1000));
+          try { const response = await fetch('http://127.0.0.1:' + port + '/health', { signal: AbortSignal.timeout(2000) });
+          if (response.ok) { health = await response.json(); break; } } catch {} }
+          if (health?.status !== 'ok') throw new Error('ozw health check timed out');
+          const page = await fetch('http://127.0.0.1:' + port + '/', { signal: AbortSignal.timeout(5000) });
+          if (!page.ok || !(await page.text()).includes('<html')) throw new Error('ozw homepage probe failed');
+          child.kill('SIGTERM'); const exited = await Promise.race([exitPromise, new Promise(resolve => setTimeout(() => resolve(null), 10000))]);
+          if (!exited) { child.kill('SIGKILL'); throw new Error('ozw did not stop after SIGTERM'); }
+          for (const required of ['.env', '.jwt-secret', 'ozw.db']) if (!fs.statSync(path.join(ozwHome, required), { throwIfNoEntry: false })?.isFile()) throw new Error('Missing user state: ' + required);
+          const envContents = fs.readFileSync(path.join(ozwHome, '.env'), 'utf8');
+          if (!/^OZW_ACCESS_TOKEN=.{32}$/mu.test(envContents)) throw new Error('Persisted access token is invalid');
+          if (installDigest() !== beforeDigest) throw new Error('Runtime modified the global installation'); }
+          finally { if (child && child.exitCode === null) child.kill('SIGKILL');
+          fs.rmSync(probeRoot, { recursive: true, force: true }); }"
+
+  optional-dependency-health:
+    name: Base runtime without optional dependencies
+    needs: candidate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26.4.0
+
+      - name: Download immutable candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-candidate
+          path: candidate
+
+      - name: Install without optional dependencies and check base runtime
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.candidate.outputs.package_version }}
+          OZW_TEST_PREFIX: ${{ runner.temp }}/ozw-without-optional
+          OZW_TEST_HOME: ${{ runner.temp }}/ozw-without-optional-home
+        run: |
+          set -euo pipefail
+          tarball="$(node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync('candidate/npm-package.sha256.json', 'utf8')); const file = path.join('candidate', manifest.filename); const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); if (manifest.name !== 'ozw' || manifest.version !== process.env.EXPECTED_VERSION || sha256 !== manifest.sha256) throw new Error('Candidate identity mismatch'); process.stdout.write(file)")"
+          package_root="${OZW_TEST_PREFIX}/lib/node_modules/ozw"
+          mkdir -p "${OZW_TEST_HOME}"
+          mkdir -p "$(dirname "${package_root}")"
+          (
+            cd "$(dirname "${package_root}")"
+            npm install --omit=optional "${GITHUB_WORKSPACE}/${tarball}"
+          )
+          mkdir -p "${OZW_TEST_PREFIX}/bin"
+          ln -s "${package_root}/dist-node/backend/cli.js" "${OZW_TEST_PREFIX}/bin/ozw"
+          cli_path="${package_root}/dist-node/backend/cli.js"
+          test -f "${cli_path}"
+          test ! -d "${package_root}/node_modules/node-pty"
+          chmod 700 "${OZW_TEST_HOME}"
+          port="$(node -e "const server = require('node:net').createServer(); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => console.log(port)); })")"
+          HOME="${OZW_TEST_HOME}" OZW_HOME="${OZW_TEST_HOME}/.ozw" HOST=127.0.0.1 PORT="${port}" node "${cli_path}" start > server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "${server_pid}" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error "http://127.0.0.1:${port}/health" | node --input-type=module -e "let body = ''; for await (const chunk of process.stdin) body += chunk; if (JSON.parse(body).status !== 'ok') process.exit(1)"; then
+              curl --fail --silent --show-error "http://127.0.0.1:${port}/" | grep -q '<html'
+              exit 0
+            fi
+            sleep 1
+          done
+          cat server.log >&2
+          exit 1
+
+  prepare-publish:
+    name: Prepare verified publish input
+    needs: [candidate, install-matrix]
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref_type == 'tag' &&
+      github.ref_name == format('v{0}', needs.candidate.outputs.package_version) &&
+      inputs.confirm_version == needs.candidate.outputs.package_version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out verifier
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up the publish runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26.4.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Require a Trusted Publishing capable npm CLI
+        run: >-
+          node --input-type=module -e "import { execFileSync } from 'node:child_process';
+          const version = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+          const [major, minor, patch] = version.split('.').map(Number);
+          if (!Number.isSafeInteger(major) || major < 11 ||
+          (major === 11 && (minor < 5 || (minor === 5 && patch < 1))))
+          throw new Error('npm 11.5.1 or newer is required, found ' + version)"
+
+      - name: Download tested candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-candidate
+          path: candidate
+
+      - name: Verify candidate identity
+        id: candidate
+        run: node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync(path.join('candidate', 'npm-package.sha256.json'), 'utf8')); if (manifest.name !== 'ozw' || manifest.version !== process.argv[1] || path.basename(manifest.filename) !== manifest.filename || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Invalid candidate manifest'); const tarball = path.join('candidate', manifest.filename); const actual = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'); if (actual !== manifest.sha256) throw new Error('Candidate SHA-256 mismatch'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tarball=' + tarball + '\n')" "${{ needs.candidate.outputs.package_version }}"
+
+      - name: Audit candidate contents
+        run: node scripts/verify-npm-package.mjs "${{ steps.candidate.outputs.tarball }}"
+
+      - name: Upload verified publish input
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-publish-input
+          path: |
+            ${{ steps.candidate.outputs.tarball }}
+            candidate/npm-package.sha256.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish approved candidate
+    needs: [candidate, prepare-publish, optional-dependency-health]
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref_type == 'tag' &&
+      github.ref_name == format('v{0}', needs.candidate.outputs.package_version) &&
+      inputs.confirm_version == needs.candidate.outputs.package_version
+    runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out verifier
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Node.js for trusted publishing
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26.4.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Require a Trusted Publishing capable npm CLI
+        run: >-
+          node --input-type=module -e "import { execFileSync } from 'node:child_process';
+          const version = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+          const [major, minor, patch] = version.split('.').map(Number);
+          if (!Number.isSafeInteger(major) || major < 11 ||
+          (major === 11 && (minor < 5 || (minor === 5 && patch < 1))))
+          throw new Error('npm 11.5.1 or newer is required, found ' + version)"
+
+      - name: Download verified publish input
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-publish-input
+          path: candidate
+
+      - name: Verify candidate identity
+        id: candidate
+        run: node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync(path.join('candidate', 'npm-package.sha256.json'), 'utf8')); if (manifest.name !== 'ozw' || manifest.version !== process.argv[1] || path.basename(manifest.filename) !== manifest.filename || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Invalid candidate manifest'); const tarball = path.join('candidate', manifest.filename); const actual = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'); if (actual !== manifest.sha256) throw new Error('Candidate SHA-256 mismatch'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tarball=' + tarball + '\n')" "${{ needs.candidate.outputs.package_version }}"
+
+      - name: Audit candidate contents
+        run: node scripts/verify-npm-package.mjs "${{ steps.candidate.outputs.tarball }}"
+
+      - name: Publish the same tested tarball
+        run: npm publish "${{ steps.candidate.outputs.tarball }}" --access public
+
+  verify-published:
+    name: Verify public registry package
+    needs: [candidate, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out verifier
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26.4.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Download verified publish input
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-publish-input
+          path: candidate
+
+      - name: Verify the public registry tarball and installation
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.candidate.outputs.package_version }}
+        run: |
+          mkdir published
+          for attempt in 1 2 3 4 5; do
+            if npm pack "ozw@${PACKAGE_VERSION}" --ignore-scripts --json --pack-destination published > published/npm-pack.json; then
+              break
+            fi
+            if [[ "${attempt}" == "5" ]]; then
+              echo "Published package did not become readable from the public registry" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          published_tarball="$(node --input-type=module -e "import fs from 'node:fs'; import path from 'node:path'; const result = JSON.parse(fs.readFileSync('published/npm-pack.json', 'utf8')); const candidate = result[0]; if (result.length !== 1 || candidate.name !== 'ozw' || candidate.version !== process.argv[1]) throw new Error('Public package identity mismatch'); process.stdout.write(path.join('published', candidate.filename))" "${PACKAGE_VERSION}")"
+          node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; const manifest = JSON.parse(fs.readFileSync('candidate/npm-package.sha256.json', 'utf8')); const actual = crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'); if (actual !== manifest.sha256) throw new Error('Public registry tarball differs from tested candidate')" "${published_tarball}"
+          node scripts/verify-npm-package.mjs "${published_tarball}"
+          npm install --global "${published_tarball}"
+          test "$(ozw --version)" = "${PACKAGE_VERSION}"
+          ozw --help

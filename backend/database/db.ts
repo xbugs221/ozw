@@ -5,10 +5,11 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { fileURLToPath } from 'url';
 import { resolvePackageRoot } from '../utils/package-root.js';
 
 const PKG_ROOT = resolvePackageRoot();
-const __dirname = path.join(PKG_ROOT, 'backend', 'database');
+const DATABASE_ASSET_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 
 // ANSI color codes for terminal output
 const colors = {
@@ -31,8 +32,8 @@ const DISABLED_PASSWORD_HASH = '!';
 const CURRENT_DATABASE_SCHEMA_VERSION = 1;
 
 // Use DATABASE_PATH environment variable if set, otherwise use default location
-const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, 'ozw.db');
-const INIT_SQL_PATH = path.join(__dirname, 'init.sql');
+const DB_PATH = process.env.DATABASE_PATH || path.join(DATABASE_ASSET_DIRECTORY, 'ozw.db');
+const INIT_SQL_PATH = path.join(DATABASE_ASSET_DIRECTORY, 'init.sql');
 const DATABASE_PATH_DEFAULTED_BY_LOAD_ENV = process.env.OZW_DATABASE_PATH_DEFAULTED === 'true';
 
 // Ensure database directory exists if custom path is provided
@@ -51,7 +52,7 @@ if (process.env.DATABASE_PATH) {
 }
 
 // Move default installs from the legacy auth.db name/location to ozw.db.
-const LEGACY_INSTALL_DB_PATH = path.join(__dirname, 'auth.db');
+const LEGACY_INSTALL_DB_PATH = path.join(DATABASE_ASSET_DIRECTORY, 'auth.db');
 const LEGACY_HOME_DB_PATH = path.join(path.dirname(DB_PATH), 'auth.db');
 const legacyDbPath = fs.existsSync(LEGACY_HOME_DB_PATH) ? LEGACY_HOME_DB_PATH : LEGACY_INSTALL_DB_PATH;
 if (DATABASE_PATH_DEFAULTED_BY_LOAD_ENV && DB_PATH !== legacyDbPath && !fs.existsSync(DB_PATH) && fs.existsSync(legacyDbPath)) {
@@ -71,6 +72,9 @@ if (DATABASE_PATH_DEFAULTED_BY_LOAD_ENV && DB_PATH !== legacyDbPath && !fs.exist
 
 // Create database connection
 const db = new Database(DB_PATH);
+if (process.platform !== 'win32' && DB_PATH !== ':memory:' && !DB_PATH.startsWith('file::memory:')) {
+  fs.chmodSync(DB_PATH, 0o600);
+}
 
 /**
  * PURPOSE: Keep many small index updates responsive on low-end local disks

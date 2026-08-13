@@ -4,8 +4,6 @@
  * wiring in server-main.ts so the entrypoint stays small and reviewable.
  */
 
-import './load-env.js';
-
 const serverBootstrapMode = 'listen';
 
 /**

@@ -14,16 +14,21 @@ import express from 'express';
 
 const originalHome = process.env.HOME;
 const originalDatabasePath = process.env.DATABASE_PATH;
+const originalPlatformMode = process.env.VITE_IS_PLATFORM;
 const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-agent-route-test-'));
 
 process.env.HOME = tempHome;
 process.env.DATABASE_PATH = path.join(tempHome, 'auth.db');
+process.env.VITE_IS_PLATFORM = 'true';
 
-const { initializeDatabase } = await import('../../backend/database/db.ts');
+const { initializeDatabase, apiKeysDb, userDb } = await import('../../backend/database/db.ts');
 await initializeDatabase();
+const { apiKey: validApiKey } = apiKeysDb.createApiKey(userDb.getSingleUser().id, 'agent-route-test');
+const { generateToken } = await import('../../backend/middleware/auth.ts');
+const validJwt = generateToken(userDb.getSingleUser());
+const { validateExternalApiKey } = await import('../../backend/domains/agent/agent-auth.ts');
 
 const {
-  default: agentRouter,
   __agentRouteInternalsForTest: {
     ResponseCollector,
     createAgentRouter,
@@ -93,6 +98,12 @@ test.after(async () => {
     process.env.DATABASE_PATH = originalDatabasePath;
   } else {
     delete process.env.DATABASE_PATH;
+  }
+
+  if (originalPlatformMode) {
+    process.env.VITE_IS_PLATFORM = originalPlatformMode;
+  } else {
+    delete process.env.VITE_IS_PLATFORM;
   }
 
   await fs.rm(tempHome, { recursive: true, force: true });
@@ -251,8 +262,24 @@ test('agent route runtime fails the request on Codex app-server terminal error',
   await assert.rejects(waitForCompletion, /runtime failed/);
 });
 
-test('POST /api/agent rejects missing and invalid API keys outside platform mode', async () => {
-  const { server, baseUrl } = await startAgentRouteApp(agentRouter);
+test('POST /api/agent requires credentials in platform mode before route work starts', async () => {
+  /** Prove platform mode cannot resolve, register, or run a project before authentication. */
+  const calls = { resolve: 0, register: 0, run: 0 };
+  const guardedRouter = createAgentRouter({
+    validateExternalApiKey,
+    async resolveAgentProjectPath(projectPath) {
+      calls.resolve += 1;
+      return projectPath;
+    },
+    async addProjectManually() {
+      calls.register += 1;
+      return {};
+    },
+    async runAgentSession() {
+      calls.run += 1;
+    },
+  });
+  const { server, baseUrl } = await startAgentRouteApp(guardedRouter);
 
   try {
     const missingKeyResponse = await fetch(`${baseUrl}/api/agent`, {
@@ -265,7 +292,8 @@ test('POST /api/agent rejects missing and invalid API keys outside platform mode
       }),
     });
     assert.equal(missingKeyResponse.status, 401);
-    assert.deepEqual(await missingKeyResponse.json(), { error: 'API key required' });
+    assert.deepEqual(await missingKeyResponse.json(), { error: 'API key or bearer token required' });
+    assert.deepEqual(calls, { resolve: 0, register: 0, run: 0 });
 
     const invalidKeyResponse = await fetch(`${baseUrl}/api/agent`, {
       method: 'POST',
@@ -281,6 +309,46 @@ test('POST /api/agent rejects missing and invalid API keys outside platform mode
     });
     assert.equal(invalidKeyResponse.status, 401);
     assert.deepEqual(await invalidKeyResponse.json(), { error: 'Invalid or inactive API key' });
+    assert.deepEqual(calls, { resolve: 0, register: 0, run: 0 });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('POST /api/agent accepts valid API-key and bearer authorization in platform mode', async () => {
+  /** Preserve both supported authorization paths after removing the platform bypass. */
+  const projectDir = path.join(tempHome, 'authorized-agent-project');
+  await fs.mkdir(projectDir, { recursive: true });
+  let runCount = 0;
+  const guardedRouter = createAgentRouter({
+    validateExternalApiKey,
+    async resolveAgentProjectPath(projectPath) {
+      return await fs.realpath(projectPath);
+    },
+    async addProjectManually(projectPath) {
+      return { path: projectPath };
+    },
+    async runAgentSession(_request, writer) {
+      runCount += 1;
+      writer.setSessionId(`authorized-${runCount}`);
+      writer.send({ type: 'codex-complete', sessionId: `authorized-${runCount}` });
+    },
+  });
+  const { server, baseUrl } = await startAgentRouteApp(guardedRouter);
+
+  try {
+    for (const headers of [
+      { 'x-api-key': validApiKey },
+      { authorization: `Bearer ${validJwt}` },
+    ]) {
+      const response = await fetch(`${baseUrl}/api/agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ projectPath: projectDir, message: 'authorized', stream: false }),
+      });
+      assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+    }
+    assert.equal(runCount, 2);
   } finally {
     await closeServer(server);
   }

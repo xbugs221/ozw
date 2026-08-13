@@ -17,7 +17,7 @@
     "allowJs": true,
     "types": ["node"],
     "declaration": false,
-    "sourceMap": true
+    "sourceMap": false
   },
   "include": [
     "backend/**/*.ts",

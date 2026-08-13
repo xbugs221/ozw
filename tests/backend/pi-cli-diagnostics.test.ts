@@ -69,6 +69,8 @@ test('Pi CLI status preserves unavailable, available, and native-provider contra
       databasePath,
       env: {
         CCFLOW_CO_HOME: coHome,
+        HOME: tempRoot,
+        USERPROFILE: tempRoot,
         PATH: `${binDir}:/usr/bin:/usr/local/bin`,
       },
     });

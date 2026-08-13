@@ -5,7 +5,7 @@ import express from 'express';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { resolvePackageRoot } from '../utils/package-root.js';
+import { fileURLToPath } from 'url';
 import { parseFrontmatter } from '../utils/frontmatter.js';
 
 const router = express.Router();
@@ -13,8 +13,8 @@ const ALIAS_DIRECTORY_NAME = path.join('.config', 'ozw-alias');
 const ALIAS_NAMESPACE = 'alias';
 const BUILTIN_ALIAS_NAMESPACE = 'builtin';
 const aliasBaseDir = path.resolve(path.join(os.homedir(), ALIAS_DIRECTORY_NAME));
-const PKG_ROOT = resolvePackageRoot();
-const builtinAliasBaseDir = path.resolve(path.join(PKG_ROOT, 'backend', 'commands', 'aliases'));
+const routeDirectory = path.dirname(fileURLToPath(import.meta.url));
+const builtinAliasBaseDir = path.resolve(routeDirectory, '..', 'commands', 'aliases');
 
 interface CommandEntry {
   name: string;

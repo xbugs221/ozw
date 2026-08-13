@@ -10,6 +10,7 @@ import { promises as fsPromises } from 'fs';
 import { spawn } from 'child_process';
 import { extractProjectDirectory } from './projects.js';
 import { resolveFlowBatchesRoot, resolveFlowRunsRoot } from './domains/workflows/flow-runtime-paths.js';
+import { sanitizeChildProcessEnv } from './security/child-process-env.js';
 
 /**
  * Normalize a relative workspace path into POSIX-style form for API payloads.
@@ -313,7 +314,10 @@ export async function createDirectoryArchive(sourceDirectory) {
         const zipProcess = spawn(
             'zip',
             ['-r', '-q', archivePath, path.basename(sourceDirectory)],
-            { cwd: path.dirname(sourceDirectory) },
+            {
+                cwd: path.dirname(sourceDirectory),
+                env: sanitizeChildProcessEnv(process.env),
+            },
         );
 
         let stderr = '';

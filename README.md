@@ -34,61 +34,40 @@
 
 ### 快速开始
 
-1. **准备基础环境：** 推荐 Node.js 26.4.0（最低 24.17.0）与 pnpm 11.10.0（分别以 `.nvmrc` 和 `package.json` 为准）。
+> **发布状态：** `ozw` 是当前候选包名，公共 NPM 包尚未发布，包名所有权和发行验收仍待完成。下面的注册表命令是**发布后的正式入口**，现在请勿从公共注册表安装同名包。
 
-   ```sh
-   corepack enable
-   corepack prepare pnpm@11.10.0 --activate
-   node --version
-   pnpm --version
-   ```
+发布后，首选全局安装：
 
-2. **安装 `oz`：** ozw 启动时会检查 `oz flow contract --json`，并通过 `oz list` 发现活跃变更、通过 `oz flow` 执行工作流，必须先确保 `oz` 在服务进程的 `PATH` 中。
+```sh
+npm install -g ozw
+ozw
+```
 
-   方式一：从 [oz Releases](https://github.com/xbugs221/oz/releases) 下载对应系统和架构的二进制文件，然后赋予执行权限：
+公开发布前，只使用维护者提供的候选包：
 
-   ```sh
-   mkdir -p ~/.local/bin
-   mv ~/Downloads/oz ~/.local/bin/oz
-   chmod +x ~/.local/bin/oz
-   oz --version
-   ```
+```sh
+npm install -g ./ozw-VERSION.tgz
+ozw
+```
 
-   如果你的 shell 还找不到 `oz`，把 `~/.local/bin` 加入 `PATH`。
+首次运行会创建 `~/.ozw`、生成 32 字符的 `OZW_ACCESS_TOKEN`，并输出登录地址。交互式终端仅在新生成时显示令牌；systemd、重定向等非交互运行不会把令牌写入日志，请从 `~/.ozw/.env` 查看。默认地址为 `http://127.0.0.1:3001`，只允许本机访问。
 
-   方式二：已有 Go 环境时直接安装：
+`oz`、Codex 和 Pi 都是按功能启用的可选依赖：缺少它们不会阻止工作台启动，只会禁用对应的工作流或会话能力。启动后可在设置页的运行时诊断中查看缺失项。
 
-   ```sh
-   go install github.com/xbugs221/oz@latest
-   oz --version
-   ```
+`node-pty` 是 Web 终端的可选依赖；缺失时基础 HTTP/WebUI 仍可启动，但终端不可用，重装 optional 依赖即可恢复。
 
-3. **准备聊天 provider：** ozw 的服务启动只强制依赖 `oz`。使用 Codex 时，请先由系统服务管理器独立运行并维护已认证的 `codex app-server` 守护进程；ozw 只作为客户端连接，不负责其启动、停止、重启或权限策略。Pi 会话通过 Pi 原生运行时运行。
+跨设备访问必须显式修改监听地址，并放在可信的 HTTPS 反向代理或隧道之后；不要把带有仓库、终端和 provider 凭据访问能力的 ozw 直接暴露到公网。
 
-4. **启动 ozw：**
+升级与卸载：
 
-   ```sh
-   pnpm install
-   cp .env.example .env
-   openssl rand -hex 16  # 将输出写入 .env 的 OZW_ACCESS_TOKEN
-   pnpm start
-   ```
+```sh
+npm update -g ozw
+npm uninstall -g ozw
+```
 
-   `OZW_ACCESS_TOKEN` 必须恰好为 32 个字符。`pnpm start` 会先构建前端和后端，再在默认 `PORT=3001` 上提供 Web 页面、API 和 WebSocket；首次访问时直接输入该访问令牌，不创建或选择账号。JWT 签名密钥由 ozw 自动生成，仅用于内部会话。
+升级和卸载都保留 `~/.ozw` 中的配置与数据库。源码开发、候选包验收、远程访问和数据清理说明见 [快速开始](docs/quickstart.md)，故障排除见 [docs/troubleshooting.md](docs/troubleshooting.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
-   开发模式使用双服务：
-
-   ```sh
-   pnpm dev
-   ```
-
-   开发模式默认前端为 `5173`，后端为 `3001`；生产模式默认只需要暴露 `3001`。
-
-5. **公网访问（推荐）：** 使用 `frp`、`nps` 或 Cloudflare Tunnel 将服务端口映射到 HTTPS 域名，开启跨设备编程接力。
-
-6. **安装到手机桌面：** ozw 发布了 PWA 入口。手机浏览器打开 HTTPS 地址后，可以通过“添加到主屏幕”保存桌面图标；相关资源位于 `/manifest.webmanifest`、`/sw.js`、`/pwa/icon-192.png` 和 `/pwa/icon-512.png`。
-
-更多技术细节请参考 [docs/quickstart.md](docs/quickstart.md)，各版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+通过 HTTPS 访问时，可将 PWA 添加到手机主屏幕。
 
 ---
 

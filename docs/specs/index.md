@@ -32,6 +32,12 @@
 - 测试入口：`pnpm exec tsx --test tests/e2e/pi-session-61-direct-controls-tool-recovery.spec.ts`、`pnpm exec tsx --test tests/e2e/pi-session-input-tool-rendering.spec.ts`
 - 源码 owner：`frontend/`、`backend/`、`tests/manual/`
 
+## 发行与运行边界
+
+- 规格：`npm-global-distribution.md`、`runtime-dependencies.md`
+- 测试入口：`pnpm exec tsx --test tests/specs/npm-global-distribution.spec.ts`、`pnpm exec tsx --test tests/backend/runtime-dependencies.test.ts`
+- 源码 owner：`backend/cli.ts`、`backend/runtime-user-state.ts`、`backend/server-main.ts`、`scripts/`
+
 ## 测试与安全
 
 - 规格：`test-suite-taxonomy.md`、`backend-security-boundary.md`、`backend-type-module-boundary.md`、`typescript-tooling.md`、`high-value-module-refactor.md`

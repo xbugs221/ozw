@@ -4,6 +4,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { sanitizeChildProcessEnv } from '../security/child-process-env.js';
 
 export type AsyncCommandProbeResult = {
   status: number | null;
@@ -30,7 +31,7 @@ export function runAsyncCommandProbe(
     execFile(command, args, {
       cwd: options.cwd,
       encoding: 'utf8',
-      env: options.env || process.env,
+      env: sanitizeChildProcessEnv(options.env || process.env),
       maxBuffer: options.maxBuffer || 4 * 1024 * 1024,
       timeout: options.timeoutMs ?? 3000,
     }, (error, stdout, stderr) => {

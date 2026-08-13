@@ -17,7 +17,8 @@ async function withFakeGoWorkflowTools(testBody) {
   const previousPath = process.env.PATH;
   const previousHome = process.env.HOME;
   const previousXdgStateHome = process.env.XDG_STATE_HOME;
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-go-workflow-'));
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ozw-go-workflow-'));
+  const tempRoot = await fs.realpath(temporaryRoot);
   const binDir = path.join(tempRoot, 'bin');
   const homeDir = path.join(tempRoot, 'home');
   const stateHome = path.join(tempRoot, 'state');
@@ -37,10 +38,14 @@ async function withFakeGoWorkflowTools(testBody) {
       '  flow)',
       '    shift',
       '    run_id="run-abc"',
-      '    repo_path="$(pwd -P)"',
+      '    repo_path="$(pwd)"',
       '    repo_base="$(basename "$repo_path" | tr "[:upper:]" "[:lower:]" | sed -E "s/[^a-z0-9]+/-/g; s/^-+//; s/-+$//")"',
       '    if [ -z "$repo_base" ]; then repo_base="repo"; fi',
-      '    repo_hash="$(printf "%s" "$repo_path" | sha1sum | cut -c1-10)"',
+      '    if command -v sha1sum >/dev/null 2>&1; then',
+      '      repo_hash="$(printf "%s" "$repo_path" | sha1sum | cut -c1-10)"',
+      '    else',
+      '      repo_hash="$(printf "%s" "$repo_path" | shasum -a 1 | cut -c1-10)"',
+      '    fi',
       '    run_dir="${XDG_STATE_HOME}/oz/flow/repos/${repo_base}-${repo_hash}/runs/$run_id"',
       '    state="$run_dir/state.json"',
       '    write_state() {',

@@ -15,26 +15,31 @@
  */
 
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import {
+    inspectRuntimeUserState,
+    resolveRuntimeUserPaths,
+} from './runtime-user-state.js';
 import { resolvePackageRoot } from './utils/package-root.js';
 
 const PKG_ROOT = resolvePackageRoot();
 
 // ANSI color codes for terminal output
+const colorEnabled = Boolean(process.stdout.isTTY) && !('NO_COLOR' in process.env);
+const terminalColor = (code) => colorEnabled ? code : '';
 const colors = {
-    reset: '\x1b[0m',
-    bright: '\x1b[1m',
-    dim: '\x1b[2m',
+    reset: terminalColor('\x1b[0m'),
+    bright: terminalColor('\x1b[1m'),
+    dim: terminalColor('\x1b[2m'),
 
     // Foreground colors
-    cyan: '\x1b[36m',
-    green: '\x1b[32m',
-    yellow: '\x1b[33m',
-    blue: '\x1b[34m',
-    magenta: '\x1b[35m',
-    white: '\x1b[37m',
-    gray: '\x1b[90m',
+    cyan: terminalColor('\x1b[36m'),
+    green: terminalColor('\x1b[32m'),
+    yellow: terminalColor('\x1b[33m'),
+    blue: terminalColor('\x1b[34m'),
+    magenta: terminalColor('\x1b[35m'),
+    white: terminalColor('\x1b[37m'),
+    gray: terminalColor('\x1b[90m'),
 };
 
 // Helper to colorize text
@@ -53,33 +58,13 @@ const packageJsonPath = path.join(PKG_ROOT, 'package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 const RELEASES_URL = 'https://github.com/xbugs221/ozw/releases/latest';
 
-// Load environment variables from .env file if it exists
-function loadEnvFile() {
-    try {
-        const envPath = path.join(PKG_ROOT, '.env');
-        const envFile = fs.readFileSync(envPath, 'utf8');
-        envFile.split('\n').forEach(line => {
-            const trimmedLine = line.trim();
-            if (trimmedLine && !trimmedLine.startsWith('#')) {
-                const [key, ...valueParts] = trimmedLine.split('=');
-                if (key && valueParts.length > 0 && !process.env[key]) {
-                    process.env[key] = valueParts.join('=').trim();
-                }
-            }
-        });
-    } catch (e) {
-        // .env file is optional
-    }
-}
-
-// Get the database path (same logic as load-env.js)
+// Get the effective database path after user-state initialization.
 function getDatabasePath() {
     /**
      * PURPOSE: Keep `ozw status` aligned with server startup defaults while
      * preserving explicit DATABASE_PATH overrides.
      */
-    loadEnvFile();
-    return process.env.DATABASE_PATH || path.join(os.homedir(), '.ozw', 'ozw.db');
+    return process.env.DATABASE_PATH || resolveRuntimeUserPaths().databasePath;
 }
 
 // Get the installation directory
@@ -88,7 +73,12 @@ function getInstallDir() {
 }
 
 // Show status command
-function showStatus() {
+async function showStatus() {
+    /**
+     * PURPOSE: Report the same initialized user configuration consumed by server startup.
+     */
+    const runtimeState = await inspectRuntimeUserState();
+    const effectiveEnv = runtimeState.effectiveEnv;
     console.log(`\n${c.bright('ozw - Status')}\n`);
     console.log(c.dim('═'.repeat(60)));
 
@@ -101,7 +91,7 @@ function showStatus() {
     console.log(`       ${c.dim(installDir)}`);
 
     // Database location
-    const dbPath = getDatabasePath();
+    const dbPath = runtimeState.databasePath;
     const dbExists = fs.existsSync(dbPath);
     console.log(`\n${c.info('[INFO]')} Database Location:`);
     console.log(`       ${c.dim(dbPath)}`);
@@ -115,23 +105,31 @@ function showStatus() {
 
     // Environment variables
     console.log(`\n${c.info('[INFO]')} Configuration:`);
-    console.log(`       PORT: ${c.bright(process.env.PORT || '3001')} ${c.dim(process.env.PORT ? '' : '(default)')}`);
-    console.log(`       DATABASE_PATH: ${c.dim(process.env.DATABASE_PATH || '(using default location)')}`);
-    console.log(`       CONTEXT_WINDOW: ${c.dim(process.env.CONTEXT_WINDOW || '160000 (default)')}`);
+    console.log(`       HOST: ${c.bright(effectiveEnv.HOST || '127.0.0.1')} ${c.dim(effectiveEnv.HOST ? '' : '(default)')}`);
+    console.log(`       PORT: ${c.bright(effectiveEnv.PORT || '3001')} ${c.dim(effectiveEnv.PORT ? '' : '(default)')}`);
+    console.log(`       DATABASE_PATH: ${c.dim(runtimeState.databasePath)}`);
+    console.log(`       CONTEXT_WINDOW: ${c.dim(effectiveEnv.CONTEXT_WINDOW || '160000 (default)')}`);
 
     // Config file location
-    const envFilePath = path.join(PKG_ROOT, '.env');
-    const envExists = fs.existsSync(envFilePath);
+    const envFilePath = runtimeState.envPath;
+    const envExists = runtimeState.envExists;
     console.log(`\n${c.info('[INFO]')} Configuration File:`);
     console.log(`       ${c.dim(envFilePath)}`);
     console.log(`       Status: ${envExists ? c.ok('[OK] Exists') : c.warn('[WARN] Not found (using defaults)')}`);
+    const tokenStatus = runtimeState.accessTokenValid
+        ? c.ok('[OK] Configured')
+        : runtimeState.accessTokenConfigured
+            ? c.warn('[WARN] Invalid (must contain exactly 32 characters)')
+            : c.warn('[WARN] Not configured (will be generated on first start)');
+    console.log(`       Access token: ${tokenStatus}`);
 
     console.log('\n' + c.dim('═'.repeat(60)));
     console.log(`\n${c.tip('[TIP]')} Hints:`);
     console.log(`      ${c.dim('>')} Use ${c.bright('ozw --port 8080')} to run on a custom port`);
     console.log(`      ${c.dim('>')} Use ${c.bright('ozw --database-path /path/to/db')} for custom database`);
     console.log(`      ${c.dim('>')} Run ${c.bright('ozw help')} for all options`);
-    console.log(`      ${c.dim('>')} Access the UI at http://localhost:${process.env.PORT || '3001'}\n`);
+    const displayHost = (effectiveEnv.HOST || '127.0.0.1') === '0.0.0.0' ? '127.0.0.1' : (effectiveEnv.HOST || '127.0.0.1');
+    console.log(`      ${c.dim('>')} Access the UI at http://${displayHost}:${effectiveEnv.PORT || '3001'}\n`);
 }
 
 // Show help
@@ -165,8 +163,11 @@ Examples:
   $ ozw status                 # Show configuration
 
 Environment Variables:
+  HOST                Bind address (default: 127.0.0.1)
   PORT                Set server port (default: 3001)
   DATABASE_PATH       Set custom database location
+  OZW_HOME            Set the user state directory (default: ~/.ozw)
+  OZW_ACCESS_TOKEN    Set an exact 32-character browser access token
   CONTEXT_WINDOW      Set context window size (default: 160000)
 
 Documentation:
@@ -205,26 +206,49 @@ async function startServer() {
 
 // Parse CLI arguments
 function parseArgs(args) {
+    /**
+     * PURPOSE: Reject malformed CLI input before configuration or database side effects occur.
+     */
+    if (args.includes('--help') || args.includes('-h')) return { command: 'help', options: {} };
+    if (args.includes('--version') || args.includes('-v')) return { command: 'version', options: {} };
+
     const parsed = { command: 'start', options: {} };
+    const commands = new Set(['start', 'status', 'info', 'help', 'version', 'update']);
+    let positionalCommandSeen = false;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
 
         if (arg === '--port' || arg === '-p') {
-            parsed.options.port = args[++i];
+            const value = args[++i];
+            if (!value || value.startsWith('-')) throw new Error('--port requires a value');
+            parsed.options.port = value;
         } else if (arg.startsWith('--port=')) {
-            parsed.options.port = arg.split('=')[1];
+            parsed.options.port = arg.slice('--port='.length);
         } else if (arg === '--database-path') {
-            parsed.options.databasePath = args[++i];
+            const value = args[++i];
+            if (!value || value.startsWith('-')) throw new Error('--database-path requires a value');
+            parsed.options.databasePath = value;
         } else if (arg.startsWith('--database-path=')) {
-            parsed.options.databasePath = arg.split('=')[1];
-        } else if (arg === '--help' || arg === '-h') {
-            parsed.command = 'help';
-        } else if (arg === '--version' || arg === '-v') {
-            parsed.command = 'version';
+            parsed.options.databasePath = arg.slice('--database-path='.length);
+        } else if (arg.startsWith('-')) {
+            throw new Error(`Unknown option: ${arg}`);
         } else if (!arg.startsWith('-')) {
+            if (positionalCommandSeen) throw new Error(`Unexpected argument: ${arg}`);
+            if (!commands.has(arg)) throw new Error(`Unknown command: ${arg}`);
             parsed.command = arg;
+            positionalCommandSeen = true;
         }
+    }
+
+    if (parsed.options.port !== undefined) {
+        const port = Number(parsed.options.port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            throw new Error('Port must be an integer between 1 and 65535');
+        }
+    }
+    if (parsed.options.databasePath !== undefined && !parsed.options.databasePath.trim()) {
+        throw new Error('--database-path requires a value');
     }
 
     return parsed;
@@ -233,7 +257,16 @@ function parseArgs(args) {
 // Main CLI handler
 async function main() {
     const args = process.argv.slice(2);
-    const { command, options } = parseArgs(args);
+    let parsed;
+    try {
+        parsed = parseArgs(args);
+    } catch (error) {
+        console.error(`Error: ${error.message}`);
+        console.error('Run "ozw help" for usage information.');
+        process.exitCode = 2;
+        return;
+    }
+    const { command, options } = parsed;
 
     // Apply CLI options to environment variables
     if (options.port) {
@@ -249,7 +282,7 @@ async function main() {
             break;
         case 'status':
         case 'info':
-            showStatus();
+            await showStatus();
             break;
         case 'help':
         case '-h':

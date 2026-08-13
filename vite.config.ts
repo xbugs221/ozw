@@ -8,7 +8,7 @@ export default defineConfig(({ command, mode }) => {
   // Load env file based on `mode` in the current working directory.
   const env = loadEnv(mode, process.cwd(), '')
 
-  const host = process.env.HOST || env.HOST || '0.0.0.0'
+  const host = process.env.HOST || env.HOST || '127.0.0.1'
   // When binding to all interfaces (0.0.0.0), proxy should connect to localhost
   // Otherwise, proxy to the specific host the backend is bound to
   const proxyHost = host === '0.0.0.0' ? 'localhost' : host

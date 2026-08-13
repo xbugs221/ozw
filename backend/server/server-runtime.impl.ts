@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Load environment variables before other imports execute
-import '../load-env.js';
+// Load environment variables before other imports execute.
+import { runtimeUserState } from '../load-env.js';
 import fs from 'fs';
 import path from 'path';
 import { resolvePackageRoot } from '../utils/package-root.js';
@@ -38,7 +38,6 @@ import http from 'http';
 import cors from 'cors';
 import { promises as fsPromises } from 'fs';
 import { spawn } from 'child_process';
-import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
@@ -166,6 +165,7 @@ import { createSessionSubscriptionRegistry } from './realtime/session-subscripti
 import { createServerRuntimeContext, type ServerRuntimeContext } from './server-runtime-context.js';
 import { closeShellPtySessions } from './shell-websocket.js';
 import { printStartupBanner } from './startup-banner.js';
+import { formatFirstRunFailureHint, printFirstRunNotice } from './first-run-notice.js';
 import { createWebSocketGateway } from './websocket-gateway.js';
 
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
@@ -876,7 +876,6 @@ const shellWebSocketDeps = {
     extractUrlsFromText,
     shouldAutoOpenUrlFromOutput,
     os,
-    pty,
     WebSocket,
 };
 
@@ -949,8 +948,8 @@ registerBackendHttpRoutes({
 registerSpaFallback({ app, fs, path, PKG_ROOT, shouldServeSpaIndex });
 
 const PORT = Number(process.env.PORT || 3001);
-const HOST = process.env.HOST || '0.0.0.0';
-// Show localhost in URL when binding to all interfaces (0.0.0.0 isn't a connectable address)
+const HOST = process.env.HOST || '127.0.0.1';
+// Show localhost in URLs when explicitly binding every interface.
 const DISPLAY_HOST = HOST === '0.0.0.0' ? 'localhost' : HOST;
 
 function clearSessionScanInterval() {
@@ -1074,12 +1073,25 @@ async function startServer() {
             console.log(`${c.warn('[WARN]')} Note: Requests will be proxied to Vite dev server at ${c.dim('http://localhost:' + (process.env.VITE_PORT || 5173))}`);
         }
 
+        const handleStartupListenError = (error: Error): void => {
+            /** Surface the persisted credential location without exposing it in failed-start logs. */
+            const recoveryHint = formatFirstRunFailureHint(runtimeUserState);
+            if (recoveryHint) console.error(recoveryHint);
+            console.error('[ERROR] Failed to listen for HTTP requests:', error);
+            process.exit(1);
+        };
+        server.once('error', handleStartupListenError);
         server.listen(PORT, HOST, async () => {
+            server.off('error', handleStartupListenError);
             const appInstallPath = PKG_ROOT;
 
             printStartupBanner({
                 c,
                 appInstallPath,
+                displayHost: DISPLAY_HOST,
+                port: PORT,
+            });
+            printFirstRunNotice(runtimeUserState, {
                 displayHost: DISPLAY_HOST,
                 port: PORT,
             });

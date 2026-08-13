@@ -58,12 +58,6 @@ test('默认数据库路径和 CLI status 使用 ~/.ozw/ozw.db', async () => {
     delete env.DATABASE_PATH;
     delete env.OZW_DATABASE_PATH_DEFAULTED;
 
-    const loadedPath = runTsxEval(
-      "import './backend/load-env.ts'; console.log(process.env.DATABASE_PATH || '');",
-      env,
-    );
-    assert.equal(loadedPath, path.join(homeDir, '.ozw', 'ozw.db'));
-
     const status = spawnSync(process.execPath, ['--import', 'tsx', 'backend/cli.ts', 'status'], {
       cwd: REPO_ROOT,
       env,
@@ -73,6 +67,13 @@ test('默认数据库路径和 CLI status 使用 ~/.ozw/ozw.db', async () => {
     assert.match(status.stdout, /Database Location/);
     assert.match(status.stdout, /\.ozw[/\\]ozw\.db/);
     assert.doesNotMatch(status.stdout, /server[/\\]database[/\\]ozw\.db/);
+    await assert.rejects(fs.access(path.join(homeDir, '.ozw', '.env')), /ENOENT/u);
+
+    const loadedPath = runTsxEval(
+      "import './backend/load-env.ts'; console.log(process.env.DATABASE_PATH || '');",
+      env,
+    );
+    assert.equal(loadedPath, path.join(homeDir, '.ozw', 'ozw.db'));
   });
 });
 
