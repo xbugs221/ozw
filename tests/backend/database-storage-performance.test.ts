@@ -1,6 +1,6 @@
 /**
  * PURPOSE: Guard SQLite startup settings and schema-version reuse for slow
- * local disks commonly found in NAS and low-cost cloud deployments.
+ * local disks commonly found in VPS and low-cost cloud deployments.
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

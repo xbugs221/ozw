@@ -1,6 +1,6 @@
 /**
- * PURPOSE: Create and persist the private JWT signing secret beside the active
- * database so login tokens survive process restarts without user configuration.
+ * PURPOSE: Create and persist the private JWT signing secret in the stable ozw
+ * user directory so login tokens survive upgrades and database relocation.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -8,21 +8,36 @@ import os from 'node:os';
 import path from 'node:path';
 
 const SIGNING_SECRET_BYTES = 32;
-const SIGNING_SECRET_SUFFIX = '.jwt-secret';
+const SIGNING_SECRET_FILE_NAME = '.jwt-secret';
+const LEGACY_SIGNING_SECRET_SUFFIX = '.jwt-secret';
+const CANONICAL_BASE64URL_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+const MINIMUM_DISTINCT_SECRET_BYTES = 16;
 
 let cachedSecret: { filePath: string; value: string } | null = null;
 
 /**
- * Resolve one stable secret file per database-backed ozw instance.
+ * Resolve one stable secret file per ozw user environment.
  */
 export function resolveJwtSecretPath(env: NodeJS.ProcessEnv = process.env): string {
-  const databasePath = env.DATABASE_PATH?.trim();
-  if (databasePath && databasePath !== ':memory:' && !databasePath.startsWith('file::memory:')) {
-    return `${path.resolve(databasePath)}${SIGNING_SECRET_SUFFIX}`;
+  const configuredSecretPath = env.OZW_JWT_SECRET_PATH?.trim();
+  if (configuredSecretPath) {
+    return path.resolve(configuredSecretPath);
   }
 
   const homeDirectory = env.HOME?.trim() || env.USERPROFILE?.trim() || os.homedir();
-  return path.join(homeDirectory, '.ozw', `ozw.db${SIGNING_SECRET_SUFFIX}`);
+  const runtimeHome = env.OZW_HOME?.trim() || path.join(homeDirectory, '.ozw');
+  return path.join(path.resolve(runtimeHome), SIGNING_SECRET_FILE_NAME);
+}
+
+/**
+ * Resolve the former database-adjacent secret path when a persistent database is configured.
+ */
+function resolveLegacyJwtSecretPath(env: NodeJS.ProcessEnv): string | null {
+  const databasePath = env.DATABASE_PATH?.trim();
+  if (!databasePath || databasePath === ':memory:' || databasePath.startsWith('file::memory:')) {
+    return null;
+  }
+  return `${path.resolve(databasePath)}${LEGACY_SIGNING_SECRET_SUFFIX}`;
 }
 
 /**
@@ -34,10 +49,8 @@ function readPersistedSecret(filePath: string): string {
     throw new Error(`JWT secret path is not a regular file: ${filePath}`);
   }
 
-  const secret = fs.readFileSync(filePath, 'utf8').trim();
-  if (!secret) {
-    throw new Error(`JWT secret file is empty: ${filePath}`);
-  }
+  const secret = fs.readFileSync(filePath, 'utf8');
+  validatePersistedSecret(secret, filePath);
 
   if (process.platform !== 'win32') {
     fs.chmodSync(filePath, 0o600);
@@ -46,14 +59,35 @@ function readPersistedSecret(filePath: string): string {
 }
 
 /**
+ * Require the exact format emitted by randomBytes(32).toString('base64url') and
+ * reject obviously low-entropy values instead of silently replacing user state.
+ */
+function validatePersistedSecret(secret: string, filePath: string): void {
+  const decodedSecret = CANONICAL_BASE64URL_PATTERN.test(secret)
+    ? Buffer.from(secret, 'base64url')
+    : Buffer.alloc(0);
+  const isCanonical = decodedSecret.length === SIGNING_SECRET_BYTES
+    && decodedSecret.toString('base64url') === secret;
+  const hasMinimumDiversity = new Set(decodedSecret).size >= MINIMUM_DISTINCT_SECRET_BYTES;
+
+  if (isCanonical && hasMinimumDiversity) {
+    return;
+  }
+
+  throw new Error(
+    `Invalid JWT secret in ${filePath}: expected canonical unpadded base64url for 32 random bytes. `
+    + 'Restore the original secret, or remove this file only if invalidating existing browser sessions is acceptable.',
+  );
+}
+
+/**
  * Atomically publish a complete random secret so concurrent server processes
  * converge on the same value instead of invalidating each other's tokens.
  */
-function createPersistedSecret(filePath: string): string {
+function publishPersistedSecret(filePath: string, secret: string): string {
   const directoryPath = path.dirname(filePath);
   fs.mkdirSync(directoryPath, { recursive: true, mode: 0o700 });
 
-  const secret = crypto.randomBytes(SIGNING_SECRET_BYTES).toString('base64url');
   const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
 
   try {
@@ -81,6 +115,25 @@ function createPersistedSecret(filePath: string): string {
 }
 
 /**
+ * Generate and atomically publish a new signing secret when no legacy value is available.
+ */
+function createPersistedSecret(filePath: string): string {
+  const secret = crypto.randomBytes(SIGNING_SECRET_BYTES).toString('base64url');
+  return publishPersistedSecret(filePath, secret);
+}
+
+/**
+ * Copy the former database-adjacent secret once so upgrades keep existing browser sessions valid.
+ */
+function migrateLegacyPersistedSecret(filePath: string, env: NodeJS.ProcessEnv): string | null {
+  const legacyPath = resolveLegacyJwtSecretPath(env);
+  if (!legacyPath || path.resolve(legacyPath) === path.resolve(filePath) || !fs.existsSync(legacyPath)) {
+    return null;
+  }
+  return publishPersistedSecret(filePath, readPersistedSecret(legacyPath));
+}
+
+/**
  * Return the stable automatically managed JWT signing secret for this process.
  */
 export function getJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
@@ -91,7 +144,7 @@ export function getJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
 
   const value = fs.existsSync(filePath)
     ? readPersistedSecret(filePath)
-    : createPersistedSecret(filePath);
+    : migrateLegacyPersistedSecret(filePath, env) ?? createPersistedSecret(filePath);
   cachedSecret = { filePath, value };
   return value;
 }

@@ -7,7 +7,7 @@
 
 import { mkdirSync, appendFileSync } from 'fs';
 import path from 'path';
-import { reduceNativeRuntimeEvent } from '../frontend/components/chat/utils/nativeRuntimeTranscript.js';
+import { reduceNativeRuntimeEvent } from '../shared/provider-runtime-transcript.js';
 
 const activeTurns = new Map<string, Record<string, unknown>>();
 
@@ -31,9 +31,11 @@ function cloneMessages(messages: unknown[]): unknown[] {
 
 function writeActiveOverlayLog(entry: Record<string, unknown>): void {
   /**
-   * Persist runtime evidence that active overlay is a disposable server view.
+   * Persist opt-in test evidence without writing into an end user's working directory.
    */
-  const logDir = path.resolve(process.cwd(), 'test-results/codex-pi-message-refresh-stability');
+  const evidenceRoot = process.env.OZW_TEST_EVIDENCE_DIR?.trim();
+  if (!evidenceRoot) return;
+  const logDir = path.resolve(evidenceRoot, 'codex-pi-message-refresh-stability');
   try {
     mkdirSync(logDir, { recursive: true });
     appendFileSync(

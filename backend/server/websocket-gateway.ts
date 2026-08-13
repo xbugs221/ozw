@@ -5,9 +5,21 @@
 import { WebSocketServer } from 'ws';
 import { getWebSocketAuthToken } from '../websocket-auth.js';
 import { authenticateWebSocket } from '../middleware/auth.js';
-import { IS_PLATFORM } from '../constants/config.js';
 import { handleChatConnection } from './chat-websocket.js';
 import { handleShellConnection } from './shell-websocket.js';
+
+type WebSocketAuthRequest = Parameters<typeof authenticateWebSocket>[1] & {
+    headers?: Record<string, unknown>;
+};
+
+/**
+ * Authenticate one WebSocket upgrade with the same bearer-token contract in every deployment mode.
+ */
+export function authenticateWebSocketUpgrade(req: WebSocketAuthRequest): { userId: number; username: string } | null {
+    /** Reject missing or invalid tokens without a platform-mode identity fallback. */
+    const token = getWebSocketAuthToken(req);
+    return authenticateWebSocket(token || undefined, req);
+}
 
 /**
  * 创建并挂载 WebSocket gateway。
@@ -27,19 +39,7 @@ export function createWebSocketGateway(deps: any): WebSocketServer {
         verifyClient: (info: any) => {
             console.log('WebSocket connection attempt to:', info.req.url);
 
-            if (IS_PLATFORM) {
-                const user = authenticateWebSocket(undefined, info.req);
-                if (!user) {
-                    console.log('[WARN] Platform mode: No user found in database');
-                    return false;
-                }
-                info.req.user = user;
-                console.log('[OK] Platform mode WebSocket authenticated for user:', user.username);
-                return true;
-            }
-
-            const token = getWebSocketAuthToken(info.req);
-            const user = authenticateWebSocket(token || undefined, info.req);
+            const user = authenticateWebSocketUpgrade(info.req);
             if (!user) {
                 console.log('[WARN] WebSocket authentication failed');
                 return false;

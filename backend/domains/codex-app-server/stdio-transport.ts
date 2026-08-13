@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { sanitizeChildProcessEnv } from '../../security/child-process-env.js';
 import { probeCodexSharedRuntimeCapabilities } from './capability-probe.js';
 import {
   type CodexAppServerTransport,
@@ -62,9 +63,9 @@ export function resolvePortableCodexPath(baseEnv: NodeJS.ProcessEnv = process.en
   return merged.join(':');
 }
 
-/** 给 spawn/execFile 用的 env，克隆后只替换 PATH。 */
+/** 给 spawn/execFile 用的 env：移除 ozw 私密配置后补充可移植 PATH。 */
 export function buildPortableCodexSpawnEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return { ...baseEnv, PATH: resolvePortableCodexPath(baseEnv) };
+  return { ...sanitizeChildProcessEnv(baseEnv), PATH: resolvePortableCodexPath(baseEnv) };
 }
 
 /** 异步验证系统服务客户端能力与 Socket，并返回 proxy 参数。 */

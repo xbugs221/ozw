@@ -14,6 +14,7 @@ import { writeFakeWorkflowTools } from './helpers/workflow-tools.ts';
 
 const REPO_ROOT = process.cwd();
 const TSC_CLI_PATH = path.join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
+const COPY_RUNTIME_ASSETS_PATH = path.join(REPO_ROOT, 'scripts', 'copy-runtime-assets.mjs');
 const DIST_RUNTIME_COMPAT_PATH = path.join(
   REPO_ROOT,
   'dist-node/backend/domains/projects/project-domain-runtime-compat.js',
@@ -89,8 +90,14 @@ test('compiled backend entrypoint starts after build', async () => {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  execFileSync(process.execPath, [COPY_RUNTIME_ASSETS_PATH], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   // 编译结果是本测试的业务对象；直接启动 TypeScript 编译器以避免包管理器冷启动。
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'dist-node', 'backend', 'index.js')), true);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'dist-node', 'backend', 'database', 'init.sql')), true);
   assert.equal(fs.existsSync(DIST_RUNTIME_COMPAT_PATH), false);
 
   const tempHome = await mkdtemp(path.join(os.tmpdir(), 'ozw-dist-start-'));

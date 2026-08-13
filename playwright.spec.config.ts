@@ -18,4 +18,13 @@ export default {
     'tests/e2e/**/*.spec.ts',
     'docs/changes/**/tests/**/*.spec.ts',
   ],
+  // Change 40 has node:test acceptance wrappers with the same `.spec.ts` suffix.
+  // Archived proposals carry historical paths and are not part of the active browser gate.
+  // Keep browser discovery available for active Playwright change tests only.
+  testIgnore: [
+    'docs/changes/archive/**',
+    'docs/changes/40-NPM全局应用开箱即用发行/tests/npm-global-distribution.acceptance.spec.ts',
+    'docs/changes/40-NPM全局应用开箱即用发行/tests/npm-global-evidence.acceptance.spec.ts',
+    'docs/changes/40-NPM全局应用开箱即用发行/tests/npm-release-workflow.acceptance.spec.ts',
+  ],
 };

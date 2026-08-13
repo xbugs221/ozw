@@ -105,7 +105,10 @@ if git diff --cached --quiet; then
   exit 0
 fi
 
-mapfile -d '' staged_files < <(git diff --cached --name-only -z)
+staged_files=()
+while IFS= read -r -d '' staged_file; do
+  staged_files+=("$staged_file")
+done < <(git diff --cached --name-only -z)
 
 if ! has_code_changes "${staged_files[@]}"; then
   echo "[pre-commit] Skipping checks: only documentation or static assets changed."

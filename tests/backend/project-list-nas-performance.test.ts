@@ -1,6 +1,6 @@
 /**
  * PURPOSE: Protect the project-list first-byte path from optional provider
- * history scans that become minute-long operations on slow NAS storage.
+ * history scans that become minute-long operations on slow VPS storage.
  */
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';

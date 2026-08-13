@@ -5,7 +5,7 @@
 ## v1.3.5 - 2026-08-07
 
 ### Highlights
-- Provider 监听器默认改用 inotify 事件取代每秒轮询，降低常驻 CPU 与磁盘唤醒，更适合 NAS 等低资源常驻场景。
+- Provider 监听器默认改用 inotify 事件取代每秒轮询，降低常驻 CPU 与磁盘唤醒，更适合 VPS 等低资源常驻场景。
 
 ### Changes
 - 性能：`provider-watchers` 默认走 inotify 监听，仅在文件系统不支持时回退到轮询。
@@ -27,7 +27,7 @@
 - 性能：简化运行时并改善低资源启动。
 - 修复：Pi 复用 Codex 风格；静默正常 JSON 噪声。
 - 文档：提出 npm 分发与低端性能门禁方案。
-- 运维：新增 NAS 双实例部署说明。
+- 运维：新增 VPS 双实例部署说明。
 
 ### Quality
 - 对齐 CI pnpm 版本与 `packageManager` 字段；更新 pnpm 至统一基线。

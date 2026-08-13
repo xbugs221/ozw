@@ -307,6 +307,10 @@ test('server main is a typed bootstrap boundary, not the moved giant entry body'
 
   assert.ok(lineCount < 200, `backend/server-main.ts must stay a small typed bootstrap, got ${lineCount}`);
   assert.match(source, /startBackendServer|import\('\.\/server-main-legacy\.js'\)/, 'backend/server-main.ts must explicitly load the server runtime');
+  assert.ok(
+    source.indexOf("import('./load-env.js')") < source.indexOf("import('./server-main-legacy.js')"),
+    'backend/server-main.ts must initialize user state before loading modules that open the database',
+  );
   assert.doesNotMatch(source, /app\.(get|post|put|delete)|new WebSocketServer|handleChatConnection/, 'backend/server-main.ts must not contain route or websocket bodies');
 });
 

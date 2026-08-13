@@ -1,0 +1,108 @@
+{
+  "change": "41-新增Hermes会话检视插件",
+  "run_id": "20260814T054729.518870000Z",
+  "stage": "audit_3",
+  "attempt": 1,
+  "diff_hash": "10db0b23e4b8ddbfe6e8adfbd01396e1e273b6af48de5b6ad53a92cb63f2f380",
+  "tests_hash": "b7a197f56853bdad2d98d660beff55548b0c0de2eba884777847e32199d12fd4",
+  "evidence_hash": "4241c931022cf44031f13f6892aefd9190d6686d4ea6b183cc42fbb7da1b5365",
+  "tests_progress_hash": "b7a197f56853bdad2d98d660beff55548b0c0de2eba884777847e32199d12fd4",
+  "evidence_progress_hash": "2bf12fc217a20f07cdaa97a1f088e758709fac0ec8a0f27d84f5da65ba7a492c",
+  "contract_hash": "db19c058fad1431414c3dad7f938cc6d3c3358a4cdadab3903ba705093f7a6be",
+  "valid": true,
+  "status": "passed",
+  "result_path": "/Users/xbugs/.local/state/oz/flow/repos/ozw-d7fec69863/runs/20260814T054729.518870000Z/evidence/audit_3/attempt-1/result.json",
+  "started_at": "2026-08-14T07:01:37.565336Z",
+  "finished_at": "2026-08-14T07:01:55.988663Z",
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "evidence_total": 2,
+    "evidence_present": 2,
+    "evidence_missing": 0
+  },
+  "tests": [
+    {
+      "id": "hermes-inspector-dashboard",
+      "source": "change_contract",
+      "path": "docs/changes/41-新增Hermes会话检视插件/tests/hermes-inspector-dashboard.acceptance.spec.ts",
+      "command": "pnpm exec tsx --test docs/changes/41-新增Hermes会话检视插件/tests/hermes-inspector-dashboard.acceptance.spec.ts",
+      "status": "passed",
+      "exit_code": 0,
+      "log_path": "test-results/acceptance-run/41-新增Hermes会话检视插件/20260814T054729.518870000Z/audit_3/attempt-1/001-hermes-inspector-dashboard-cd6953810f68.log",
+      "sealed_log_path": "/Users/xbugs/.local/state/oz/flow/repos/ozw-d7fec69863/runs/20260814T054729.518870000Z/evidence/audit_3/attempt-1/tests/001-hermes-inspector-dashboard-cd6953810f68.log",
+      "log_hash": "0d11c860c42e96102b0d7e2a8e3e0ddd2ff2a4e50f0ccb895c8a3cbb529c348d",
+      "log_progress_hash": "0d11c860c42e96102b0d7e2a8e3e0ddd2ff2a4e50f0ccb895c8a3cbb529c348d",
+      "duration_ms": 18419
+    }
+  ],
+  "evidence": [
+    {
+      "id": "inspector-browser-demo",
+      "kind": "demo_video",
+      "path": "test-results/change-41-hermes-inspector/inspector-browser-demo.webm",
+      "sealed_path": "/Users/xbugs/.local/state/oz/flow/repos/ozw-d7fec69863/runs/20260814T054729.518870000Z/evidence/audit_3/attempt-1/required/001-inspector-browser-demo-inspector-browser-demo.webm-52d7473d8bda",
+      "content_hash": "0316d02dfcbd8ef19cbcdd1c195de3d815a2b22673d8ea5010c7d3b28336a841",
+      "progress_hash": "0316d02dfcbd8ef19cbcdd1c195de3d815a2b22673d8ea5010c7d3b28336a841",
+      "status": "present"
+    },
+    {
+      "id": "inspector-readonly-state",
+      "kind": "state_snapshot",
+      "path": "test-results/change-41-hermes-inspector/inspector-readonly-state.json",
+      "sealed_path": "/Users/xbugs/.local/state/oz/flow/repos/ozw-d7fec69863/runs/20260814T054729.518870000Z/evidence/audit_3/attempt-1/required/002-inspector-readonly-state-inspector-readonly-state.json-216cfb199b72",
+      "content_hash": "cde2a3c9bc4f79d6371b9ee5dbf3e04587caae1b232a5b725065b31b2e947df4",
+      "progress_hash": "bd9eb64c6ae33184c00dd328ead5542d891972be7619e588c49bdbea5f3ffcd1",
+      "status": "present"
+    }
+  ],
+  "coverage": [
+    {
+      "spec": "需求：插件必须作为独立 Dashboard Tab 安装和访问 / 场景：Dashboard 发现插件并通过深链打开会话",
+      "tests": [
+        "hermes-inspector-dashboard"
+      ],
+      "evidence": [
+        "inspector-browser-demo"
+      ]
+    },
+    {
+      "spec": "需求：插件必须完整呈现可持久化的执行细节 / 场景：合并 compression lineage 并展开 reasoning/工具详情",
+      "tests": [
+        "hermes-inspector-dashboard"
+      ],
+      "evidence": [
+        "inspector-browser-demo"
+      ]
+    },
+    {
+      "spec": "需求：检视必须只读且不依赖 ozw 运行时 / 场景：无 ozw 运行时仍可检视且不修改数据库",
+      "tests": [
+        "hermes-inspector-dashboard"
+      ],
+      "evidence": [
+        "inspector-readonly-state"
+      ]
+    }
+  ],
+  "producers": [
+    {
+      "evidence_id": "inspector-browser-demo",
+      "path": "test-results/change-41-hermes-inspector/inspector-browser-demo.webm",
+      "tests": [
+        "hermes-inspector-dashboard"
+      ],
+      "verified": true
+    },
+    {
+      "evidence_id": "inspector-readonly-state",
+      "path": "test-results/change-41-hermes-inspector/inspector-readonly-state.json",
+      "tests": [
+        "hermes-inspector-dashboard"
+      ],
+      "verified": true
+    }
+  ],
+  "diagnostics": null
+}

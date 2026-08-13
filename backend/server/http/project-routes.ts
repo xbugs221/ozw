@@ -56,7 +56,7 @@ export function registerProjectRoutes(deps: ProjectRouteDeps): void {
      * lightweight project-list response path.
      */
     const refreshUnscopedHermes = async () => {
-        /** PURPOSE: Coalesce slow NAS reads while keeping the last complete snapshot visible. */
+        /** PURPOSE: Coalesce slow VPS reads while keeping the last complete snapshot visible. */
         if (unscopedHermesRefresh) {
             return unscopedHermesRefresh;
         }

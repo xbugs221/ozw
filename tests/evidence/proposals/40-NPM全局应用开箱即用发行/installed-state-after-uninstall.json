@@ -1,0 +1,17 @@
+{
+  "scenario": "真实候选包首次登录、重装、重启和卸载后用户数据保留",
+  "packageVersion": "1.3.5",
+  "packageSha256": "4914cc4f91c996066100e1ecc3add5d7e0661e863ae9a2ec07539ae49a826859",
+  "accessTokenLength": 32,
+  "secretsRecordedInPlaintext": false,
+  "userStateDirectory": "/var/folders/9l/2kt0f8yn2cs9lh5kcpy187j00000gn/T/ozw-npm-evidence-5GV9PL/home/.ozw",
+  "userStateMode": "700",
+  "envSha256BeforeAndAfterMatch": true,
+  "jwtSha256BeforeAndAfterMatch": true,
+  "databaseMarkerAfterUninstall": 42,
+  "globalCommandRemoved": true,
+  "globalPackageRemoved": true,
+  "userConfigurationRetained": true,
+  "internalKeyRetained": true,
+  "databaseRetained": true
+}

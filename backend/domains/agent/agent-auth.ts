@@ -3,8 +3,8 @@
  */
 
 import type { NextFunction, Request, Response } from 'express';
-import { IS_PLATFORM } from '../../constants/config.js';
-import { apiKeysDb, userDb } from '../../database/db.js';
+import { apiKeysDb } from '../../database/db.js';
+import { authenticateToken } from '../../middleware/auth.js';
 
 export type AgentUser = {
   id: number;
@@ -23,33 +23,30 @@ export function requireAgentUser(user: AgentUser | null | undefined): AgentUser 
   return user;
 }
 
-export function validateExternalApiKey(req: AgentRequest, res: Response, next: NextFunction): void {
-  /** Authenticate external agent requests and attach the resolved user. */
-  if (IS_PLATFORM) {
-    try {
-      const user = userDb.getSingleUser();
-      req.user = user;
-      next();
-      return;
-    } catch (error) {
-      console.error('Platform mode error:', error);
-      res.status(500).json({ error: 'Platform mode: Failed to fetch user' });
+export function validateExternalApiKey(req: AgentRequest, res: Response, next: NextFunction): void | Promise<void> {
+  /** Authenticate agent requests with an API key or the existing JWT session contract. */
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey !== undefined) {
+    if (!apiKey || Array.isArray(apiKey)) {
+      res.status(401).json({ error: 'Invalid or inactive API key' });
       return;
     }
-  }
 
-  const apiKey = req.headers['x-api-key'];
-  if (!apiKey || Array.isArray(apiKey)) {
-    res.status(401).json({ error: 'API key required' });
+    const user = apiKeysDb.validateApiKey(apiKey);
+    if (!user) {
+      res.status(401).json({ error: 'Invalid or inactive API key' });
+      return;
+    }
+
+    req.user = user;
+    next();
     return;
   }
 
-  const user = apiKeysDb.validateApiKey(apiKey);
-  if (!user) {
-    res.status(401).json({ error: 'Invalid or inactive API key' });
+  if (!req.headers.authorization) {
+    res.status(401).json({ error: 'API key or bearer token required' });
     return;
   }
 
-  req.user = user;
-  next();
+  return authenticateToken(req, res, next);
 }

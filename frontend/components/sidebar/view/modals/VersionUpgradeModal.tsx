@@ -1,6 +1,8 @@
-import { useCallback, useState } from "react";
+/**
+ * 文件目的：展示与安装方式匹配的手动升级指令。
+ * 业务意义：Web UI 只允许复制命令，不向后端发起安装或自更新请求。
+ */
 import { useTranslation } from "react-i18next";
-import { authenticatedFetch } from "../../../../utils/api";
 import { copyTextToClipboard } from "../../../../utils/clipboard";
 import type { InstallMode } from "../../../../hooks/useVersionCheck";
 
@@ -11,6 +13,9 @@ interface VersionUpgradeModalProps {
     installMode: InstallMode;
 }
 
+/**
+ * Render copy-only upgrade guidance for the detected installation method.
+ */
 export default function VersionUpgradeModal({
     isOpen,
     onClose,
@@ -20,39 +25,7 @@ export default function VersionUpgradeModal({
     const { t } = useTranslation('common');
     const upgradeCommand = installMode === 'npm'
         ? t('versionUpdate.npmUpgradeCommand')
-        : 'git checkout main && git pull && pnpm install';
-    const [isUpdating, setIsUpdating] = useState(false);
-    const [updateOutput, setUpdateOutput] = useState('');
-    const [updateError, setUpdateError] = useState('');
-
-    const handleUpdateNow = useCallback(async () => {
-        setIsUpdating(true);
-        setUpdateOutput('Starting update...\n');
-        setUpdateError('');
-
-        try {
-            // Call the backend API to run the update command
-            const response = await authenticatedFetch('/api/system/update', {
-                method: 'POST',
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                setUpdateOutput(prev => prev + data.output + '\n');
-                setUpdateOutput(prev => prev + '\n✅ Update completed successfully!\n');
-                setUpdateOutput(prev => prev + 'Please restart the server to apply changes.\n');
-            } else {
-                setUpdateError(data.error || 'Update failed');
-                setUpdateOutput(prev => prev + '\n❌ Update failed: ' + (data.error || 'Unknown error') + '\n');
-            }
-        } catch (error: any) {
-            setUpdateError(error.message);
-            setUpdateOutput(prev => prev + '\n❌ Update failed: ' + error.message + '\n');
-        } finally {
-            setIsUpdating(false);
-        }
-    }, []);
+        : t('versionUpdate.gitUpgradeCommand');
 
     if (!isOpen) return null;
 
@@ -100,35 +73,18 @@ export default function VersionUpgradeModal({
                     </div>
                 </div>
 
-                {/* Update Output */}
-                {(updateOutput || updateError) && (
-                    <div className="space-y-2">
-                        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('versionUpdate.updateProgress')}</h3>
-                        <div className="bg-gray-900 dark:bg-gray-950 rounded-lg p-4 border border-gray-700 max-h-48 overflow-y-auto">
-                            <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap">{updateOutput}</pre>
-                        </div>
-                        {updateError && (
-                            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">
-                                {updateError}
-                            </div>
-                        )}
-                    </div>
-                )}
-
                 {/* Upgrade Instructions */}
-                {!isUpdating && !updateOutput && (
-                    <div className="space-y-3">
-                        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('versionUpdate.manualUpgrade')}</h3>
-                        <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3 border">
-                            <code className="text-sm text-gray-800 dark:text-gray-200 font-mono">
-                                {upgradeCommand}
-                            </code>
-                        </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-400">
-                            {t('versionUpdate.manualUpgradeHint')}
-                        </p>
+                <div className="space-y-3">
+                    <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('versionUpdate.manualUpgrade')}</h3>
+                    <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3 border">
+                        <code className="text-sm text-gray-800 dark:text-gray-200 font-mono">
+                            {upgradeCommand}
+                        </code>
                     </div>
-                )}
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                        {t('versionUpdate.manualUpgradeHint')}
+                    </p>
+                </div>
 
                 {/* Actions */}
                 <div className="flex gap-2 pt-2">
@@ -136,34 +92,16 @@ export default function VersionUpgradeModal({
                         onClick={onClose}
                         className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors"
                     >
-                        {updateOutput ? t('versionUpdate.buttons.close') : t('versionUpdate.buttons.later')}
+                        {t('versionUpdate.buttons.later')}
                     </button>
-                    {!updateOutput && (
-                        <>
-                            <button
-                                onClick={() => copyTextToClipboard(upgradeCommand)}
-                                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors"
-                            >
-                                {t('versionUpdate.buttons.copyCommand')}
-                            </button>
-                            <button
-                                onClick={handleUpdateNow}
-                                disabled={isUpdating}
-                                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed rounded-md transition-colors flex items-center justify-center gap-2"
-                            >
-                                {isUpdating ? (
-                                    <>
-                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        {t('versionUpdate.buttons.updating')}
-                                    </>
-                                ) : (
-                                    t('versionUpdate.buttons.updateNow')
-                                )}
-                            </button>
-                        </>
-                    )}
+                    <button
+                        onClick={() => copyTextToClipboard(upgradeCommand)}
+                        className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                    >
+                        {t('versionUpdate.buttons.copyCommand')}
+                    </button>
                 </div>
             </div>
         </div>
     );
-};
+}

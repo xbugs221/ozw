@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "change": "40-NPM全局应用开箱即用发行",
+  "evidence": [
+    {
+      "evidence_id": "first-run-browser-demo",
+      "source_path": "test-results/change-40-npm-global-distribution/first-run-browser-demo.webm",
+      "archive_path": "tests/evidence/proposals/40-NPM全局应用开箱即用发行/first-run-browser-demo.webm",
+      "content_hash": "6fd67026b33931fac4b26ab0d8f9e04e53f5d17a93600aa008704cffcf71e0ce"
+    },
+    {
+      "evidence_id": "installed-state-after-uninstall",
+      "source_path": "test-results/change-40-npm-global-distribution/installed-state-after-uninstall.json",
+      "archive_path": "tests/evidence/proposals/40-NPM全局应用开箱即用发行/installed-state-after-uninstall.json",
+      "content_hash": "e7f485cbb1956521e69384206007d3c90f5f3235f96f36ed9fb79ca2f92bd922"
+    }
+  ]
+}

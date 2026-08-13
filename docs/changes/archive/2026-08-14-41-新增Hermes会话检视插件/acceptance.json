@@ -1,0 +1,131 @@
+{
+  "summary": "在真实 Hermes Dashboard 中安装独立会话检视插件，按 ozw 当前源码的有序 turn、分层折叠和紧凑工具语义完整展示 compression lineage，同时证明检视只读且不依赖 ozw 运行时。",
+  "coverage": [
+    {
+      "spec": "需求：插件必须作为独立 Dashboard Tab 安装和访问 / 场景：Dashboard 发现插件并通过深链打开会话",
+      "tests": ["hermes-inspector-dashboard"],
+      "evidence": ["inspector-browser-demo"],
+      "risk": "第一版没有原生 Sessions 行级按钮，用户从独立插件 Tab 或深链进入。"
+    },
+    {
+      "spec": "需求：插件必须完整呈现可持久化的执行细节 / 场景：按真实跨行顺序阅读 compression lineage 的完整执行流程；桌面和移动端保持 ozw 的紧凑阅读层级",
+      "tests": ["hermes-inspector-dashboard"],
+      "evidence": ["inspector-browser-demo", "inspector-browser-screenshots", "inspector-three-surface-parity"],
+      "risk": "模型或 provider 没有持久化的 reasoning 不在可观察范围内；同一 assistant DB 行未保存字段级精确交错，只采用声明的稳定协议投影。"
+    },
+    {
+      "spec": "需求：检视必须只读且不依赖 ozw 运行时 / 场景：无 ozw 运行时仍可检视且不修改数据库",
+      "tests": ["hermes-inspector-dashboard"],
+      "evidence": ["inspector-readonly-state"],
+      "risk": "只比较 sessions/messages 业务投影，不把 Dashboard 自身运行元数据计为插件写入。"
+    }
+  ],
+  "required_tests": [
+    {
+      "id": "hermes-inspector-dashboard",
+      "source": "change_contract",
+      "path": "docs/changes/archive/2026-08-14-41-新增Hermes会话检视插件/tests/hermes-inspector-dashboard.acceptance.spec.ts",
+      "command": "pnpm exec tsx --test docs/changes/archive/2026-08-14-41-新增Hermes会话检视插件/tests/hermes-inspector-dashboard.acceptance.spec.ts",
+      "purpose": "启动真实 Hermes Dashboard 和浏览器，用故意交错的 compression 会话验证 ozw 对齐的有序时间线、分层折叠、Markdown、响应式、只读边界与无 ozw 运行时依赖。",
+      "assertions": [
+        "真实插件扫描后导航出现 Hermes 会话检视，深链直接选中指定 profile 与会话",
+        "completed turn 的外层过程默认闭合、final Markdown 默认可见；展开后 R1→T1/result→commentary→R2→T2/error→final 的可见纵向坐标严格递增且 compression echo 不重复",
+        "多行 thinking 摘要/全文与单行 thinking 行为不同；工具组、同卡 output 和错误 output 可独立开闭，结果严格归属原 call",
+        "Markdown 生成真实 h2、ul、ol、a、inline code、pre>code；raw 打开/关闭不改变语义顺序或折叠状态",
+        "1440×900 与 390×844 固定截图来自本次成功运行；移动 session picker 默认收起、第一屏进入 transcript、页面无横向溢出",
+        "同一浏览器 harness 直接使用当前 OZW 真实组件分别渲染 Codex、Claude；与 Hermes 使用同语义 fixture、1440×900 和 outer/thinking/T1 group/T1 output 同展开状态，三方分别保存截图和折叠视频",
+        "Codex、Claude、Hermes 均逐层断言真实 details.open，且打开 T1/output 不得连带打开 T2 group",
+        "真实 tool-only turn 覆盖 read_file/search/plan/subagent 语义摘要、unmatched result 可见边界，以及外层 turn-tool-list-group 与内层 turn-tool-list 双层默认闭合和独立开闭",
+        "三方固定截图使用相同 760×640 transcript crop；parity-metrics.json 比较 outer/thinking/tool group/command/user bubble 的 fontSize、lineHeight、radius、padding、height 和纵向 gap，超出窄容差即失败",
+        "实际渲染色的 WCAG 对比度满足正文/小字/summary/control >=4.5:1、大标题 >=3:1；elementFromPoint、文字 Range 与矩形相交断言证明 command 左右 control 不遮挡文字",
+        "390×844 下长 thinking/tool summary 完整换行，无 ellipsis/nowrap/scrollWidth 截断；长 command 的 copy/output control 保持安全内边距和独立命中",
+        "inspector-browser-demo 使用独立 page/context，只停留 /session-inspector，稳定等待后逐层展开并反向收起 outer/thinking/T1 group/Output；前后 URL、console、alert、可见状态均健康",
+        "Inspector 的全部 /api/ 请求均为 GET；没有 ozw 运行时仍可检视，且检视前后 sessions/messages 业务投影完全一致",
+        "原生 /sessions 与 /chat 返回 2xx、显示各自页面且不包含 Inspector 根节点"
+      ],
+      "expected_initial_failure": "旧实现按 reasoning/tools/assistant 分桶且缺少 ozw turn 级外层折叠，应首先在 completed process 默认闭合或 hermes-turn-process 真实 details 合同处失败；不得为绿灯删除顺序、折叠或视觉断言。"
+    }
+  ],
+  "required_evidence": [
+    {
+      "id": "inspector-browser-demo",
+      "kind": "demo_video",
+      "path": "test-results/change-41-hermes-inspector/inspector-browser-demo.webm",
+      "purpose": "使用独立 page/context 只展示稳定 /session-inspector：outer→thinking→T1 group→Output 逐层展开并反向收起；不得包含 Sessions、Chat、TUI、parity harness 或错误页。"
+    },
+    {
+      "id": "inspector-readonly-state",
+      "kind": "state_snapshot",
+      "path": "test-results/change-41-hermes-inspector/inspector-readonly-state.json",
+      "purpose": "记录检视前后真实 sessions/messages 业务投影摘要一致，且运行环境未提供 ozw 依赖。"
+    },
+    {
+      "id": "inspector-browser-screenshots",
+      "kind": "screenshot_set",
+      "path": "test-results/change-41-hermes-inspector/",
+      "purpose": "保存本次成功运行的 desktop default/process/tool/error/Markdown 与 mobile default/process 固定截图；evidence-status.json 必须为 complete 且 runId 与只读快照一致。"
+    },
+    {
+      "id": "inspector-three-surface-parity",
+      "kind": "comparison_screenshot_and_video_set",
+      "path": "test-results/change-41-hermes-inspector/",
+      "purpose": "保存同一 760×640 transcript crop 的 compare-ozw-codex-process-open.png、compare-ozw-claude-process-open.png、compare-hermes-process-open.png，三方折叠视频，以及 parity-metrics.json；Codex/Claude 证明当前生产 renderer parity，不声称覆盖 native raw normalizer。"
+    }
+  ],
+  "submission_evidence": [
+    {
+      "evidence_id": "inspector-browser-demo",
+      "source_path": "test-results/change-41-hermes-inspector/inspector-browser-demo.webm",
+      "archive_path": "docs/changes/archive/2026-08-14-41-新增Hermes会话检视插件/tests/evidence/proposals/41-新增Hermes会话检视插件/inspector-browser-demo.webm"
+    },
+    {
+      "evidence_id": "inspector-readonly-state",
+      "source_path": "test-results/change-41-hermes-inspector/inspector-readonly-state.json",
+      "archive_path": "docs/changes/archive/2026-08-14-41-新增Hermes会话检视插件/tests/evidence/proposals/41-新增Hermes会话检视插件/inspector-readonly-state.json"
+    },
+    {
+      "evidence_id": "inspector-browser-screenshots",
+      "source_path": "test-results/change-41-hermes-inspector/",
+      "archive_path": "docs/changes/archive/2026-08-14-41-新增Hermes会话检视插件/tests/evidence/proposals/41-新增Hermes会话检视插件/screenshots/"
+    },
+    {
+      "evidence_id": "inspector-three-surface-parity",
+      "source_path": "test-results/change-41-hermes-inspector/",
+      "archive_path": "docs/changes/archive/2026-08-14-41-新增Hermes会话检视插件/tests/evidence/proposals/41-新增Hermes会话检视插件/three-surface-parity/"
+    }
+  ],
+  "delivery_report": {
+    "user_benefits": [
+      "用户在 VPS 的 Hermes Dashboard 内即可核查复杂会话，不再为了 reasoning 和工具详情打开工作电脑上的 ozw。",
+      "用户只需安装插件即可在 Hermes Dashboard 检查记录，不必在另一台电脑启动 ozw 或同步数据库。"
+    ],
+    "prerequisites": [
+      "VPS 已运行支持 Dashboard Plugin SDK 1.1 的 Hermes Agent。",
+      "目标会话已经把需要检查的 reasoning 和工具调用写入 state.db。"
+    ],
+    "scenarios": [
+      {
+        "id": "inspect-hermes-session",
+        "title": "在 Dashboard 检查复杂 Hermes 会话",
+        "user_value": "用户无需切换产品即可理解 Agent 做过什么、为什么这样做以及工具返回了什么。",
+        "steps": [
+          {
+            "action": "从 Hermes 会话检视 Tab 搜索目标会话，或直接打开带 profile/session 的深链。",
+            "expected": "页面选中目标会话并显示从 compression 父会话到当前子会话的连续 turn；completed 过程默认折叠，final Markdown 默认可见。"
+          },
+          {
+            "action": "逐层展开过程、thinking、工具组与 output，再切换 raw JSON。",
+            "expected": "页面按真实跨行顺序显示 reasoning、commentary、工具调用/同卡结果、错误和最终回答；raw 不改变已有顺序与折叠状态。"
+          }
+        ],
+        "evidence_ids": ["inspector-browser-demo", "inspector-browser-screenshots", "inspector-three-surface-parity", "inspector-readonly-state"]
+      }
+    ],
+    "known_limits": [
+      "第一版从独立 Inspector Tab 或深链进入，不在原生 Sessions 每一行注入按钮。",
+      "插件只读；继续任务、steer、停止和审批仍在 Hermes 原生 Chat/TUI 完成。",
+      "页面不可能展示模型未输出或未持久化的内部推理。"
+      ,"同一 assistant 数据库行没有保存 reasoning_content、content 与 tool_calls 的精确流式交错；插件只能采用已声明的稳定协议投影。"
+    ]
+  }
+}

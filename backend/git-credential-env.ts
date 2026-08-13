@@ -5,11 +5,21 @@
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import { sanitizeChildProcessEnv } from './security/child-process-env.js';
 
 export type GitCredentialEnvironment = {
   env: NodeJS.ProcessEnv;
   cleanup: () => Promise<void>;
 };
+
+/** Build the common sanitized Git environment while retaining user Git configuration. */
+export function buildGitChildProcessEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  /** Git keeps HOME/XDG/PATH and existing credential helpers, but not ozw secrets. */
+  return {
+    ...sanitizeChildProcessEnv(baseEnv),
+    GIT_TERMINAL_PROMPT: '0',
+  };
+}
 
 function shellSingleQuote(value: string): string {
   /**
@@ -24,10 +34,7 @@ export async function createGitCredentialEnvironment(githubToken?: string | null
    * PURPOSE: Return git spawn env that disables terminal prompts and, when a
    * token exists, supplies credentials through GIT_ASKPASS instead of argv.
    */
-  const baseEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    GIT_TERMINAL_PROMPT: '0',
-  };
+  const baseEnv = buildGitChildProcessEnv();
 
   if (!githubToken) {
     return {

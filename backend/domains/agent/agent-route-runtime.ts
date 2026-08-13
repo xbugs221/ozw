@@ -12,6 +12,7 @@ import { resolveAgentProjectPath } from './agent-project-resolver.js';
 import { cloneGitHubRepo } from './github-operations.js';
 import { ResponseCollector, SSEStreamWriter } from './agent-response-writer.js';
 import { runAgentSession } from './agent-session-runner.js';
+import { buildGitChildProcessEnv, createGitCredentialEnvironment } from '../../git-credential-env.js';
 
 type AgentRouteRequest = express.Request & {
   user?: { id: number };
@@ -21,6 +22,7 @@ type AgentRouteDependencies = {
   validateExternalApiKey: typeof validateExternalApiKey;
   resolveAgentProjectPath: typeof resolveAgentProjectPath;
   runAgentSession: typeof runAgentSession;
+  addProjectManually?: typeof addProjectManually;
 };
 
 type GitHubBranchInfo = {
@@ -51,7 +53,8 @@ async function getGitRemoteUrl(repoPath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const gitProcess = spawn('git', ['config', '--get', 'remote.origin.url'], {
       cwd: repoPath,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: buildGitChildProcessEnv(),
     });
 
     let stdout = '';
@@ -209,7 +212,8 @@ async function getCommitMessages(projectPath: string, limit = 5): Promise<string
   return new Promise((resolve, reject) => {
     const gitProcess = spawn('git', ['log', `-${limit}`, '--pretty=format:%s'], {
       cwd: projectPath,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: buildGitChildProcessEnv(),
     });
 
     let stdout = '';
@@ -641,7 +645,7 @@ function createAgentPostHandler(dependencies: AgentRouteDependencies): express.R
     // Register the project (or use existing registration)
     let project;
     try {
-      project = await addProjectManually(finalProjectPath);
+      project = await (dependencies.addProjectManually ?? addProjectManually)(finalProjectPath);
       console.log('📦 Project registered:', project);
     } catch (error) {
       // If project already exists, that's fine - continue with the existing registration
@@ -748,7 +752,8 @@ function createAgentPostHandler(dependencies: AgentRouteDependencies): express.R
           console.log('🔄 Creating local branch...');
           const checkoutProcess = spawn('git', ['checkout', '-b', finalBranchName], {
             cwd: activeProjectPath,
-            stdio: 'pipe'
+            stdio: 'pipe',
+            env: buildGitChildProcessEnv(),
           });
 
           await new Promise<void>((resolve, reject) => {
@@ -764,7 +769,8 @@ function createAgentPostHandler(dependencies: AgentRouteDependencies): express.R
                   console.log(`ℹ️ Branch '${finalBranchName}' already exists locally, checking out...`);
                   const checkoutExisting = spawn('git', ['checkout', finalBranchName], {
                     cwd: activeProjectPath,
-                    stdio: 'pipe'
+                    stdio: 'pipe',
+                    env: buildGitChildProcessEnv(),
                   });
                   checkoutExisting.on('close', (checkoutCode: number | null) => {
                     if (checkoutCode === 0) {
@@ -783,31 +789,37 @@ function createAgentPostHandler(dependencies: AgentRouteDependencies): express.R
 
           // Push the branch to remote
           console.log('🔄 Pushing branch to remote...');
-          const pushProcess = spawn('git', ['push', '-u', 'origin', finalBranchName], {
-            cwd: activeProjectPath,
-            stdio: 'pipe'
-          });
-
-          await new Promise<void>((resolve, reject) => {
-            let stderr = '';
-            let stdout = '';
-            pushProcess.stdout.on('data', (data) => { stdout += data.toString(); });
-            pushProcess.stderr.on('data', (data) => { stderr += data.toString(); });
-            pushProcess.on('close', (code) => {
-              if (code === 0) {
-                console.log(`✅ Pushed branch '${finalBranchName}' to remote`);
-                resolve();
-              } else {
-                // Check if branch exists on remote but has different commits
-                if (stderr.includes('already exists') || stderr.includes('up-to-date')) {
-                  console.log(`ℹ️ Branch '${finalBranchName}' already exists on remote, using existing branch`);
+          const pushCredentials = await createGitCredentialEnvironment(tokenToUse);
+          try {
+            const pushProcess = spawn('git', ['push', '-u', 'origin', finalBranchName], {
+              cwd: activeProjectPath,
+              stdio: 'pipe',
+              env: pushCredentials.env,
+            });
+            await new Promise<void>((resolve, reject) => {
+              let stderr = '';
+              let stdout = '';
+              pushProcess.stdout.on('data', (data) => { stdout += data.toString(); });
+              pushProcess.stderr.on('data', (data) => { stderr += data.toString(); });
+              pushProcess.on('close', (code) => {
+                if (code === 0) {
+                  console.log(`✅ Pushed branch '${finalBranchName}' to remote`);
                   resolve();
                 } else {
-                  reject(new Error(`Failed to push branch: ${stderr}`));
+                  // Check if branch exists on remote but has different commits
+                  if (stderr.includes('already exists') || stderr.includes('up-to-date')) {
+                    console.log(`ℹ️ Branch '${finalBranchName}' already exists on remote, using existing branch`);
+                    resolve();
+                  } else {
+                    reject(new Error(`Failed to push branch: ${stderr}`));
+                  }
                 }
-              }
+              });
+              pushProcess.on('error', reject);
             });
-          });
+          } finally {
+            await pushCredentials.cleanup();
+          }
 
           branchInfo = {
             name: finalBranchName,

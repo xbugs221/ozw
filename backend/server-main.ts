@@ -8,6 +8,7 @@
  * Start the backend server by importing the legacy operational module.
  */
 export async function startBackendServer(): Promise<void> {
+  await import('./load-env.js');
   const legacyServer = await import('./server-main-legacy.js');
   await legacyServer.startBackendServer();
 }
