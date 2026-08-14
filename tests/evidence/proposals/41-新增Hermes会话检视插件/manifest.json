@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "change": "41-新增Hermes会话检视插件",
+  "run_id": "20260814T054729.518870000Z",
+  "stage": "audit_3",
+  "attempt": 1,
+  "contract_hash": "db19c058fad1431414c3dad7f938cc6d3c3358a4cdadab3903ba705093f7a6be",
+  "tests_hash": "b7a197f56853bdad2d98d660beff55548b0c0de2eba884777847e32199d12fd4",
+  "evidence_hash": "4241c931022cf44031f13f6892aefd9190d6686d4ea6b183cc42fbb7da1b5365",
+  "evidence": [
+    {
+      "evidence_id": "inspector-browser-demo",
+      "source_path": "test-results/change-41-hermes-inspector/inspector-browser-demo.webm",
+      "archive_path": "tests/evidence/proposals/41-新增Hermes会话检视插件/inspector-browser-demo.webm",
+      "content_hash": "0316d02dfcbd8ef19cbcdd1c195de3d815a2b22673d8ea5010c7d3b28336a841"
+    },
+    {
+      "evidence_id": "inspector-readonly-state",
+      "source_path": "test-results/change-41-hermes-inspector/inspector-readonly-state.json",
+      "archive_path": "tests/evidence/proposals/41-新增Hermes会话检视插件/inspector-readonly-state.json",
+      "content_hash": "cde2a3c9bc4f79d6371b9ee5dbf3e04587caae1b232a5b725065b31b2e947df4"
+    }
+  ]
+}

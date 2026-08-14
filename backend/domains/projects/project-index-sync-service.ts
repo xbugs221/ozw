@@ -102,7 +102,7 @@ async function projectDirectoryExistsOnce(
   projectPath: string,
   cache: Map<string, Promise<boolean>> | null,
 ): Promise<boolean> {
-  /** PURPOSE: Avoid repeating slow NAS stat calls during a single startup backfill. */
+  /** PURPOSE: Avoid repeating slow VPS stat calls during a single startup backfill. */
   if (!cache) return projectDirectoryExists(projectPath);
   const existing = cache.get(projectPath);
   if (existing) return existing;
@@ -355,7 +355,7 @@ async function loadProjectConfigOnce(
   projectPath: string,
   cache: Map<string, Promise<LooseRecord>>,
 ): Promise<LooseRecord> {
-  /** PURPOSE: Avoid one small-file NAS read per transcript during a single startup backfill. */
+  /** PURPOSE: Avoid one small-file VPS read per transcript during a single startup backfill. */
   const existing = cache.get(projectPath);
   if (existing) {
     return existing;

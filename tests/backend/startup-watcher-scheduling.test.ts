@@ -48,7 +48,7 @@ test('HTTP listening does not wait for Provider watcher ready', async () => {
 
 test('Provider watcher startup failures are reported without escaping background work', async () => {
   /** Optional realtime setup may fail while the already-listening service remains usable. */
-  const expectedError = new Error('slow NAS watcher failed');
+  const expectedError = new Error('slow VPS watcher failed');
   const errors: unknown[] = [];
   scheduleProviderWatchersAfterListen({
     setupProviderWatchers: async () => {

@@ -34,6 +34,7 @@
     "build": "pnpm run build:server && vite build && node scripts/verify-production-entry-assets.mjs",
     "build:release": "pnpm run build",
     "build:server": "node scripts/clean-server-build.mjs && tsc -p tsconfig.build.json && node scripts/copy-runtime-assets.mjs",
+    "build:hermes-inspector": "vite build --config integrations/hermes-dashboard-inspector/vite.config.ts",
     "format": "./scripts/format-code.sh --staged",
     "format:check": "./scripts/format-code.sh --staged --check",
     "hooks:install": "git config core.hooksPath .githooks",

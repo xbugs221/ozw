@@ -1,6 +1,6 @@
 #!/bin/sh
 # PURPOSE: Pull the latest ozw source, rebuild one shared image, and recreate
-# both NAS viewers without touching Hermes data or ozw authentication volumes.
+# both VPS viewers without touching Hermes data or ozw authentication volumes.
 
 set -eu
 
@@ -19,7 +19,7 @@ ensure_directories() {
 
 sync_source() {
   # Use the already-installed alpine/git image because DSM does not expose git
-  # in the SSH user's PATH; use the NAS's existing proxy for GitHub access.
+  # in the SSH user's PATH; use the VPS's existing proxy for GitHub access.
   if [ ! -d "$SOURCE_DIR/.git" ]; then
     "$DOCKER" run --rm \
       -e HTTP_PROXY="$GIT_PROXY" -e HTTPS_PROXY="$GIT_PROXY" -e ALL_PROXY="$GIT_PROXY" \

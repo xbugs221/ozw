@@ -6,6 +6,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import Database from 'better-sqlite3';
+import {
+  decodeHermesStructuredContent,
+  hermesLineageIds,
+  isHermesCompressionContinuation,
+  isHermesCompressionUserEcho,
+} from '../../../shared/hermes-transcript-inspector.js';
 
 type HermesHome = { scope: string; dbPath: string; displayName?: string };
 type ReadOptions = { homes?: HermesHome[]; includeHidden?: boolean; limit?: number; cursor?: string | null };
@@ -135,7 +141,7 @@ function isBranch(row: Row): boolean {
 }
 
 function isCompressionContinuation(child: Row, parent: Row | undefined): boolean {
-  return Boolean(parent && parent.end_reason === 'compression' && !isDelegate(child) && !isBranch(child));
+  return isHermesCompressionContinuation(child, parent) && !isDelegate(child) && !isBranch(child);
 }
 
 function isCompressionParent(row: Row, children: Map<string, Row[]>): boolean {
@@ -306,45 +312,15 @@ export function listHermesSessions(options: ReadOptions = {}) {
 }
 
 function decodeStructuredContent(content: unknown): string {
-  if (typeof content !== 'string') return '';
-  if (!content.startsWith('\0json:')) return content;
-  try {
-    const parts = JSON.parse(content.slice(6));
-    if (!Array.isArray(parts)) return '';
-    return parts.map((part) => {
-      if (typeof part === 'string') return part;
-      if (part?.type === 'text' && typeof part.text === 'string') return part.text;
-      if (String(part?.type || '').match(/image|file|media/)) return '[Hermes media omitted]';
-      return '';
-    }).filter(Boolean).join('\n');
-  } catch { return '[Invalid structured Hermes content]'; }
+  return decodeHermesStructuredContent(content);
 }
 
 function isCompressionUserEcho(older: Row, newer: Row, sessionIds: string[]): boolean {
-  if (older.role !== 'user' || newer.role !== 'user') return false;
-  const olderSessionIndex = sessionIds.indexOf(String(older.session_id));
-  const newerSessionIndex = sessionIds.indexOf(String(newer.session_id));
-  if (olderSessionIndex < 0 || newerSessionIndex !== olderSessionIndex + 1) return false;
-  const olderContent = decodeStructuredContent(older.content).trim();
-  const newerContent = decodeStructuredContent(newer.content).trim();
-  return Boolean(olderContent && olderContent === newerContent);
+  return isHermesCompressionUserEcho(older, newer, sessionIds);
 }
 
 function lineage(rows: Row[], tipId: string): string[] {
-  const byId = new Map(rows.map((row) => [String(row.id), row]));
-  const result: string[] = [];
-  const seen = new Set<string>();
-  let current: Row | undefined = byId.get(tipId);
-  while (current && !seen.has(String(current.id))) {
-    const id = String(current.id);
-    seen.add(id);
-    result.unshift(id);
-    const parent = current.parent_session_id ? byId.get(String(current.parent_session_id)) : undefined;
-    // parent_session_id also represents ordinary branches and delegates.  Only a
-    // parent that ended by compression is a display-history continuation.
-    current = isCompressionContinuation(current, parent) ? parent : undefined;
-  }
-  return result;
+  return hermesLineageIds(rows, tipId);
 }
 
 function encodeHistoryCursor(value: HistoryCursor): string {

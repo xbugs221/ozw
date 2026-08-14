@@ -1,4 +1,4 @@
-# NAS 双实例部署
+# VPS 双实例部署
 
 本目录用于在群晖 Container Manager 上运行两个只读 Hermes 历史查看器：
 
@@ -17,4 +17,4 @@
 
 后续更新仍执行同一命令：它会通过 `alpine/git` 拉取 `main`、构建共享镜像并重建两个容器。数据库和 Hermes 数据均在宿主机目录中，不会因重建丢失。
 
-脚本默认使用 NAS 现有代理访问 GitHub；代理地址变化时可临时覆盖：`GIT_PROXY=http://host:port /volume1/docker/app-data/ozw-deploy/update.sh`。
+脚本默认使用 VPS 现有代理访问 GitHub；代理地址变化时可临时覆盖：`GIT_PROXY=http://host:port /volume1/docker/app-data/ozw-deploy/update.sh`。
