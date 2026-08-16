@@ -71,7 +71,7 @@ export function createInspectorView(sdk: SDK): () => any {
       element(React, 'header', { className: 'hti-header' },
         element(React, 'div', { className: 'hti-heading' },
           element(React, 'div', null,
-            element(React, 'h1', null, 'Hermes 会话检视'),
+            element(React, 'h1', null, '渲染'),
             element(React, 'p', null, '从压缩链路到最终回复，按真实执行顺序阅读。')),
           element(React, Badge, { variant: 'outline', className: 'hti-readonly-badge' }, '只读')),
         element(React, 'p', { className: 'hti-notice' }, '仅展示已持久化的 reasoning，不代表模型隐藏推理。')),

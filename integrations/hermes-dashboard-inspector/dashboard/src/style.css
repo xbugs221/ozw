@@ -87,21 +87,31 @@
 .hti-rich-text { min-width: 0; font-size: .875rem; line-height: 1.65; overflow-wrap: anywhere; }
 .hti-rich-text > :first-child { margin-top: 0; }
 .hti-rich-text > :last-child { margin-bottom: 0; }
-.hti-rich-text p, .hti-rich-text ul, .hti-rich-text ol, .hti-rich-text h1, .hti-rich-text h2, .hti-rich-text h3 { margin: .55rem 0; }
-.hti-rich-text h1, .hti-rich-text h2, .hti-rich-text h3 { color: var(--hti-text); font-weight: 700; line-height: 1.3; }
+.hti-rich-text p, .hti-rich-text ul, .hti-rich-text ol, .hti-rich-text h1, .hti-rich-text h2, .hti-rich-text h3, .hti-rich-text h4, .hti-rich-text h5, .hti-rich-text h6 { margin: .55rem 0; }
+.hti-rich-text h1, .hti-rich-text h2, .hti-rich-text h3, .hti-rich-text h4, .hti-rich-text h5, .hti-rich-text h6 { color: var(--hti-text); font-weight: 700; line-height: 1.3; }
 .hti-rich-text h1 { font-size: 1.35rem; }
 .hti-rich-text h2 { font-size: 1.15rem; }
 .hti-rich-text h3 { font-size: 1rem; }
+.hti-rich-text h4, .hti-rich-text h5, .hti-rich-text h6 { font-size: .9rem; }
 .hti-rich-text ul, .hti-rich-text ol { padding-left: 1.25rem; }
 .hti-rich-text ul { list-style: disc; }
 .hti-rich-text ol { list-style: decimal; }
+.hti-rich-text .contains-task-list { padding-left: 0; list-style: none; }
+.hti-rich-text .task-list-item { list-style: none; }
+.hti-rich-text .task-list-item input { margin: 0 .35rem 0 0; accent-color: var(--hti-accent); }
 .hti-rich-text a { color: var(--hti-accent); text-decoration: underline; text-underline-offset: 2px; }
 .hti-rich-text blockquote { margin: .55rem 0; border-left: 2px solid var(--hti-border); padding-left: .75rem; color: var(--hti-muted); }
+.hti-rich-text hr { height: 0; margin: .9rem 0; border: 0; border-top: 1px solid var(--hti-border); }
 .hti-rich-text code { border: 1px solid var(--hti-border-soft); border-radius: .3rem; padding: .08rem .3rem; color: color-mix(in srgb, var(--hti-code-text) 92%, var(--hti-text)); font-family: var(--theme-font-mono, ui-monospace, monospace); font-size: .82em; background: var(--hti-surface-raised); }
-.hti-code-block { overflow: hidden; margin: .65rem 0; border: 1px solid var(--hti-border); border-radius: .5rem; background: var(--hti-code-surface); }
-.hti-code-language { display: block; padding: .35rem .7rem; border-bottom: 1px solid var(--hti-border); color: var(--hti-muted); font-size: .68rem; text-transform: uppercase; }
-.hti-code-block pre { overflow: auto; margin: 0; padding: .75rem; font-family: var(--theme-font-mono, ui-monospace, monospace); font-size: .78rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.hti-code-block pre code { border: 0; padding: 0; color: inherit; background: transparent; font: inherit; white-space: inherit; }
+.hti-rich-text table { display: block; width: max-content; min-width: 100%; max-width: 100%; margin: .65rem 0; overflow-x: auto; border: 1px solid var(--hti-border); border-radius: .5rem; border-collapse: collapse; color: var(--hti-text); font-size: .82rem; line-height: 1.45; overscroll-behavior-inline: contain; }
+.hti-rich-text th, .hti-rich-text td { min-width: 7rem; border-right: 1px solid var(--hti-border-soft); border-bottom: 1px solid var(--hti-border-soft); padding: .45rem .6rem; text-align: left; vertical-align: top; }
+.hti-rich-text th:last-child, .hti-rich-text td:last-child { border-right: 0; }
+.hti-rich-text tbody tr:last-child td { border-bottom: 0; }
+.hti-rich-text th { background: var(--hti-surface-raised); font-weight: 650; white-space: nowrap; }
+.hti-rich-text th[align="center"], .hti-rich-text td[align="center"] { text-align: center; }
+.hti-rich-text th[align="right"], .hti-rich-text td[align="right"] { text-align: right; }
+.hti-rich-text pre { overflow: auto; margin: .65rem 0; border: 1px solid var(--hti-border); border-radius: .5rem; padding: .75rem; color: var(--hti-code-text); background: var(--hti-code-surface); font-family: var(--theme-font-mono, ui-monospace, monospace); font-size: .78rem; white-space: pre; }
+.hti-rich-text pre code { border: 0; padding: 0; color: inherit; background: transparent; font: inherit; white-space: inherit; }
 
 /* Turn-level process details copied from OZW TurnNonBodyGroup density. */
 .hti-process-group { min-width: 0; overflow: hidden; border: 1px solid var(--hti-border-soft); border-radius: .375rem; background: color-mix(in srgb, var(--hti-surface) 60%, transparent); padding: .5rem .75rem; font-size: .875rem; }

@@ -13,7 +13,7 @@ function register(): void {
   const sdk = (window as any).__HERMES_PLUGIN_SDK__;
   const registry = (window as any).__HERMES_PLUGINS__;
   if (!sdk || !registry || !supportsSDK(String(sdk.sdkVersion || '0.0.0'))) return;
-  registry.register('hermes-transcript-inspector', createInspectorView(sdk));
+  registry.register('render', createInspectorView(sdk));
 }
 
 register();

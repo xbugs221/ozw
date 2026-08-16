@@ -4,6 +4,8 @@
  */
 import type { HermesDisplayEvent, HermesTurn } from '../../../../shared/hermes-transcript-inspector';
 import type { ChatMessage } from '../../../../frontend/components/chat/types/types';
+import { micromark } from 'micromark';
+import { gfm, gfmHtml } from 'micromark-extension-gfm';
 import {
   buildTurnDisplayBlocks,
   type TurnNonBodyGroupBlock,
@@ -116,85 +118,21 @@ function formatMessageTime(turn: OrderedHermesTurn): string {
   return value > 0 ? new Date(value).toLocaleTimeString() : '';
 }
 
-/** 仅允许普通网页、邮件、页面锚点和相对路径链接，拒绝可执行协议。 */
-function safeLinkHref(value: string): string | null {
-  const href = value.trim();
-  if (/^(?:https?:|mailto:|#|\/|\.\.?\/)/i.test(href)) return href;
-  return /^[^\s:/?#][^\s:]*$/.test(href) ? href : null;
+/** 使用标准 CommonMark + GFM 生成安全 HTML；原始 HTML 和危险链接不会被执行。 */
+export function renderMarkdownHtml(content: string): string {
+  return micromark(content, {
+    allowDangerousHtml: false,
+    extensions: [gfm()],
+    htmlExtensions: [gfmHtml()],
+  });
 }
 
-/** 把行内代码和 Markdown 链接渲染为安全 React 节点，不解释 raw HTML。 */
-function InlineText({ React, text }: { React: ReactRuntime; text: string }): any {
-  const chunks = text.split(/(`[^`]+`|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|\*[^*]+\*)/g).filter(Boolean);
-  return element(React, React.Fragment, null, ...chunks.map((chunk, index) => {
-    if (chunk.startsWith('`') && chunk.endsWith('`')) {
-      return element(React, 'code', { key: index }, chunk.slice(1, -1));
-    }
-    const link = chunk.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    const href = link ? safeLinkHref(link[2]) : null;
-    if (link && href) {
-      const external = /^https?:/i.test(href);
-      return element(React, 'a', {
-        key: index,
-        href,
-        target: external ? '_blank' : undefined,
-        rel: external ? 'noreferrer' : undefined,
-      }, link[1]);
-    }
-    if (chunk.startsWith('**') && chunk.endsWith('**')) {
-      return element(React, 'strong', { key: index }, chunk.slice(2, -2));
-    }
-    if (chunk.startsWith('*') && chunk.endsWith('*')) {
-      return element(React, 'em', { key: index }, chunk.slice(1, -1));
-    }
-    return chunk;
-  }));
-}
-
-/** 渲染聊天正文与 thinking 共用的轻量 Markdown 结构。 */
+/** 渲染聊天正文与 thinking 共用的完整 CommonMark + GFM 文档。 */
 function RichText({ React, content }: { React: ReactRuntime; content: string }): any {
-  const blocks = content.split(/(```[\s\S]*?```)/g).filter(Boolean);
-  return element(React, 'div', { className: 'hti-rich-text' }, ...blocks.flatMap((block, blockIndex) => {
-    if (block.startsWith('```')) {
-      const match = block.match(/^```([^\n]*)\n?([\s\S]*?)```$/);
-      return [element(React, 'div', { className: 'hti-code-block', key: `code-${blockIndex}` },
-        match?.[1] ? element(React, 'span', { className: 'hti-code-language' }, match[1]) : null,
-        element(React, 'pre', null,
-          element(React, 'code', {
-            className: match?.[1] ? `language-${match[1].trim().replace(/[^A-Za-z0-9_-]/g, '-')}` : undefined,
-          }, match?.[2] || block.slice(3, -3))))];
-    }
-    return block.trim().split(/\n\s*\n/).filter(Boolean).map((group, groupIndex) => {
-      const lines = group.split('\n');
-      const heading = lines[0]?.match(/^(#{1,3})\s+(.+)$/);
-      if (heading) {
-        return element(React, `h${heading[1].length}`, { key: `heading-${blockIndex}-${groupIndex}` },
-          element(React, InlineText, { React, text: heading[2] }));
-      }
-      if (lines.every(line => /^\s*>\s?/.test(line))) {
-        return element(React, 'blockquote', { key: `quote-${blockIndex}-${groupIndex}` },
-          element(React, InlineText, { React, text: lines.map(line => line.replace(/^\s*>\s?/, '')).join(' ') }));
-      }
-      if (lines.every(line => /^\s*[-*]\s+/.test(line))) {
-        return element(React, 'ul', { key: `list-${blockIndex}-${groupIndex}` }, ...lines.map((line, lineIndex) =>
-          element(React, 'li', { key: lineIndex }, element(React, InlineText, {
-            React,
-            text: line.replace(/^\s*[-*]\s+/, ''),
-          }))));
-      }
-      if (lines.every(line => /^\s*\d+\.\s+/.test(line))) {
-        return element(React, 'ol', { key: `ordered-list-${blockIndex}-${groupIndex}` }, ...lines.map((line, lineIndex) =>
-          element(React, 'li', { key: lineIndex }, element(React, InlineText, {
-            React,
-            text: line.replace(/^\s*\d+\.\s+/, ''),
-          }))));
-      }
-      return element(React, 'p', { key: `paragraph-${blockIndex}-${groupIndex}` }, ...lines.flatMap((line, lineIndex) => [
-        lineIndex > 0 ? ' ' : null,
-        element(React, InlineText, { key: `line-${lineIndex}`, React, text: line }),
-      ]));
-    });
-  }));
+  return element(React, 'div', {
+    className: 'hti-rich-text',
+    dangerouslySetInnerHTML: { __html: renderMarkdownHtml(content) },
+  });
 }
 
 /** 为 buildTurnDisplayBlocks 构造窄 ChatMessage 适配，复用 OZW 的分组与默认开闭逻辑。 */

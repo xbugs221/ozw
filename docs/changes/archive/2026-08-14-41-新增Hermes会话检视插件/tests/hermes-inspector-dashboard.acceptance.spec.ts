@@ -443,7 +443,7 @@ async function captureStableHermesVideo(browser: any, inspectorUrl: string, vide
     if (frame === page.mainFrame() && frame.url() !== 'about:blank') navigations.push(frame.url());
   });
   const assertInspectorState = async (label: string) => {
-    assert.equal(new URL(page.url()).pathname, '/session-inspector', `${label} 必须停留 Inspector`);
+    assert.equal(new URL(page.url()).pathname, '/render', `${label} 必须停留渲染页`);
     assert.equal(await page.locator('[data-component="HermesTranscriptInspector"]').isVisible(), true, `${label} 必须显示 Inspector 根节点`);
     assert.equal(await page.locator('[role="alert"]').count(), 0, `${label} 不得出现错误 alert`);
     assert.deepEqual(problems, [], `${label} 不得出现浏览器问题：${problems.join('\n')}`);
@@ -472,7 +472,7 @@ async function captureStableHermesVideo(browser: any, inspectorUrl: string, vide
   await toggleDetails(thinking); await page.waitForTimeout(350); assert.equal(await isDetailsOpen(thinking), false);
   await toggleDetails(outer); await page.waitForTimeout(500); assert.equal(await isDetailsOpen(outer), false);
   await assertInspectorState('录制结束');
-  assert.ok(navigations.length > 0 && navigations.every(url => new URL(url).pathname === '/session-inspector'), `视频禁止进入其他路由：${navigations.join(', ')}`);
+  assert.ok(navigations.length > 0 && navigations.every(url => new URL(url).pathname === '/render'), `视频禁止进入其他路由：${navigations.join(', ')}`);
   const video = page.video();
   await page.close();
   await context.close();
@@ -761,8 +761,14 @@ try:
         "assistant",
         """## 部署检查结论
 
-- 已确认目录为 \x60/srv/demo-project\x60
-- 未执行任何写操作
+---
+
+| 检查项 | 状态 |
+| --- | --- |
+| 配置 | 通过 |
+
+- [x] 已确认只读
+- [ ] 等待复核
 
 1. 保持 \x60state.db\x60 只读
 2. 记录权限错误
@@ -899,7 +905,7 @@ test('真实 Dashboard 按 OZW 当前行为检视有序 Hermes 执行流程', { 
 
   const root = await mkdtemp(path.join(tmpdir(), 'ozw-hermes-inspector-'));
   const hermesHome = path.join(root, '.hermes');
-  const pluginTarget = path.join(hermesHome, 'plugins/hermes-transcript-inspector');
+  const pluginTarget = path.join(hermesHome, 'plugins/render');
   const dbPath = path.join(hermesHome, 'state.db');
   const videoDir = path.join(root, 'video');
   const logs: string[] = [];
@@ -915,7 +921,7 @@ test('真实 Dashboard 按 OZW 当前行为检视有序 Hermes 执行流程', { 
     await cp(PLUGIN_SOURCE, pluginTarget, { recursive: true });
     await writeFile(
       path.join(hermesHome, 'config.yaml'),
-      'plugins:\n  enabled:\n    - hermes-transcript-inspector\n',
+      'plugins:\n  enabled:\n    - render\n',
       'utf8',
     );
     await seedHermesState(python, hermesRepo, hermesHome);
@@ -989,12 +995,12 @@ test('真实 Dashboard 按 OZW 当前行为检视有序 Hermes 执行流程', { 
       }
     });
 
-    const inspectorUrl = `${baseUrl}/session-inspector?profile=default&session=inspector-child`;
+    const inspectorUrl = `${baseUrl}/render?profile=default&session=inspector-child`;
     const inspectorResponse = await page.goto(inspectorUrl);
     assert.ok(inspectorResponse?.ok(), `Inspector 深链必须返回 2xx，实际 ${inspectorResponse?.status()}`);
-    assert.equal(new URL(page.url()).pathname, '/session-inspector', '浏览器必须停留在 Inspector 深链');
+    assert.equal(new URL(page.url()).pathname, '/render', '浏览器必须停留在渲染深链');
     assert.ok((await page.title()).trim(), 'Dashboard 页面必须有标题');
-    await page.getByRole('link', { name: 'Hermes 会话检视' }).waitFor();
+    await page.getByRole('link', { name: '渲染' }).waitFor();
     const timeline = page.getByTestId('hermes-inspector-timeline');
     await timeline.waitFor();
 
@@ -1011,6 +1017,12 @@ test('真实 Dashboard 按 OZW 当前行为检视有序 Hermes 执行流程', { 
     assert.equal(await page.getByText(R1_FIRST, { exact: true }).isVisible(), false, '闭合时不得泄露多行 reasoning 正文');
     assert.equal(await page.getByText(T1_OUTPUT, { exact: true }).isVisible(), false, '闭合时不得泄露工具 output');
     assert.equal(await finalHeading.isVisible(), true, 'final Markdown 必须默认可见');
+    assert.ok(await timeline.locator('.hti-rich-text hr').count(), 'CommonMark 分割线必须渲染为 hr');
+    const markdownTable = timeline.locator('.hti-rich-text table').first();
+    await markdownTable.waitFor();
+    assert.equal(await markdownTable.getByRole('columnheader', { name: '检查项' }).count(), 1, 'GFM 表格必须渲染语义表头');
+    assert.equal(await markdownTable.getByRole('cell', { name: '通过' }).count(), 1, 'GFM 表格必须渲染语义单元格');
+    assert.equal(await timeline.locator('.hti-rich-text input[type="checkbox"][checked]').count(), 1, 'GFM 任务列表必须保留完成状态');
     assert.equal(await timeline.locator('details.hti-raw-panel').count(), 0, 'raw 默认不得渲染');
     await assertNoPageHorizontalOverflow(page, 'desktop default');
     await page.screenshot({ path: path.join(CHANGE_RESULTS, 'desktop-default.png'), fullPage: false });
@@ -1196,7 +1208,7 @@ test('真实 Dashboard 按 OZW 当前行为检视有序 Hermes 执行流程', { 
     await search.fill('');
 
     // 从 compression parent 深链也必须恢复真正 tip，而不是最新 sibling branch。
-    await page.goto(`${baseUrl}/session-inspector?profile=default&session=inspector-parent`);
+    await page.goto(`${baseUrl}/render?profile=default&session=inspector-parent`);
     await page.getByTestId('hermes-inspector-timeline').waitFor();
     await page.getByRole('heading', { name: FINAL_HEADING, exact: true }).waitFor();
     assert.equal(await page.getByText('更新 sibling 不得截断 compression lineage').count(), 0, '父深链不得跳入 sibling branch');

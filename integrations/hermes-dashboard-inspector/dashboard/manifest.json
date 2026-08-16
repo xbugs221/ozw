@@ -1,12 +1,16 @@
 {
-  "name": "hermes-transcript-inspector",
-  "label": "Hermes 会话检视",
-  "description": "只读检查 compression lineage、reasoning 与工具调用详情",
-  "icon": "Eye",
+  "name": "render",
+  "label": "Render",
+  "labels": {
+    "en": "Render",
+    "zh": "渲染"
+  },
+  "description": "按 CommonMark 与 GFM 渲染 Hermes 会话记录",
+  "icon": "FileText",
   "version": "0.1.0",
   "sdk_version": "1.1.0",
   "tab": {
-    "path": "/session-inspector",
+    "path": "/render",
     "position": "after:sessions"
   },
   "entry": "dist/index.js",

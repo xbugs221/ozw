@@ -1,13 +1,20 @@
 /**
- * 文件目的：长期保护 ozw 与 Dashboard Inspector 共用的 Hermes transcript 语义。
- * 业务边界：仅验证纯转换，不访问数据库、网络或任一运行时。
+ * 文件目的：长期保护 ozw 与 Dashboard Inspector 共用的 Hermes transcript 语义和 SSR 输出。
+ * 业务边界：仅验证纯转换与本地 React 渲染，不访问数据库、网络或 Hermes 运行时。
  */
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import * as React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   hermesLineageIds,
   normalizeHermesTranscript,
 } from '../../shared/hermes-transcript-inspector.ts';
+import {
+  createTranscriptComponents,
+  renderMarkdownHtml,
+} from '../../integrations/hermes-dashboard-inspector/dashboard/src/transcript-components.ts';
 import {
   listSessions,
   loadTranscript,
@@ -368,4 +375,75 @@ test('会话搜索使用只读全文端点并保留 compression tip', async () =
   assert.deepEqual(requests, [
     '/api/sessions/search?q=permission%20denied&limit=100&profile=default',
   ]);
+});
+
+test('assistant 使用 CommonMark + GFM 渲染常见 Markdown，并拒绝危险 HTML', async () => {
+  /** 场景：真实行程回答同时包含分割线、表格、任务、引用、代码和不可信输入。 */
+  const markdown = [
+    '---',
+    '### 预约清单',
+    '| 事项 | 渠道 | 时段 |',
+    '| :--- | :---: | ---: |',
+    '| 场馆甲 | 预约平台\\|移动端 | `日期甲\\|日期乙` |',
+    '',
+    '- [x] 已完成',
+    '- [ ] 待处理',
+    '',
+    '> 引用说明',
+    '',
+    '```ts',
+    'const ready = true;',
+    '```',
+    '',
+    '~~已删除~~ https://example.com',
+    '',
+    '<script>alert("unsafe")</script>',
+    '[危险链接](javascript:alert(1))',
+  ].join('\n');
+  const markdownHtml = renderMarkdownHtml(markdown);
+  assert.match(markdownHtml, /<hr\s*\/>/);
+  assert.match(markdownHtml, /<table>[\s\S]*<th align="left">事项<\/th>/);
+  assert.match(markdownHtml, /<td align="center">预约平台\|移动端<\/td>/);
+  assert.match(markdownHtml, /<td align="right"><code>日期甲\|日期乙<\/code><\/td>/);
+  assert.match(markdownHtml, /<input type="checkbox" disabled="" checked="" \/>/);
+  assert.match(markdownHtml, /<blockquote>[\s\S]*引用说明[\s\S]*<\/blockquote>/);
+  assert.match(markdownHtml, /<pre><code class="language-ts">const ready = true;/);
+  assert.match(markdownHtml, /<del>已删除<\/del>/);
+  assert.match(markdownHtml, /href="https:\/\/example\.com"/);
+  assert.doesNotMatch(markdownHtml, /<script>|javascript:/);
+
+  const { TranscriptTimeline } = createTranscriptComponents({
+    React,
+    hooks: {
+      useMemo: React.useMemo,
+      useState: React.useState,
+    },
+  });
+  const html = renderToStaticMarkup(React.createElement(TranscriptTimeline, {
+    turns: [{
+      key: 'table-turn',
+      user: '',
+      events: [{
+        kind: 'assistant',
+        key: 'table-answer',
+        content: markdown,
+        phase: 'final',
+        rowId: 1,
+        raw: [],
+      }],
+      raw: [],
+    }],
+    rawOpen: false,
+  }));
+
+  assert.match(html, /<div class="hti-rich-text"><hr \/>[\s\S]*<h3>预约清单<\/h3>/);
+  assert.match(html, /<table>[\s\S]*<thead>[\s\S]*<tbody>/);
+  assert.doesNotMatch(html, /:---|---:|<script>|javascript:/);
+
+  const style = await readFile(
+    new URL('../../integrations/hermes-dashboard-inspector/dashboard/src/style.css', import.meta.url),
+    'utf8',
+  );
+  assert.match(style, /\.hti-rich-text hr\s*\{[^}]*border-top:\s*1px solid/);
+  assert.match(style, /\.hti-rich-text table\s*\{[^}]*min-width:\s*100%;[^}]*overflow-x:\s*auto;/);
 });
