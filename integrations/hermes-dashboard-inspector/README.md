@@ -19,3 +19,9 @@ plugins:
 修改后重启 Hermes Dashboard，使其重新扫描插件目录。
 
 插件运行时只使用 Dashboard 的受认证 GET Session API，不连接 ozw 服务或数据库。
+
+## 南科大青橙主题
+
+将 `theme/sustech-cyan-orange.yaml` 复制到
+`~/.hermes/dashboard-themes/`，刷新 Dashboard 后即可在主题切换器中选择
+`SUSTech Cyan Orange`。
