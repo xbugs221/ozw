@@ -2,13 +2,14 @@
 
 Provides a workspace-scoped text editor API and an authenticated raw shell
 PTY for the standalone Workbench plugin.  HTTP routes are mounted by Hermes at
-``/api/plugins/render``; WebSocket upgrades reuse Hermes' canonical dashboard
+``/api/plugins/workbench``; WebSocket upgrades reuse Hermes' canonical dashboard
 authentication gate.
 """
 
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import json
 import os
@@ -18,7 +19,6 @@ import signal
 import struct
 import tempfile
 import termios
-import fcntl
 import time
 from pathlib import Path
 from typing import Any

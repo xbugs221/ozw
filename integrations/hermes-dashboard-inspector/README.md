@@ -9,8 +9,7 @@ pnpm run build:hermes-inspector
 cp -R integrations/hermes-dashboard-inspector ~/.hermes/plugins/workbench
 ```
 
-该插件只有 Dashboard 资源，没有 `plugin.yaml` 或 Python 入口，因此不要运行
-`hermes plugins enable`。请在 Hermes 的 `config.yaml` 中启用其 Dashboard manifest：
+插件包含 Dashboard 资源和同目录 `plugin_api.py`，后端提供受控文件读写与容器内原始 Shell。请在 Hermes 的 `config.yaml` 中启用插件：
 
 ```yaml
 plugins:
@@ -20,7 +19,19 @@ plugins:
 
 修改后重启 Hermes Dashboard，使其重新扫描插件目录。
 
-插件运行时假定 Hermes 后端提供 `workspace`、`files`、`file` GET/PUT、`shell` WebSocket API，并继续使用 Hermes 自带 `/api/pty` 承载聊天 TUI；不连接 ozw 服务或数据库。
+插件后端提供 `workspace`、`files`、`file` GET/PUT 与 `shell` WebSocket API，并继续使用 Hermes 自带 `/api/pty` 承载聊天 TUI；不连接 ozw 服务或数据库。
+
+可选配置：
+
+```yaml
+dashboard:
+  workbench:
+    root: /opt/data
+    max_shells: 4
+    shell_idle_timeout_seconds: 1800
+```
+
+原始 Shell 运行在 Hermes 容器中，工作目录为 `root`，但不是 chroot；它可以访问该容器账号本来就能访问的路径。
 
 ## 南科大青橙主题
 

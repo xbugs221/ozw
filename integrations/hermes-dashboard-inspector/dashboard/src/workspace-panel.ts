@@ -2,7 +2,14 @@
  * 文件目的：提供 OZW 风格的工作区文件树、Markdown 预览和 CodeMirror 文本编辑保存流程。
  * 业务边界：所有文件操作都限定到会话绑定的 workspace id。
  */
-import { EditorView } from '@codemirror/view';
+import { css } from '@codemirror/lang-css';
+import { html } from '@codemirror/lang-html';
+import { javascript } from '@codemirror/lang-javascript';
+import { json } from '@codemirror/lang-json';
+import { markdown } from '@codemirror/lang-markdown';
+import { python } from '@codemirror/lang-python';
+import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { EditorView, highlightActiveLine, highlightActiveLineGutter, lineNumbers } from '@codemirror/view';
 import { renderMarkdownHtml } from './transcript-components';
 import {
   isMarkdownPath,
@@ -14,7 +21,7 @@ import {
 } from './workbench-api';
 
 type SDK = Record<string, any>;
-type CodeEditorProps = { value: string; onChange: (value: string) => void };
+type CodeEditorProps = { path: string; value: string; onChange: (value: string) => void };
 type WorkspacePanelProps = { workspace: Workspace | null };
 
 /** 创建使用宿主 React 实例的元素，避免插件打包第二份 React。 */
@@ -30,12 +37,23 @@ function fileIcon(entry: FileEntry, expanded = false): string {
   return '·';
 }
 
+/** Select CodeMirror syntax support from the current file name. */
+function languageForPath(path: string): any[] {
+  if (/\.(?:js|jsx|mjs|cjs|ts|tsx)$/i.test(path)) return [javascript({ typescript: /\.(?:ts|tsx)$/i.test(path), jsx: /\.(?:jsx|tsx)$/i.test(path) })];
+  if (/\.py$/i.test(path)) return [python()];
+  if (/\.jsonc?$/i.test(path)) return [json()];
+  if (/\.css$/i.test(path)) return [css()];
+  if (/\.(?:html?|vue|svelte)$/i.test(path)) return [html()];
+  if (isMarkdownPath(path)) return [markdown()];
+  return [];
+}
+
 /** 创建只使用原生 CodeMirror 包的受控文本编辑器。 */
 function createCodeEditor(sdk: SDK): (props: CodeEditorProps) => any {
   const React = sdk.React;
   const { useEffect, useRef } = sdk.hooks;
 
-  return function CodeEditor({ value, onChange }: CodeEditorProps): any {
+  return function CodeEditor({ path, value, onChange }: CodeEditorProps): any {
     /** 编辑路径：挂载时创建 EditorView，切文件时重建以避免旧文档状态泄漏。 */
     const hostRef = useRef(null as HTMLDivElement | null);
     const changeRef = useRef(onChange);
@@ -47,6 +65,11 @@ function createCodeEditor(sdk: SDK): (props: CodeEditorProps) => any {
         doc: value,
         parent: hostRef.current,
         extensions: [
+          lineNumbers(),
+          highlightActiveLine(),
+          highlightActiveLineGutter(),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          ...languageForPath(path),
           EditorView.lineWrapping,
           EditorView.updateListener.of(update => {
             if (update.docChanged) changeRef.current(update.state.doc.toString());
@@ -98,7 +121,7 @@ export function createWorkspacePanel(sdk: SDK): (props: WorkspacePanelProps) => 
       if (children.length > 0) return;
       setLoading(true);
       setLoadError('');
-      try { setChildren(await listFiles(sdk.fetchJSON, workspaceId, entry.path)); }
+      try { setChildren(await listFiles(sdk.fetchJSON, entry.path)); }
       catch (error) { setLoadError(String(error)); }
       finally { setLoading(false); }
     };
@@ -130,6 +153,7 @@ export function createWorkspacePanel(sdk: SDK): (props: WorkspacePanelProps) => 
     const [selectedPath, setSelectedPath] = useState('');
     const [content, setContent] = useState('');
     const [savedContent, setSavedContent] = useState('');
+    const [version, setVersion] = useState('');
     const [mode, setMode] = useState('edit' as 'edit' | 'preview');
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
@@ -139,10 +163,11 @@ export function createWorkspacePanel(sdk: SDK): (props: WorkspacePanelProps) => 
       setSelectedPath('');
       setContent('');
       setSavedContent('');
+      setVersion('');
       if (!workspace) return undefined;
       let active = true;
       setLoading(true);
-      listFiles(sdk.fetchJSON, workspace.id, '')
+      listFiles(sdk.fetchJSON, '')
         .then(files => active && setRootFiles(files))
         .catch(error => active && setMessage(String(error)))
         .finally(() => active && setLoading(false));
@@ -152,33 +177,47 @@ export function createWorkspacePanel(sdk: SDK): (props: WorkspacePanelProps) => 
     /** 读取用户选择的文件，并根据扩展名选择默认视图。 */
     const openFile = useCallback(async (entry: FileEntry) => {
       if (!workspace) return;
+      if (content !== savedContent && !window.confirm('当前文件尚未保存，仍要切换吗？ / Discard unsaved changes?')) return;
       setSelectedPath(entry.path);
       setLoading(true);
       setMessage('');
       try {
-        const nextContent = await readFile(sdk.authedFetch, workspace.id, entry.path);
-        setContent(nextContent);
-        setSavedContent(nextContent);
+        const document = await readFile(sdk.fetchJSON, entry.path);
+        setContent(document.content);
+        setSavedContent(document.content);
+        setVersion(document.version);
         setMode(isMarkdownPath(entry.path) ? 'preview' : 'edit');
       } catch (error) {
         setMessage(String(error));
       } finally {
         setLoading(false);
       }
-    }, [workspace?.id]);
+    }, [content, savedContent, workspace?.id]);
 
     /** 保存当前完整文档，成功后重置未保存状态。 */
     const save = useCallback(async () => {
       if (!workspace || !selectedPath || content === savedContent) return;
       setMessage('保存中… / Saving…');
       try {
-        await writeFile(sdk.authedFetch, workspace.id, selectedPath, content);
+        const saved = await writeFile(sdk.fetchJSON, selectedPath, content, version);
         setSavedContent(content);
+        setVersion(saved.version);
         setMessage('已保存 / Saved');
       } catch (error) {
         setMessage(String(error));
       }
-    }, [content, savedContent, selectedPath, workspace?.id]);
+    }, [content, savedContent, selectedPath, version, workspace?.id]);
+
+    useEffect(() => {
+      if (content === savedContent) return undefined;
+      /** Warn before a browser navigation drops unsaved editor content. */
+      const warn = (event: BeforeUnloadEvent) => {
+        event.preventDefault();
+        event.returnValue = '';
+      };
+      window.addEventListener('beforeunload', warn);
+      return () => window.removeEventListener('beforeunload', warn);
+    }, [content, savedContent]);
 
     /** 捕获工作台内的标准保存快捷键。 */
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -229,7 +268,7 @@ export function createWorkspacePanel(sdk: SDK): (props: WorkspacePanelProps) => 
               className: 'hti-markdown-preview hti-rich-text',
               dangerouslySetInnerHTML: { __html: renderMarkdownHtml(content) },
             })
-            : element(React, CodeEditor, { key: selectedPath, value: content, onChange: setContent }))
+            : element(React, CodeEditor, { key: selectedPath, path: selectedPath, value: content, onChange: setContent }))
           : element(React, 'div', { className: 'hti-panel-empty' },
             element(React, 'strong', null, '选择文件 / Select a file'),
             element(React, 'span', null, '从左侧文件树打开文件。 / Open a file from the tree.'))));

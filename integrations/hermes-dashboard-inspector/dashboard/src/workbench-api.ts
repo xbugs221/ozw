@@ -4,7 +4,7 @@
  */
 
 export type FetchJSON = <T>(url: string, init?: RequestInit) => Promise<T>;
-export type AuthedFetch = (url: string, init?: RequestInit) => Promise<Response>;
+const WORKBENCH_API = '/api/plugins/workbench';
 
 export type Workspace = {
   id: string;
@@ -17,6 +17,13 @@ export type FileEntry = {
   path: string;
   type: 'file' | 'directory';
   size?: number;
+};
+
+export type FileDocument = {
+  content: string;
+  version: string;
+  path: string;
+  size: number;
 };
 
 /** 对路径和身份参数编码，避免工作区路径改变请求结构。 */
@@ -45,7 +52,7 @@ export async function loadWorkspace(
   sessionId: string,
 ): Promise<Workspace | null> {
   const response = await fetchJSON<any>(
-    `/api/workspace?profile=${query(profile)}&session=${query(sessionId)}`,
+    `${WORKBENCH_API}/workspace?profile=${query(profile)}&session=${query(sessionId)}`,
   );
   return normalizeWorkspace(response);
 }
@@ -82,45 +89,40 @@ function normalizeFiles(value: any, parentPath: string): FileEntry[] {
 /** 浏览工作区中的一个目录。 */
 export async function listFiles(
   fetchJSON: FetchJSON,
-  workspaceId: string,
   path: string,
 ): Promise<FileEntry[]> {
   const response = await fetchJSON<any>(
-    `/api/files?workspace=${query(workspaceId)}&path=${query(path)}`,
+    `${WORKBENCH_API}/files?path=${query(path)}`,
   );
   return normalizeFiles(response, path);
 }
 
 /** 读取 UTF-8 文本文件；二进制响应由浏览器替换字符保护。 */
 export async function readFile(
-  authedFetch: AuthedFetch,
-  workspaceId: string,
+  fetchJSON: FetchJSON,
   path: string,
-): Promise<string> {
-  const response = await authedFetch(
-    `/api/file?workspace=${query(workspaceId)}&path=${query(path)}`,
-  );
-  if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`);
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const payload = await response.json();
-    return String(payload?.content ?? payload?.text ?? '');
-  }
-  return await response.text();
+): Promise<FileDocument> {
+  const payload = await fetchJSON<any>(`${WORKBENCH_API}/file?path=${query(path)}`);
+  return {
+    content: String(payload?.content ?? ''),
+    version: String(payload?.version ?? ''),
+    path: String(payload?.path ?? path),
+    size: Number(payload?.size ?? 0),
+  };
 }
 
 /** 使用 PUT 保存编辑器中的完整 UTF-8 文件内容。 */
 export async function writeFile(
-  authedFetch: AuthedFetch,
-  workspaceId: string,
+  fetchJSON: FetchJSON,
   path: string,
   content: string,
-): Promise<void> {
-  const response = await authedFetch(
-    `/api/file?workspace=${query(workspaceId)}&path=${query(path)}`,
-    { method: 'PUT', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: content },
-  );
-  if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`);
+  version: string,
+): Promise<{ version: string }> {
+  return await fetchJSON<{ version: string }>(`${WORKBENCH_API}/file?path=${query(path)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, version }),
+  });
 }
 
 /** 判断文件是否应提供 Markdown 预览。 */

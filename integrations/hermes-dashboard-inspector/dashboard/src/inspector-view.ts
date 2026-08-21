@@ -70,6 +70,7 @@ export function createInspectorView(sdk: SDK): () => any {
     const params = new URLSearchParams(window.location.search);
     const [profile, setProfile] = useState(params.get('profile') || 'default');
     const [sessionId, setSessionId] = useState(params.get('session') || '');
+    const [newSessionEpoch, setNewSessionEpoch] = useState(Date.now());
     const [search, setSearch] = useState('');
     const [sessions, setSessions] = useState([] as any[]);
     const [transcript, setTranscript] = useState(null as InspectorTranscript | null);
@@ -101,12 +102,11 @@ export function createInspectorView(sdk: SDK): () => any {
       setTranscript(null);
       setWorkspace(null);
       setRawOpen(false);
-      if (!sessionId) return undefined;
       let active = true;
       setSessionLoading(true);
       setError('');
       Promise.all([
-        loadTranscript(sdk.fetchJSON, profile, sessionId),
+        sessionId ? loadTranscript(sdk.fetchJSON, profile, sessionId) : Promise.resolve(null),
         loadWorkspace(sdk.fetchJSON, profile, sessionId),
       ]).then(([nextTranscript, nextWorkspace]) => {
         if (!active) return;
@@ -127,6 +127,21 @@ export function createInspectorView(sdk: SDK): () => any {
       window.history.replaceState(null, '', next);
     };
 
+    /** Start a fresh TUI while keeping the selected profile and workspace. */
+    const startNewSession = () => {
+      setSessionId('');
+      setTranscript(null);
+      setCenterMode('chat');
+      setNewSessionEpoch(Date.now());
+      setDrawer(null);
+      const next = new URL(window.location.href);
+      next.searchParams.set('profile', profile);
+      next.searchParams.delete('session');
+      window.history.replaceState(null, '', next);
+    };
+
+    const terminalInstanceId = sessionId || `new-${newSessionEpoch}`;
+
     /** 构造桌面左栏与移动会话抽屉共用的列表。 */
     const sessionSidebar = element(React, 'aside', {
       className: `hti-session-sidebar${drawer === 'sessions' ? ' is-mobile-open' : ''}`,
@@ -141,9 +156,21 @@ export function createInspectorView(sdk: SDK): () => any {
           'aria-label': '关闭 / Close',
         }, '×')),
       element(React, 'div', { className: 'hti-session-controls' },
+        element(React, 'button', {
+          type: 'button', className: 'hti-new-session', onClick: startNewSession,
+        }, '＋ 新会话 / New chat'),
         element(React, 'label', { htmlFor: 'hti-profile' }, '配置 / Profile'),
         element(React, 'input', {
-          id: 'hti-profile', value: profile, onChange: (event: any) => setProfile(event.target.value),
+          id: 'hti-profile', value: profile, onChange: (event: any) => {
+            const nextProfile = String(event.target.value);
+            setProfile(nextProfile);
+            setSessionId('');
+            setNewSessionEpoch(Date.now());
+            const next = new URL(window.location.href);
+            next.searchParams.set('profile', nextProfile);
+            next.searchParams.delete('session');
+            window.history.replaceState(null, '', next);
+          },
         }),
         element(React, 'label', { htmlFor: 'hti-search' }, '搜索 / Search'),
         element(React, 'input', {
@@ -176,7 +203,7 @@ export function createInspectorView(sdk: SDK): () => any {
           'aria-label': '打开会话 / Open sessions',
         }, '☰'),
         element(React, 'div', { className: 'hti-active-session' },
-          element(React, 'strong', null, sessionId ? sessionTitle(sessions.find((row: Record<string, any>) => rowSessionId(row) === sessionId) || { id: sessionId }) : 'Hermes Workbench'),
+          element(React, 'strong', null, sessionId ? sessionTitle(sessions.find((row: Record<string, any>) => rowSessionId(row) === sessionId) || { id: sessionId }) : '新会话 / New chat'),
           element(React, 'span', null, workspace ? workspace.path : '未绑定工作区 / No workspace')),
         element(React, Segmented, {
           React,
@@ -192,15 +219,16 @@ export function createInspectorView(sdk: SDK): () => any {
           'aria-label': '打开工作区 / Open workspace',
         }, '▤')),
       error ? element(React, 'div', { className: 'hti-page-error', role: 'alert' }, error) : null,
-      !sessionId ? element(React, 'div', { className: 'hti-panel-empty' },
-        element(React, 'strong', null, '选择会话 / Select a session'),
-        element(React, 'span', null, '从左侧开始进入工作台。 / Choose a session to enter the workbench.'))
-        : centerMode === 'chat'
+      centerMode === 'chat'
           ? workspace ? element(React, TerminalPanel, {
-            mode: 'chat', profile, sessionId, workspaceId: workspace.id, workspacePath: workspace.path,
+            mode: 'chat', profile, instanceId: terminalInstanceId, resumeSessionId: sessionId,
+            workspaceId: workspace.id, workspacePath: workspace.path,
           }) : element(React, 'div', { className: 'hti-panel-empty' },
             element(React, 'strong', null, sessionLoading ? '正在加载… / Loading…' : '未绑定工作区 / No workspace'),
             element(React, 'span', null, 'Hermes TUI 需要当前会话的工作区。 / Hermes TUI needs this session workspace.'))
+          : !sessionId ? element(React, 'div', { className: 'hti-panel-empty' },
+            element(React, 'strong', null, '新会话尚无记录 / No transcript yet'),
+            element(React, 'span', null, '先在聊天视图发送消息。 / Send a message in Chat first.'))
           : transcript ? element(React, 'div', { className: 'hti-transcript-pane' },
             element(React, 'div', { className: 'hti-transcript-toolbar' },
               element(React, 'div', { className: 'hti-lineage' },
@@ -234,8 +262,9 @@ export function createInspectorView(sdk: SDK): () => any {
         }, '×')),
       rightMode === 'files'
         ? element(React, WorkspacePanel, { workspace })
-        : workspace && sessionId ? element(React, TerminalPanel, {
-          mode: 'shell', profile, sessionId, workspaceId: workspace.id, workspacePath: workspace.path,
+        : workspace ? element(React, TerminalPanel, {
+          mode: 'shell', profile, instanceId: terminalInstanceId,
+          workspaceId: workspace.id, workspacePath: workspace.path,
           active: rightMode === 'shell',
         }) : element(React, 'div', { className: 'hti-panel-empty' },
           element(React, 'strong', null, '未绑定工作区 / No workspace'),

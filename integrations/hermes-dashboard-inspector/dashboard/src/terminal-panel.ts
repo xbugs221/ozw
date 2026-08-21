@@ -11,11 +11,26 @@ type TerminalMode = 'chat' | 'shell';
 type TerminalPanelProps = {
   mode: TerminalMode;
   profile: string;
-  sessionId: string;
+  instanceId: string;
+  resumeSessionId?: string;
   workspaceId: string;
   workspacePath: string;
   active?: boolean;
 };
+
+/** Keep one reconnectable PTY identity per Workbench terminal instance. */
+function terminalAttachToken(mode: TerminalMode, profile: string, instanceId: string): string {
+  const key = `hermes.workbench.${mode}.${profile}.${instanceId}.attach`;
+  try {
+    const existing = window.sessionStorage.getItem(key);
+    if (existing) return existing;
+    const token = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    window.sessionStorage.setItem(key, token);
+    return token;
+  } catch {
+    return `${Date.now()}-${Math.random()}`;
+  }
+}
 
 /** 创建使用宿主 React 实例的元素，避免插件打包第二份 React。 */
 function element(React: any, type: any, props?: Record<string, any> | null, ...children: any[]): any {
@@ -49,6 +64,37 @@ function terminalStatusLabel(status: string, mode: TerminalMode): string {
   return '等待连接 / Idle';
 }
 
+/** 根据主题实际背景选择高对比 ANSI 色板，避免亮色主题中的黄色文字失去可读性。 */
+function terminalTheme(element: HTMLElement): Record<string, string> {
+  const computed = window.getComputedStyle(element);
+  const background = computed.backgroundColor || '#000000';
+  const foreground = computed.color || '#d8f4f2';
+  const channels = background.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [0, 0, 0];
+  const luminance = (0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]) / 255;
+  if (luminance > 0.55) {
+    return {
+      background,
+      foreground,
+      cursor: '#f28c28',
+      selectionBackground: 'rgba(242, 140, 40, 0.25)',
+      black: '#123e40', red: '#b42318', green: '#087a68', yellow: '#8a4d00',
+      blue: '#075b5f', magenta: '#7a3e75', cyan: '#007b80', white: '#f5f7f7',
+      brightBlack: '#527174', brightRed: '#d92d20', brightGreen: '#12866f', brightYellow: '#a85d00',
+      brightBlue: '#006a70', brightMagenta: '#934a8c', brightCyan: '#008f95', brightWhite: '#ffffff',
+    };
+  }
+  return {
+    background,
+    foreground,
+    cursor: '#ff9d3d',
+    selectionBackground: 'rgba(255, 157, 61, 0.3)',
+    black: '#000000', red: '#ff6b68', green: '#49d6a5', yellow: '#ffb25f',
+    blue: '#72b7ff', magenta: '#d19cff', cyan: '#3fd0d0', white: '#d8f4f2',
+    brightBlack: '#77908f', brightRed: '#ff8c89', brightGreen: '#6aebba', brightYellow: '#ffc77f',
+    brightBlue: '#9acbff', brightMagenta: '#dfb9ff', brightCyan: '#75e2e2', brightWhite: '#ffffff',
+  };
+}
+
 /** 创建可复用于聊天和右栏 shell 的原生 xterm 组件。 */
 export function createTerminalPanel(sdk: SDK): (props: TerminalPanelProps) => any {
   const React = sdk.React;
@@ -57,7 +103,8 @@ export function createTerminalPanel(sdk: SDK): (props: TerminalPanelProps) => an
   return function TerminalPanel({
     mode,
     profile,
-    sessionId,
+    instanceId,
+    resumeSessionId = '',
     workspaceId,
     workspacePath,
     active = true,
@@ -71,7 +118,7 @@ export function createTerminalPanel(sdk: SDK): (props: TerminalPanelProps) => an
     const [status, setStatus] = useState('idle' as 'idle' | 'connecting' | 'open' | 'closed' | 'error');
 
     useEffect(() => {
-      if (!active || !hostRef.current || !sessionId || !workspaceId) return undefined;
+      if (!active || !hostRef.current || !instanceId || !workspaceId) return undefined;
       let disposed = false;
       let resizeObserver: ResizeObserver | null = null;
       let inputDisposable: { dispose: () => void } | null = null;
@@ -81,13 +128,9 @@ export function createTerminalPanel(sdk: SDK): (props: TerminalPanelProps) => an
         cursorBlink: true,
         fontFamily: 'var(--theme-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
         fontSize: 13,
+        minimumContrastRatio: 4.5,
         scrollback: 5000,
-        theme: {
-          background: '#0b1015',
-          foreground: '#d5dbe3',
-          cursor: '#72b7a4',
-          selectionBackground: '#365e55',
-        },
+        theme: terminalTheme(hostRef.current),
       });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
@@ -102,8 +145,7 @@ export function createTerminalPanel(sdk: SDK): (props: TerminalPanelProps) => an
         try { fit.fit(); } catch { return; }
         const socket = socketRef.current;
         if (!socket || socket.readyState !== WebSocket.OPEN) return;
-        if (mode === 'chat') socket.send(`\u001b[RESIZE:${terminal.cols};${terminal.rows}]`);
-        else socket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+        socket.send(`\u001b[RESIZE:${terminal.cols};${terminal.rows}]`);
       };
 
       resizeObserver = new ResizeObserver(() => fitTerminal());
@@ -112,15 +154,17 @@ export function createTerminalPanel(sdk: SDK): (props: TerminalPanelProps) => an
 
       /** 获取一次性认证地址后连接 WebSocket，并绑定当前会话与工作区。 */
       const connect = async () => {
-        const path = mode === 'chat' ? '/api/pty' : '/api/shell';
+        const path = mode === 'chat' ? '/api/pty' : '/api/plugins/workbench/shell';
         const params: Record<string, string> = {
-          channel: `workbench-${mode}-${sessionId}`,
+          channel: `workbench-${mode}-${instanceId}`,
           profile,
-          session: sessionId,
           workspace: workspaceId,
           cwd: workspacePath,
         };
-        if (mode === 'chat') params.resume = sessionId;
+        if (mode === 'chat') {
+          params.attach = terminalAttachToken(mode, profile, instanceId);
+          if (resumeSessionId) params.resume = resumeSessionId;
+        }
         try {
           const url = await sdk.buildWsUrl(path, params);
           if (disposed) return;
@@ -160,7 +204,7 @@ export function createTerminalPanel(sdk: SDK): (props: TerminalPanelProps) => an
         terminalRef.current = null;
         fitRef.current = null;
       };
-    }, [active, mode, profile, retry, sessionId, workspaceId, workspacePath]);
+    }, [active, instanceId, mode, profile, resumeSessionId, retry, workspaceId, workspacePath]);
 
     return element(React, 'div', { className: `hti-terminal-frame is-${mode}` },
       element(React, 'div', { className: 'hti-terminal-status' },
