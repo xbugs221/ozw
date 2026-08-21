@@ -127,7 +127,7 @@ export function createTerminalPanel(sdk: SDK): (props: TerminalPanelProps) => an
         convertEol: false,
         cursorBlink: true,
         fontFamily: 'var(--theme-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
-        fontSize: 13,
+        fontSize: window.matchMedia('(max-width: 640px)').matches ? 15 : 13,
         minimumContrastRatio: 4.5,
         scrollback: 5000,
         theme: terminalTheme(hostRef.current),
@@ -198,7 +198,15 @@ export function createTerminalPanel(sdk: SDK): (props: TerminalPanelProps) => an
         disposed = true;
         resizeObserver?.disconnect();
         inputDisposable?.dispose();
-        socketRef.current?.close();
+        const socket = socketRef.current;
+        if (socket?.readyState === WebSocket.CONNECTING) {
+          socket.onmessage = null;
+          socket.onerror = null;
+          socket.onclose = null;
+          socket.onopen = () => socket.close();
+        } else {
+          socket?.close();
+        }
         socketRef.current = null;
         terminal.dispose();
         terminalRef.current = null;

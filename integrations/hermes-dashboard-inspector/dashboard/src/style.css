@@ -401,18 +401,22 @@ details[open] > summary > .hti-detail-chevron { transform: rotate(90deg); }
   .hti-session-sidebar.is-mobile-open, .hti-right-pane.is-mobile-open { transform: translateX(0); }
   .hti-drawer-close { display: inline-grid; place-items: center; width: 1.8rem; height: 1.8rem; color: var(--hti-muted); font-size: 1.2rem; }
   .hti-mobile-action { display: inline-grid; place-items: center; flex: 0 0 1.8rem; width: 1.8rem; height: 1.8rem; color: var(--hti-muted); font-size: .9rem; }
+  .hti-terminal-host { padding-top: 1.8rem; }
   .hti-chat-header { padding-inline: .35rem; }
   .hti-active-session { display: none; }
   .hti-chat-header .hti-segmented { margin: 0 auto; }
   .hti-chat-header .hti-segmented button { padding-inline: .65rem; }
   .hti-drawer-backdrop { position: absolute; z-index: 15; inset: 0; display: block; width: 100%; height: 100%; border: 0; background: rgb(0 0 0 / 42%); cursor: pointer; }
   .hti-transcript-pane { padding: .75rem .65rem 1.5rem; }
+  .hti-user-content, .hti-assistant-message, .hti-rich-text { font-size: 1rem; line-height: 1.7; }
   .hti-transcript-toolbar { align-items: flex-start; }
   .hti-transcript-toolbar .hti-lineage code { max-width: 60vw; white-space: normal; overflow-wrap: anywhere; }
   .hti-workspace-panel { grid-template-rows: minmax(9rem, 38%) minmax(0, 1fr); }
   .hti-editor-header { align-items: flex-start; height: auto; min-height: 3rem; }
   .hti-editor-path span { display: none; }
   .hti-editor-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .hti-codemirror { font-size: .875rem; }
+  .hti-markdown-preview { font-size: 1rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
