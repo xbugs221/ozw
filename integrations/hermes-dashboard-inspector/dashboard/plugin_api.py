@@ -39,14 +39,29 @@ _SENSITIVE_NAMES = frozenset(
         ".npmrc",
         ".pypirc",
         "auth.json",
+        "config.yaml",
         "credentials.json",
+        "gateway_state.json",
         "id_ed25519",
         "id_rsa",
         "known_hosts",
         "nous_auth.json",
     }
 )
-_SENSITIVE_DIRS = frozenset({".git", ".gnupg", ".ssh", "secrets"})
+_SENSITIVE_DIRS = frozenset({".git", ".gnupg", ".ssh", "codex-auth", "secrets"})
+_SAFE_HIDDEN_NAMES = frozenset(
+    {
+        ".dockerignore",
+        ".editorconfig",
+        ".env.example",
+        ".env.sample",
+        ".gitattributes",
+        ".github",
+        ".gitignore",
+        ".vscode",
+    }
+)
+_IGNORED_TREE_DIRS = frozenset({".venv", "__pycache__", "node_modules", "venv"})
 _active_shells = 0
 _shell_lock = asyncio.Lock()
 
@@ -114,10 +129,25 @@ def _is_sensitive(relative: Path) -> bool:
     lowered = [part.lower() for part in relative.parts]
     if any(part in _SENSITIVE_DIRS for part in lowered):
         return True
+    if any(part.startswith(".") and part not in _SAFE_HIDDEN_NAMES for part in lowered):
+        return True
     name = lowered[-1] if lowered else ""
     if name in _SENSITIVE_NAMES:
         return True
+    if name in {".env.example", ".env.sample"}:
+        return False
+    if any(name.startswith(f"{base}.") or name.startswith(f"{base}-") for base in _SENSITIVE_NAMES):
+        return True
+    if name.endswith((".key", ".pem")):
+        return True
     return name.startswith(".env.") and not name.endswith((".example", ".sample"))
+
+
+def _hide_from_tree(relative: Path) -> bool:
+    """Keep secrets and generated dependency trees out of file navigation."""
+
+    lowered = [part.lower() for part in relative.parts]
+    return _is_sensitive(relative) or any(part in _IGNORED_TREE_DIRS for part in lowered)
 
 
 def _resolve_path(raw_path: str | None, *, must_exist: bool = True) -> tuple[Path, Path]:
@@ -259,7 +289,7 @@ async def list_files(path: str = Query(default="")) -> dict[str, Any]:
                 child_relative = resolved.relative_to(root)
             except (OSError, RuntimeError, ValueError):
                 continue
-            if _is_sensitive(child_relative):
+            if _hide_from_tree(child_relative):
                 continue
             try:
                 stat = resolved.stat()

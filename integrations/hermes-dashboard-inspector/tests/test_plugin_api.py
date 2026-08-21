@@ -46,6 +46,28 @@ def test_sensitive_file_is_rejected(plugin, tmp_path: Path) -> None:
     assert caught.value.status_code == 403
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "auth.json.bak-20260808",
+        "codex-auth/auth.json",
+        "config.yaml",
+        "config.yaml.corrupt.bak",
+        "gateway_state.json",
+        ".codex/settings.json",
+    ],
+)
+def test_sensitive_backups_and_hidden_state_are_rejected(plugin, tmp_path: Path, name: str) -> None:
+    """Credential backups and hidden runtime state must never enter the editor tree."""
+
+    target = tmp_path / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("secret")
+    with pytest.raises(HTTPException) as caught:
+        plugin._resolve_path(name)
+    assert caught.value.status_code == 403
+
+
 def test_save_rejects_symlink_outside_workspace(plugin, tmp_path: Path) -> None:
     """Saving through an existing symlink cannot replace an external file."""
 
