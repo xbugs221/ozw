@@ -22,6 +22,5 @@ plugins:
 
 ## 南科大青橙主题
 
-将 `theme/sustech-cyan-orange.yaml` 复制到
-`~/.hermes/dashboard-themes/`，刷新 Dashboard 后即可在主题切换器中选择
-`SUSTech Cyan Orange`。
+将 `theme/sustech-light.yaml` 与 `theme/sustech-dark.yaml` 复制到
+`~/.hermes/dashboard-themes/`，刷新 Dashboard 后即可在亮色与暗色之间切换。

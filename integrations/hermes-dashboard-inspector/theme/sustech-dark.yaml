@@ -1,0 +1,73 @@
+# 文件目的：提供与 Hermes 聊天区一致的南科大青橙暗色主题。
+name: sustech-dark
+label: SUSTech Dark
+description: Balanced deep teal with vivid cyan and warm orange accents
+
+palette:
+  background: { hex: "#102F33", alpha: 1 }
+  midground: { hex: "#D8F4F2", alpha: 1 }
+  foreground: { hex: "#FF9D3D", alpha: 0.18 }
+  warmGlow: "rgba(255, 157, 61, 0.20)"
+  noiseOpacity: 0.28
+
+typography:
+  fontSans: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+  fontMono: 'ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace'
+  fontDisplay: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+  baseSize: "16px"
+  lineHeight: "1.6"
+  letterSpacing: "-0.004em"
+
+layout: { radius: "0.75rem", density: comfortable }
+layoutVariant: standard
+terminalBackground: "#0B2529"
+terminalForeground: "#D8F4F2"
+seriesColors: { inputTokenAccent: "#3FD0D0", outputTokenAccent: "#FF9D3D" }
+swatchColors: ["#102F33", "#3FD0D0", "#FF9D3D"]
+
+colorOverrides:
+  card: "#173B3F"
+  cardForeground: "#E9FAF8"
+  popover: "#173B3F"
+  popoverForeground: "#E9FAF8"
+  primary: "#3FD0D0"
+  primaryForeground: "#09272A"
+  secondary: "#21484C"
+  secondaryForeground: "#D8F4F2"
+  muted: "#1B4145"
+  mutedForeground: "#9CC4C3"
+  accent: "#FF9D3D"
+  accentForeground: "#2E1906"
+  destructive: "#FF6B68"
+  destructiveForeground: "#FFFFFF"
+  success: "#49D6A5"
+  warning: "#FF9D3D"
+  border: "rgba(63, 208, 208, 0.28)"
+  input: "rgba(63, 208, 208, 0.38)"
+  ring: "#FF9D3D"
+
+componentStyles:
+  card:
+    background: "linear-gradient(145deg, rgba(25,66,70,0.98), rgba(17,49,53,0.98))"
+    boxShadow: "0 12px 30px rgba(3,18,20,0.22), inset 0 0 0 1px rgba(63,208,208,0.10)"
+  header:
+    background: "linear-gradient(90deg, rgba(16,47,51,0.98), rgba(24,63,67,0.98))"
+  sidebar:
+    background: "linear-gradient(180deg, rgba(13,42,46,0.99), rgba(18,51,55,0.99))"
+
+customCSS: |
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto 0;
+    z-index: 1000;
+    height: 3px;
+    pointer-events: none;
+    background: linear-gradient(90deg, #3FD0D0 0 72%, #FF9D3D 72% 100%);
+  }
+  ::selection { color: #E9FAF8; background: rgba(255, 157, 61, 0.35); }
+  @media (max-width: 640px) {
+    .text-sm.text-foreground.leading-relaxed,
+    .text-sm.text-foreground.leading-relaxed .text-sm { font-size: 1rem !important; line-height: 1.7 !important; }
+    .text-sm.text-foreground.leading-relaxed .text-xs { font-size: 0.875rem !important; }
+  }
