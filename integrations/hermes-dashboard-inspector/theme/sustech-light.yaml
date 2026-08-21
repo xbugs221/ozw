@@ -1,14 +1,14 @@
 # 文件目的：提供南科大青橙风格的 Hermes Dashboard 亮色主题。
 name: sustech-light
 label: SUSTech Light
-description: Bright cyan and warm orange for daytime use
+description: Pure white canvas with cyan and warm orange accents
 
 palette:
-  background: { hex: "#EAF8F7", alpha: 1 }
+  background: { hex: "#FFFFFF", alpha: 1 }
   midground: { hex: "#075B5F", alpha: 1 }
-  foreground: { hex: "#F28C28", alpha: 0.16 }
-  warmGlow: "rgba(242, 140, 40, 0.18)"
-  noiseOpacity: 0.12
+  foreground: { hex: "#F28C28", alpha: 0 }
+  warmGlow: "rgba(242, 140, 40, 0)"
+  noiseOpacity: 0
 
 typography:
   fontSans: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
@@ -20,10 +20,10 @@ typography:
 
 layout: { radius: "0.75rem", density: comfortable }
 layoutVariant: standard
-terminalBackground: "#EAF8F7"
+terminalBackground: "#FFFFFF"
 terminalForeground: "#075B5F"
 seriesColors: { inputTokenAccent: "#008F95", outputTokenAccent: "#F28C28" }
-swatchColors: ["#EAF8F7", "#008F95", "#F28C28"]
+swatchColors: ["#FFFFFF", "#008F95", "#F28C28"]
 
 colorOverrides:
   card: "#FFFFFF"
@@ -32,9 +32,9 @@ colorOverrides:
   popoverForeground: "#123E40"
   primary: "#008F95"
   primaryForeground: "#FFFFFF"
-  secondary: "#DDF3F1"
+  secondary: "#F2F7F7"
   secondaryForeground: "#075B5F"
-  muted: "#E3F1F0"
+  muted: "#F5F7F7"
   mutedForeground: "#527174"
   accent: "#F28C28"
   accentForeground: "#3D2208"
@@ -45,15 +45,6 @@ colorOverrides:
   border: "rgba(0, 143, 149, 0.28)"
   input: "rgba(0, 143, 149, 0.38)"
   ring: "#F28C28"
-
-componentStyles:
-  card:
-    background: "linear-gradient(145deg, rgba(255,255,255,0.98), rgba(240,250,249,0.96))"
-    boxShadow: "0 10px 28px rgba(7,91,95,0.08), inset 0 0 0 1px rgba(0,143,149,0.08)"
-  header:
-    background: "linear-gradient(90deg, rgba(255,255,255,0.98), rgba(221,243,241,0.96))"
-  sidebar:
-    background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(234,248,247,0.98))"
 
 customCSS: |
   body::before {
