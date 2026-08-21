@@ -1,4 +1,4 @@
-/* 文件目的：在 Hermes Dashboard 中复刻 OZW transcript 的折叠层级、密度与响应式表现。 */
+/* 文件目的：复刻 OZW 工作台三栏、移动抽屉、终端、编辑器及 transcript 的交互与密度。 */
 .hti-root {
   --hti-surface: var(--color-card, color-mix(in srgb, var(--midground-base, #fff) 4%, var(--background-base, #071414)));
   --hti-surface-raised: var(--color-muted, color-mix(in srgb, var(--midground-base, #fff) 7%, var(--background-base, #071414)));
@@ -246,4 +246,160 @@ details[open] > summary > .hti-detail-chevron { transform: rotate(90deg); }
 
 @media (prefers-reduced-motion: reduce) {
   .hti-sessions button, .hti-detail-chevron { transition: none; }
+}
+
+/* Workbench shell: desktop follows OZW's session / chat / workspace columns. */
+.hti-workbench {
+  display: grid;
+  grid-template-columns: minmax(13.5rem, 17rem) minmax(22rem, 1fr) minmax(20rem, 31rem);
+  width: 100%;
+  height: calc(100dvh - 4rem);
+  min-height: 36rem;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--hti-border);
+  border-radius: var(--theme-radius, .55rem);
+  background: var(--hti-surface);
+}
+.hti-session-sidebar, .hti-center-pane, .hti-right-pane { min-width: 0; min-height: 0; overflow: hidden; background: var(--hti-surface); }
+.hti-session-sidebar { display: flex; flex-direction: column; border-right: 1px solid var(--hti-border); }
+.hti-center-pane { display: flex; flex-direction: column; background: var(--color-background, var(--background-base, #071414)); }
+.hti-right-pane { display: flex; flex-direction: column; border-left: 1px solid var(--hti-border); }
+.hti-pane-header { display: flex; align-items: center; flex: 0 0 3.25rem; min-width: 0; height: 3.25rem; border-bottom: 1px solid var(--hti-border); padding: .55rem .7rem; background: color-mix(in srgb, var(--hti-surface-raised) 70%, var(--hti-surface)); }
+.hti-pane-header button, .hti-workbench input, .hti-transcript-toolbar button, .hti-save-button, .hti-terminal-status button {
+  color: inherit;
+  font: inherit;
+}
+.hti-session-heading { justify-content: space-between; }
+.hti-session-heading > div { display: grid; min-width: 0; }
+.hti-session-heading strong { font-size: .9rem; letter-spacing: -.01em; }
+.hti-session-heading span { color: var(--hti-muted); font-size: .68rem; }
+.hti-drawer-close, .hti-mobile-action { display: none; border: 0; background: transparent; cursor: pointer; }
+.hti-session-controls { display: grid; grid-template-columns: 1fr; gap: .28rem; padding: .7rem; border-bottom: 1px solid var(--hti-border-soft); }
+.hti-session-controls label { color: var(--hti-muted); font-size: .66rem; font-weight: 600; }
+.hti-session-controls label:not(:first-child) { margin-top: .28rem; }
+.hti-session-controls input {
+  width: 100%;
+  min-width: 0;
+  height: 1.9rem;
+  border: 1px solid var(--hti-border);
+  border-radius: .35rem;
+  padding: 0 .55rem;
+  color: var(--hti-text);
+  background: color-mix(in srgb, var(--hti-surface-raised) 74%, transparent);
+  font-size: .72rem;
+  outline: none;
+}
+.hti-session-controls input:focus { border-color: var(--hti-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--hti-accent) 18%, transparent); }
+.hti-session-meta { padding: .55rem .7rem .3rem; color: var(--hti-muted); font-size: .66rem; }
+.hti-session-list { min-height: 0; overflow: auto; padding: 0 .4rem .6rem; }
+.hti-session-list > button { display: grid; gap: .3rem; width: 100%; min-width: 0; margin: .12rem 0; border: 1px solid transparent; border-radius: .4rem; padding: .55rem .6rem; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+.hti-session-list > button:hover { background: var(--hti-surface-raised); }
+.hti-session-list > button.active { border-color: color-mix(in srgb, var(--hti-accent) 36%, var(--hti-border)); background: color-mix(in srgb, var(--hti-accent) 12%, var(--hti-surface)); }
+.hti-session-list .hti-session-title { font-size: .76rem; font-weight: 600; }
+.hti-session-subtitle { display: flex; align-items: center; justify-content: space-between; gap: .4rem; min-width: 0; color: var(--hti-muted); font-size: .6rem; }
+.hti-session-subtitle code { overflow: hidden; min-width: 0; border: 0; padding: 0; color: inherit; background: transparent; font-size: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.hti-session-subtitle time { flex: 0 0 auto; }
+
+.hti-chat-header { gap: .75rem; justify-content: space-between; }
+.hti-active-session { display: grid; min-width: 0; margin-right: auto; }
+.hti-active-session strong, .hti-active-session span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hti-active-session strong { font-size: .78rem; }
+.hti-active-session span { color: var(--hti-muted); font-family: var(--theme-font-mono, ui-monospace, monospace); font-size: .62rem; }
+.hti-segmented { display: inline-flex; align-items: center; flex: 0 0 auto; overflow: hidden; border: 1px solid var(--hti-border); border-radius: .38rem; padding: .12rem; background: color-mix(in srgb, var(--hti-code-surface) 22%, transparent); }
+.hti-segmented button { height: 1.65rem; border: 0; border-radius: .28rem; padding: 0 .55rem; color: var(--hti-muted); background: transparent; cursor: pointer; font-family: inherit; font-size: .66rem; font-weight: 600; white-space: nowrap; }
+.hti-segmented button:hover { color: var(--hti-text); }
+.hti-segmented button.active { color: var(--hti-text); background: var(--hti-surface-raised); box-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent); }
+.hti-page-error { flex: 0 0 auto; margin: .6rem; border-radius: .35rem; padding: .55rem .7rem; font-size: .72rem; }
+.hti-panel-empty { display: grid; place-content: center; justify-items: center; gap: .35rem; flex: 1 1 auto; min-height: 0; padding: 1.5rem; color: var(--hti-muted); text-align: center; }
+.hti-panel-empty strong { color: var(--hti-text); font-size: .84rem; }
+.hti-panel-empty span { max-width: 25rem; font-size: .7rem; line-height: 1.5; }
+
+/* Native xterm surfaces fill the selected TUI or shell tab. */
+.hti-terminal-frame { position: relative; display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #0b1015; }
+.hti-terminal-status { position: absolute; z-index: 3; top: .35rem; right: .45rem; display: flex; align-items: center; gap: .35rem; border: 1px solid #29313a; border-radius: 999px; padding: .18rem .45rem; color: #9aa6b2; background: rgb(11 16 21 / 86%); font-size: .58rem; backdrop-filter: blur(5px); }
+.hti-terminal-status button { border: 0; padding: 0; color: #72b7a4; background: transparent; cursor: pointer; font-size: .58rem; }
+.hti-status-dot { width: .38rem; height: .38rem; border-radius: 999px; background: #78828d; }
+.hti-status-dot.is-connecting { background: #f59e0b; }
+.hti-status-dot.is-open { background: #22c55e; box-shadow: 0 0 0 2px rgb(34 197 94 / 14%); }
+.hti-status-dot.is-error, .hti-status-dot.is-closed { background: #ef4444; }
+.hti-terminal-host { flex: 1 1 auto; min-width: 0; min-height: 0; padding: .55rem .25rem .25rem .6rem; }
+.hti-terminal-host .xterm { height: 100%; }
+.hti-terminal-host .xterm-viewport { overscroll-behavior: contain; }
+
+/* Persisted transcript stays visually identical to the existing inspector renderer. */
+.hti-transcript-pane { min-width: 0; min-height: 0; overflow: auto; padding: 1rem clamp(.85rem, 2.5vw, 2rem) 2rem; }
+.hti-transcript-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0 0 1rem; border-bottom: 1px solid var(--hti-border); padding: 0 0 .7rem; }
+.hti-transcript-toolbar .hti-lineage { display: grid; justify-items: start; min-width: 0; text-align: left; }
+.hti-transcript-toolbar .hti-lineage code { max-width: min(52vw, 45rem); }
+.hti-transcript-toolbar button { flex: 0 0 auto; border: 1px solid var(--hti-border); border-radius: .35rem; padding: .35rem .55rem; background: var(--hti-surface-raised); cursor: pointer; font-size: .66rem; }
+
+/* Right-side workspace follows OZW's tree + document split. */
+.hti-right-header { justify-content: space-between; }
+.hti-workspace-panel { display: grid; grid-template-rows: minmax(8.5rem, 34%) minmax(0, 1fr); flex: 1 1 auto; min-width: 0; min-height: 0; }
+.hti-file-tree { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-bottom: 1px solid var(--hti-border); }
+.hti-file-tree-heading { display: grid; flex: 0 0 auto; gap: .1rem; padding: .5rem .65rem; border-bottom: 1px solid var(--hti-border-soft); }
+.hti-file-tree-heading strong, .hti-file-tree-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hti-file-tree-heading strong { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; }
+.hti-file-tree-heading span { color: var(--hti-muted); font-family: var(--theme-font-mono, ui-monospace, monospace); font-size: .58rem; }
+.hti-tree-root, .hti-tree-children { margin: 0; padding: 0; list-style: none; }
+.hti-tree-root { min-height: 0; overflow: auto; padding: .3rem .3rem .6rem; }
+.hti-tree-children { padding-left: .8rem; }
+.hti-tree-row { display: flex; align-items: center; gap: .28rem; width: 100%; min-width: 0; height: 1.6rem; border: 0; border-radius: .25rem; padding: 0 .35rem; color: color-mix(in srgb, var(--hti-text) 88%, var(--hti-muted)); background: transparent; cursor: pointer; font-family: inherit; font-size: .66rem; text-align: left; }
+.hti-tree-row:hover, .hti-tree-row.is-active { background: var(--hti-surface-raised); }
+.hti-tree-row.is-active { color: var(--hti-text); box-shadow: inset 2px 0 var(--hti-accent); }
+.hti-tree-row > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hti-file-icon { display: inline-grid; place-items: center; flex: 0 0 .75rem; width: .75rem; color: var(--hti-muted); font-family: var(--theme-font-mono, ui-monospace, monospace); font-size: .58rem; }
+.hti-tree-loading { padding: .35rem .55rem; color: var(--hti-muted); font-size: .62rem; }
+.hti-tree-error { padding: .35rem .55rem; color: var(--hti-error-text); font-size: .6rem; overflow-wrap: anywhere; }
+.hti-editor-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.hti-editor-header { display: flex; align-items: center; justify-content: space-between; gap: .45rem; flex: 0 0 2.7rem; min-width: 0; border-bottom: 1px solid var(--hti-border-soft); padding: .38rem .55rem; }
+.hti-editor-path { display: grid; min-width: 0; }
+.hti-editor-path strong, .hti-editor-path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hti-editor-path strong { font-size: .68rem; }
+.hti-editor-path span { color: var(--hti-muted); font-family: var(--theme-font-mono, ui-monospace, monospace); font-size: .55rem; }
+.hti-editor-actions { display: flex; align-items: center; flex: 0 0 auto; gap: .3rem; }
+.hti-editor-actions .hti-segmented button { height: 1.45rem; padding: 0 .38rem; font-size: .58rem; }
+.hti-save-button { height: 1.7rem; border: 1px solid color-mix(in srgb, var(--hti-accent) 45%, var(--hti-border)); border-radius: .32rem; padding: 0 .48rem; color: var(--hti-text); background: color-mix(in srgb, var(--hti-accent) 14%, var(--hti-surface)); cursor: pointer; font-size: .6rem; }
+.hti-save-button:disabled { border-color: var(--hti-border); color: var(--hti-muted); background: transparent; cursor: default; }
+.hti-editor-message { flex: 0 0 auto; border-bottom: 1px solid var(--hti-border-soft); padding: .28rem .55rem; color: var(--hti-muted); font-size: .58rem; }
+.hti-codemirror { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; color: var(--hti-text); background: color-mix(in srgb, var(--hti-code-surface) 32%, var(--hti-surface)); font-size: .7rem; }
+.hti-codemirror .cm-editor { height: 100%; }
+.hti-codemirror .cm-selectionBackground { background: color-mix(in srgb, var(--hti-accent) 30%, transparent) !important; }
+.hti-codemirror .cm-cursor { border-left-color: var(--hti-text); }
+.hti-markdown-preview { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: .85rem; font-size: .72rem; }
+.hti-drawer-backdrop { display: none; }
+
+@media (max-width: 1100px) {
+  .hti-workbench { grid-template-columns: minmax(12rem, 15rem) minmax(20rem, 1fr) minmax(17rem, 24rem); }
+  .hti-chat-header { gap: .45rem; }
+  .hti-chat-header .hti-segmented button { padding-inline: .38rem; }
+}
+
+/* Mobile keeps the chat canvas mounted and promotes both side columns to drawers. */
+@media (max-width: 800px) {
+  .hti-workbench { display: block; position: relative; height: calc(100dvh - 3.25rem); min-height: 28rem; padding: 0; overflow: hidden; border-radius: 0; }
+  .hti-center-pane { width: 100%; height: 100%; }
+  .hti-session-sidebar, .hti-right-pane { position: absolute; z-index: 20; top: 0; bottom: 0; display: flex; width: min(88vw, 25rem); transition: transform .18s ease; box-shadow: 0 0 1.5rem rgb(0 0 0 / 28%); }
+  .hti-session-sidebar { left: 0; transform: translateX(-105%); }
+  .hti-right-pane { right: 0; transform: translateX(105%); }
+  .hti-session-sidebar.is-mobile-open, .hti-right-pane.is-mobile-open { transform: translateX(0); }
+  .hti-drawer-close { display: inline-grid; place-items: center; width: 1.8rem; height: 1.8rem; color: var(--hti-muted); font-size: 1.2rem; }
+  .hti-mobile-action { display: inline-grid; place-items: center; flex: 0 0 1.8rem; width: 1.8rem; height: 1.8rem; color: var(--hti-muted); font-size: .9rem; }
+  .hti-chat-header { padding-inline: .35rem; }
+  .hti-active-session { display: none; }
+  .hti-chat-header .hti-segmented { margin: 0 auto; }
+  .hti-chat-header .hti-segmented button { padding-inline: .65rem; }
+  .hti-drawer-backdrop { position: absolute; z-index: 15; inset: 0; display: block; width: 100%; height: 100%; border: 0; background: rgb(0 0 0 / 42%); cursor: pointer; }
+  .hti-transcript-pane { padding: .75rem .65rem 1.5rem; }
+  .hti-transcript-toolbar { align-items: flex-start; }
+  .hti-transcript-toolbar .hti-lineage code { max-width: 60vw; white-space: normal; overflow-wrap: anywhere; }
+  .hti-workspace-panel { grid-template-rows: minmax(9rem, 38%) minmax(0, 1fr); }
+  .hti-editor-header { align-items: flex-start; height: auto; min-height: 3rem; }
+  .hti-editor-path span { display: none; }
+  .hti-editor-actions { flex-wrap: wrap; justify-content: flex-end; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hti-session-sidebar, .hti-right-pane { transition: none; }
 }

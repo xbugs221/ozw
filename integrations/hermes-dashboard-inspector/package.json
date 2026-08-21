@@ -1,6 +1,6 @@
 {
-  "name": "render",
-  "version": "0.1.0",
+  "name": "hermes-workbench",
+  "version": "0.2.0",
   "private": true,
   "license": "GPL-3.0",
   "scripts": {

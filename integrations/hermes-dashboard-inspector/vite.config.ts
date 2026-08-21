@@ -8,8 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 
 const integrationRoot = path.dirname(fileURLToPath(import.meta.url));
-const MAX_IIFE_BYTES = 512 * 1024;
-const MAX_IIFE_GZIP_BYTES = 128 * 1024;
+// xterm 与 CodeMirror 是工作台的必要原生运行时；预算仍限制为单个受审计 IIFE。
+const MAX_IIFE_BYTES = 2 * 1024 * 1024;
+const MAX_IIFE_GZIP_BYTES = 600 * 1024;
 const FORBIDDEN_REACT_IMPORT = /^(?:react(?:\/.*)?|react-dom(?:\/.*)?)$/;
 const EMBEDDED_REACT_FINGERPRINTS = [
   '__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED',
@@ -73,7 +74,7 @@ export default defineConfig({
     emptyOutDir: true,
     lib: {
       entry: path.resolve(integrationRoot, 'dashboard/src/index.ts'),
-      name: 'HermesTranscriptInspector',
+      name: 'HermesWorkbench',
       formats: ['iife'],
       fileName: () => 'index.js',
     },
