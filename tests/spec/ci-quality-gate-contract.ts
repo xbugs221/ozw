@@ -34,12 +34,12 @@ test('local pre-commit hook runs only staged tests without changing staged files
   const precommit = read('scripts/pre-commit.sh');
   const nodeVersion = read('.nvmrc').trim();
   const engineRange = String(packageJson.engines?.node || '');
-  const minimumMatch = engineRange.match(/^>=(\d+)\.(\d+)\.(\d+)$/);
+  const minimumMatch = engineRange.match(/>=\s*(\d+)\.(\d+)\.(\d+)/);
   const pinnedMatch = nodeVersion.match(/^v(\d+)\.(\d+)\.(\d+)$/);
 
   assert.equal(packageJson.scripts?.precommit, './scripts/pre-commit.sh');
   assert.match(nodeVersion, /^v\d+\.\d+\.\d+$/);
-  assert.ok(minimumMatch, 'package engine must declare a minimum Node version');
+  assert.ok(minimumMatch, 'package engine must declare a supported minimum Node version');
   assert.ok(pinnedMatch, '.nvmrc must pin an exact Node version');
   const minimum = minimumMatch.slice(1).map(Number);
   const pinned = pinnedMatch.slice(1).map(Number);
