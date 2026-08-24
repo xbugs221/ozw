@@ -74,6 +74,14 @@ interface DownloadFolderOptions {
   projectPath?: string;
 }
 
+export interface ChatSearchOptions {
+  mode?: 'content' | 'jsonl';
+  projectPath?: string;
+  projectName?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
 // API endpoints
 export const api = {
   // Auth endpoints (no token required)
@@ -148,8 +156,24 @@ export const api = {
     }),
   sessions: (projectName: string, limit = 5, offset = 0): Promise<Response> =>
     authenticatedFetch(`${projectApiPath(projectName)}/sessions?limit=${limit}&offset=${offset}`),
-  chatSearch: (query: string, mode = 'content'): Promise<Response> =>
-    authenticatedFetch(`/api/chat/search?q=${encodeURIComponent(String(query || ''))}&mode=${encodeURIComponent(String(mode || 'content'))}`),
+  chatSearch: (
+    query: string,
+    options: ChatSearchOptions | ChatSearchOptions['mode'] = {},
+  ): Promise<Response> => {
+    /**
+     * Search chat history with an optional project scope while retaining the
+     * legacy string mode argument used by older callers.
+     */
+    const normalizedOptions = typeof options === 'string' ? { mode: options } : options;
+    const params = new URLSearchParams({
+      q: String(query || ''),
+      mode: String(normalizedOptions.mode || 'content'),
+    });
+    if (normalizedOptions.projectPath) params.set('projectPath', normalizedOptions.projectPath);
+    if (normalizedOptions.projectName) params.set('projectName', normalizedOptions.projectName);
+    if (typeof normalizedOptions.limit === 'number') params.set('limit', String(normalizedOptions.limit));
+    return authenticatedFetch(`/api/chat/search?${params.toString()}`, { signal: normalizedOptions.signal });
+  },
   sessionMessages: (
     projectName: string,
     sessionId: string,

@@ -166,3 +166,34 @@ test('provider session index only advances activity revision when file fingerpri
     db.close();
   }
 });
+
+test('provider session index returns stored transcript version fields without schema migration', () => {
+  /** PURPOSE: Search caches can validate indexed transcripts without touching JSONL files. */
+  const db = new Database(':memory:');
+  try {
+    createLegacyProviderSessionIndex(db);
+    db.exec('ALTER TABLE provider_session_index ADD COLUMN file_size INTEGER');
+    providerSessionIndexDb.upsert(db, {
+      provider: 'codex',
+      id: 'codex-versioned-session',
+      projectPath: '/tmp/ozw-provider-index-version',
+      title: 'versioned session',
+      filePath: '/tmp/codex-versioned-session.jsonl',
+      lastActivity: '2026-08-24T00:00:00.000Z',
+      fileMtimeMs: 1_777_777_777_777,
+    });
+    db.prepare('UPDATE provider_session_index SET file_size = ? WHERE session_id = ?')
+      .run(4096, 'codex-versioned-session');
+
+    const [session] = providerSessionIndexDb.listForProject(
+      db,
+      'codex',
+      '/tmp/ozw-provider-index-version',
+      10,
+    );
+    assert.equal(session.fileMtimeMs, 1_777_777_777_777);
+    assert.equal(session.fileSize, 4096);
+  } finally {
+    db.close();
+  }
+});

@@ -20,6 +20,7 @@ const CHAT_SEARCH_RESULT = '[data-testid="chat-history-search-result"]';
 const CHAT_SEARCH_LOADING = '[data-testid="chat-history-search-loading"]';
 const CHAT_SEARCH_EMPTY = '[data-testid="chat-history-search-empty"]';
 const CHAT_SEARCH_ERROR = '[data-testid="chat-history-search-error"]';
+const CHAT_SEARCH_HIGHLIGHT = '[data-testid="chat-history-search-highlight"]';
 const OPEN_CHAT_SEARCH = '[data-testid="open-chat-history-search"]';
 const CHAT_SEARCH_MODE_CONTENT = '[data-testid="chat-history-search-mode-content"]';
 
@@ -239,4 +240,88 @@ test('shows an explicit error state when chat search fails', async ({ page }) =>
   await page.locator(CHAT_SEARCH_INPUT).press('Enter');
 
   await expect(page.locator(CHAT_SEARCH_ERROR)).toContainText('fixture search failure');
+});
+
+test('automatically scopes a two-character search to the selected project path', async ({ page }) => {
+  /** Scenario: 当前项目中的两字符输入应自动触发项目范围搜索，无需按 Enter。 */
+  await openFixtureProject(page, { reset: false });
+  const searchRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === '/api/chat/search' && url.searchParams.get('q') === 'xy';
+  });
+
+  await page.locator(OPEN_CHAT_SEARCH).first().click();
+  await page.locator(CHAT_SEARCH_INPUT).fill('xy');
+
+  const request = await searchRequest;
+  const url = new URL(request.url());
+  expect(url.searchParams.get('projectPath')).toBe(PRIMARY_FIXTURE_PROJECT_PATH);
+  expect(url.searchParams.get('limit')).toBe('50');
+});
+
+test('does not let a slow older search overwrite newer results', async ({ page }) => {
+  /** Scenario: 用户继续输入后，旧请求即使更晚返回也不能覆盖新结果。 */
+  await page.route('**/api/chat/search**', async (route) => {
+    const query = new URL(route.request().url()).searchParams.get('q');
+    if (query === 'old-query') await new Promise((resolve) => setTimeout(resolve, 700));
+    const resultText = query === 'old-query' ? 'stale-result' : 'fresh-result';
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        results: [{
+          resultType: 'session',
+          projectName: 'fixture-project',
+          projectDisplayName: 'fixture-project',
+          provider: 'codex',
+          sessionId: resultText,
+          sessionSummary: resultText,
+          snippet: resultText,
+        }],
+      }),
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'networkidle' });
+  await page.locator(OPEN_CHAT_SEARCH).first().click();
+  await page.locator(CHAT_SEARCH_INPUT).fill('old-query');
+  await expect(page.locator(CHAT_SEARCH_LOADING)).toBeVisible();
+  await page.locator(CHAT_SEARCH_INPUT).fill('new-query');
+
+  await expect(page.locator(CHAT_SEARCH_RESULT).filter({ hasText: 'fresh-result' })).toHaveCount(1);
+  await page.waitForTimeout(800);
+  await expect(page.locator(CHAT_SEARCH_RESULT).filter({ hasText: 'stale-result' })).toHaveCount(0);
+});
+
+test('renders matched text with readable surrounding context and session identity', async ({ page }) => {
+  /** Scenario: 命中词、前后文和会话文件必须能在结果卡片中被一眼区分。 */
+  await page.route('**/api/chat/search**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        results: [{
+          resultType: 'message',
+          projectName: 'ozw',
+          projectDisplayName: 'ozw',
+          provider: 'codex',
+          sessionId: 'readable-result-session',
+          sessionFileName: 'rollout-readable-result.jsonl',
+          sessionSummary: '搜索体验改进',
+          messageKey: 'message:readable-result',
+          snippet: '在根目录创建测试集，并同步更新验收文件，确保搜索结果能展示完整上下文。',
+        }],
+      }),
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'networkidle' });
+  await page.locator(OPEN_CHAT_SEARCH).first().click();
+  await page.locator(CHAT_SEARCH_MODE_CONTENT).click();
+  await page.locator(CHAT_SEARCH_INPUT).fill('测试集');
+
+  const result = page.locator(CHAT_SEARCH_RESULT);
+  await expect(result).toContainText('rollout-readable-result.jsonl');
+  await expect(result).toContainText('在根目录创建测试集，并同步更新验收文件');
+  await expect(result.locator(CHAT_SEARCH_HIGHLIGHT)).toHaveText('测试集');
 });

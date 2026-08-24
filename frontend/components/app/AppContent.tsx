@@ -404,6 +404,8 @@ export default function AppContent() {
         <Suspense fallback={<div className="fixed inset-0 z-50 bg-black/50" role="status" aria-label="Loading chat search" />}>
           <ChatHistorySearchDialog
             isOpen={isChatSearchOpen}
+            projects={sidebarSharedProps.projects || []}
+            selectedProject={selectedProject}
             onClose={() => setIsChatSearchOpen(false)}
             onNavigateToSession={handleNavigateToSession}
           />

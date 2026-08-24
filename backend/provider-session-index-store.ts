@@ -41,10 +41,13 @@ type ProviderSessionIndexRow = {
   last_activity: string;
   message_count: number | null;
   message_count_known: number;
+  file_mtime_ms: number | null;
+  file_size: number | null;
   manual_pending?: number;
 };
 
 const schemaReadyDbs = new WeakSet<object>();
+const schemaColumnsByDb = new WeakMap<object, Set<string>>();
 
 /**
  * Normalize dates before writing SQLite text columns.
@@ -159,7 +162,19 @@ function ensureProviderSessionIndexSchema(db: any): void {
       UPDATE session_attention_ack SET legacy_pending_migrated = 1;
     `);
   }
+  schemaColumnsByDb.set(
+    db,
+    new Set((db.prepare('PRAGMA table_info(provider_session_index)').all() as Array<{ name: string }>)
+      .map((column) => column.name)),
+  );
   schemaReadyDbs.add(db);
+}
+
+/** Check whether an installation already provides an optional index column. */
+function hasProviderSessionIndexColumn(db: any, columnName: string): boolean {
+  /** Optional version fields are consumed without mutating older databases. */
+  ensureProviderSessionIndexSchema(db);
+  return schemaColumnsByDb.get(db)?.has(columnName) === true;
 }
 
 /**
@@ -190,6 +205,8 @@ function rowToSession(row: ProviderSessionIndexRow): Record<string, unknown> {
     thread: row.thread || undefined,
     sessionFileName: row.session_file_name || undefined,
     filePath: row.file_path,
+    fileMtimeMs: typeof row.file_mtime_ms === 'number' ? row.file_mtime_ms : 0,
+    fileSize: typeof row.file_size === 'number' ? row.file_size : undefined,
     provider: row.provider,
     __provider: row.provider,
     pending: Number(row.manual_pending || 0) === 1,
@@ -294,6 +311,9 @@ function listProviderSessionsForProject(db: any, provider: string, projectPath: 
   if (!normalizedProjectPath || limit <= 0) {
     return [];
   }
+  const fileSizeSelection = hasProviderSessionIndexColumn(db, 'file_size')
+    ? 'p.file_size'
+    : 'NULL AS file_size';
   const rows = db.prepare(`
     SELECT
       p.provider,
@@ -312,6 +332,8 @@ function listProviderSessionsForProject(db: any, provider: string, projectPath: 
       p.last_activity,
       p.message_count,
       p.message_count_known,
+      p.file_mtime_ms,
+      ${fileSizeSelection},
       COALESCE(a.manual_pending, 0) AS manual_pending
     FROM provider_session_index p
     LEFT JOIN session_attention_ack a

@@ -38,10 +38,16 @@
     "files": "files",
     "pattern": "pattern:",
     "in": "in:",
-    "placeholder": "Search chat history",
-    "enterPrompt": "Type and press Enter to search chat history.",
+    "placeholder": "Search chat contents",
+    "enterPrompt": "Type at least {{count}} characters to search.",
     "searching": "Searching chat history...",
-    "noMatches": "No chat history matches found."
+    "noMatches": "No chat history matches found.",
+    "noJsonlMatches": "No matching JSONL filename or thread found.",
+    "failed": "Failed to search chat history",
+    "projectScope": "Search project",
+    "filterProjects": "Filter projects",
+    "allProjects": "All projects",
+    "noProjects": "No matching projects"
   },
   "fileOperations": {
     "updated": "File updated successfully",

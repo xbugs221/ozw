@@ -38,10 +38,16 @@
     "files": "文件",
     "pattern": "模式：",
     "in": "在：",
-    "placeholder": "搜索聊天记录",
-    "enterPrompt": "输入内容后按 Enter 搜索聊天记录。",
+    "placeholder": "搜索聊天内容",
+    "enterPrompt": "输入至少 {{count}} 个字符开始搜索。",
     "searching": "正在搜索聊天记录...",
-    "noMatches": "未找到匹配的聊天记录。"
+    "noMatches": "未找到匹配的聊天记录。",
+    "noJsonlMatches": "未找到匹配的 JSONL 文件名或 thread。",
+    "failed": "搜索聊天记录失败",
+    "projectScope": "搜索项目",
+    "filterProjects": "筛选项目",
+    "allProjects": "全部项目",
+    "noProjects": "没有匹配的项目"
   },
   "fileOperations": {
     "updated": "文件更新成功",

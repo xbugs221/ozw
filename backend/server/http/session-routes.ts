@@ -17,7 +17,11 @@ export interface SessionRouteDeps {
     app: HttpRouteApp;
     authenticateToken: AuthMiddleware;
     handleGetSessionMessages: unknown;
-    searchChatHistory: (query: string, mode: 'jsonl' | 'content') => Promise<unknown[]>;
+    searchChatHistory: (
+        query: string,
+        mode: 'jsonl' | 'content',
+        options?: { projectPath?: string; projectName?: string; limit?: number },
+    ) => Promise<unknown[]>;
     heavyReadCoalescer: HeavyReadCoalescer;
     renameSession: (projectName: string, sessionId: string, summary: string, projectPath: string) => Promise<unknown>;
     updateSessionUiState: (projectName: string, sessionId: string, provider: string, state: { favorite: boolean; pending: boolean; hidden: boolean }, projectPath: string) => Promise<unknown>;
@@ -59,9 +63,14 @@ const searchChatHistoryHandler = async (req: any, res: any) => {
     try {
         const query = typeof req.query.q === 'string' ? req.query.q : '';
         const mode = req.query.mode === 'jsonl' ? 'jsonl' : 'content';
+        const projectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath.trim() : '';
+        const projectName = typeof req.query.projectName === 'string' ? req.query.projectName.trim() : '';
+        const parsedLimit = Number.parseInt(String(req.query.limit || ''), 10);
+        const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(200, parsedLimit) : 50;
+        const searchOptions = { projectPath, projectName, limit };
         const results = await heavyReadCoalescer.run(
-            `search:chat:${mode}:${query.trim()}`,
-            async () => searchChatHistory(query, mode),
+            `search:chat:${JSON.stringify({ mode, query: query.trim(), ...searchOptions })}`,
+            async () => searchChatHistory(query, mode, searchOptions),
         );
         res.json({ success: true, results });
     } catch (error: any) {

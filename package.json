@@ -1,11 +1,18 @@
 {
   "name": "ozw",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Local web workbench for Codex, Pi, and oz agentic coding workflows",
   "type": "module",
   "packageManager": "pnpm@11.17.0",
   "engines": {
     "node": ">=24.17.0 <25 || >=26.4.0 <27"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.17.0",
+      "onFail": "ignore"
+    }
   },
   "main": "dist-node/backend/index.js",
   "bin": {
@@ -31,7 +38,7 @@
     "dev:watch": "./scripts/dev-watch.sh",
     "server": "tsx backend/index.ts",
     "client": "vite",
-    "build": "pnpm run build:server && vite build && node scripts/verify-production-entry-assets.mjs",
+    "build": "node scripts/clean-server-build.mjs && tsc -p tsconfig.build.json && node scripts/copy-runtime-assets.mjs && vite build && node scripts/verify-production-entry-assets.mjs",
     "build:release": "pnpm run build",
     "build:server": "node scripts/clean-server-build.mjs && tsc -p tsconfig.build.json && node scripts/copy-runtime-assets.mjs",
     "format": "./scripts/format-code.sh --staged",

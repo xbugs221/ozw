@@ -267,8 +267,12 @@ export async function getCodexSessionMessages(
   limit: unknown = null,
   offset: unknown = 0,
   afterLine: unknown = null,
+  indexedFilePath: unknown = '',
 ): Promise<LooseRecord> {
-  const filePath = await findCodexSessionFile(String(sessionId || ''));
+  const filePath = await resolveIndexedProviderSessionFile(
+    indexedFilePath,
+    () => findCodexSessionFile(String(sessionId || '')),
+  );
   if (!filePath) {
     return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextMessageOffset: 0, nextRawLineOffset: 0 };
   }
@@ -435,8 +439,12 @@ export async function getPiSessionMessages(
   limit: unknown = null,
   offset: unknown = 0,
   afterLine: unknown = null,
+  indexedFilePath: unknown = '',
 ): Promise<LooseRecord> {
-  const filePath = await findPiSessionFile(String(sessionId || ''));
+  const filePath = await resolveIndexedProviderSessionFile(
+    indexedFilePath,
+    () => findPiSessionFile(String(sessionId || '')),
+  );
   if (!filePath) {
     return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextMessageOffset: 0, nextRawLineOffset: 0 };
   }
@@ -531,6 +539,25 @@ export async function findCodexSessionFile(sessionId: string): Promise<string | 
  */
 export async function findPiSessionFile(sessionId: string): Promise<string | null> {
   return findSessionFile(await listPiSessionFiles(), sessionId);
+}
+
+/**
+ * Prefer one indexed transcript path and retain recursive discovery as a
+ * compatibility fallback for callers whose index is missing or stale.
+ */
+async function resolveIndexedProviderSessionFile(
+  indexedFilePath: unknown,
+  discover: () => Promise<string | null>,
+): Promise<string | null> {
+  /** A caller-supplied path is trusted only while it still names a regular file. */
+  const candidate = String(indexedFilePath || '').trim();
+  if (candidate) {
+    const isFile = await fs.stat(candidate).then((entry) => entry.isFile()).catch(() => false);
+    if (isFile) {
+      return candidate;
+    }
+  }
+  return discover();
 }
 
 /** Find a Claude transcript by provider session id. */
