@@ -743,6 +743,7 @@ function MainContent({
             <ErrorBoundary showDetails>
               <React.Suspense fallback={<DeferredPanelFallback label="Loading chat…" />}>
                 <ChatInterface
+                  key={`chat-${selectedSession?.id || 'project'}-${selectedSession?.__provider || 'codex'}`}
                   selectedProject={selectedProject}
                   selectedSession={selectedSession}
                   ws={ws}
@@ -763,6 +764,7 @@ function MainContent({
                   autoScrollToBottom={autoScrollToBottom}
                   externalMessageUpdate={externalMessageUpdate}
                   renderSnapshotRequestId={renderSnapshotRequestId}
+                  renderTranscriptOnMount={activeTab === 'chat'}
                   onRenderSnapshotLoadingChange={setIsRenderingSnapshot}
                 />
               </React.Suspense>

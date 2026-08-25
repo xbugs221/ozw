@@ -101,13 +101,32 @@ test('聊天页默认 TUI-first，并由消息 Tab 触发渲染快照', () => {
   );
 });
 
-test('新建会话进入终端而不是渲染标签', () => {
-  /** 路由同步不得覆盖新建会话入口已经选择的 TUI 标签。 */
+test('历史会话默认打开渲染标签，新建会话显式进入终端', () => {
+  /** 历史阅读不应唤起 tmux；新建入口保留明确的实时终端路由。 */
   const source = readRequiredSource(PROJECTS_STATE_PATH, '项目会话标签同步');
   assert.match(
     source,
-    /Entering a concrete session defaults to its live TUI[\s\S]{0,240}setActiveTab\('shell'\)/,
-    '具体会话在 URL 未指定标签时必须默认进入终端',
+    /Open persisted sessions in the readable transcript[\s\S]{0,240}setActiveTab\('chat'\)/,
+    '历史会话在 URL 未指定标签时必须默认进入渲染视图',
+  );
+  assert.match(
+    source,
+    /Selecting stored history prioritizes the rendered user\/agent transcript[\s\S]{0,160}setActiveTab\('chat'\)/,
+    '从会话列表点开历史会话必须进入渲染视图',
+  );
+  assert.match(
+    source,
+    /new URLSearchParams\(\{ tab: 'shell' \}\)[\s\S]{0,200}navigate\(`\$\{baseRoute\}\?\$\{newSessionParams\.toString\(\)\}`\)/,
+    '新建会话必须在 URL 明确指定终端，避免路由同步切回渲染视图',
+  );
+  const mainContentSource = readRequiredSource(
+    path.join(REPO_ROOT, 'frontend', 'components', 'main-content', 'view', 'MainContent.tsx'),
+    '会话渲染入口',
+  );
+  assert.match(
+    mainContentSource,
+    /renderTranscriptOnMount=\{activeTab === 'chat'\}/,
+    '渲染标签必须让会话从渲染快照启动，而非先挂载 TUI',
   );
 });
 

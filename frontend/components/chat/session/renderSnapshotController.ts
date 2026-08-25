@@ -1,6 +1,6 @@
 /**
- * PURPOSE: Manage user-triggered rendered JSONL snapshots for chat sessions.
- * Business purpose: The rendered view is a frozen history snapshot and must not replace the live TUI by automatic events.
+ * PURPOSE: Manage rendered JSONL snapshots for chat sessions.
+ * Business purpose: Stored-history readers start with a frozen transcript while live TUI sessions remain explicit.
  */
 
 export type RenderSnapshotMessage = {
@@ -51,14 +51,17 @@ export function resolveRenderSnapshotCalibrationStep(input: {
 }
 
 /**
- * Create the default TUI-first render state for a chat session.
+ * Create the initial render state for a chat session.
  *
- * @param input Stable TUI session key.
+ * @param input Stable TUI session key and optional reader mode.
  * @returns Initial render snapshot state.
  */
-export function createInitialRenderSnapshotState(input: { tuiSessionKey: string }): RenderSnapshotState {
+export function createInitialRenderSnapshotState(input: {
+  tuiSessionKey: string;
+  mode?: RenderSnapshotState['mode'];
+}): RenderSnapshotState {
   return {
-    mode: 'tui',
+    mode: input.mode ?? 'tui',
     tuiSessionKey: input.tuiSessionKey,
     snapshotVersion: 0,
     snapshotMessages: [],

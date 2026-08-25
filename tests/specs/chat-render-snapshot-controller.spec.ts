@@ -37,7 +37,10 @@ const SNAPSHOT_CONTROLLER_PATH = path.join(
  * Load the production snapshot controller and verify its public contract.
  */
 async function loadSnapshotController(): Promise<{
-  createInitialRenderSnapshotState: (input: { tuiSessionKey: string }) => RenderSnapshotState;
+  createInitialRenderSnapshotState: (input: {
+    tuiSessionKey: string;
+    mode?: RenderSnapshotState['mode'];
+  }) => RenderSnapshotState;
   applyUserRenderSnapshot: (
     state: RenderSnapshotState,
     input: { messages: SnapshotMessage[]; loadedAt: string },
@@ -75,6 +78,18 @@ test('默认状态是 TUI 模式，且保留 TUI 会话键', async () => {
   assert.equal(state.snapshotVersion, 0);
   assert.deepEqual(state.snapshotMessages, []);
   assert.equal(state.loadedAt, null);
+});
+
+test('历史阅读可直接初始化为渲染模式，不挂载 TUI', async () => {
+  const { createInitialRenderSnapshotState } = await loadSnapshotController();
+
+  const state = createInitialRenderSnapshotState({
+    tuiSessionKey: 'project:codex:c-history',
+    mode: 'renderedSnapshot',
+  });
+
+  assert.equal(state.mode, 'renderedSnapshot');
+  assert.deepEqual(state.snapshotMessages, []);
 });
 
 test('用户点击渲染后保存冻结 JSONL snapshot', async () => {

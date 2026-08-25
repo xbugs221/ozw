@@ -100,12 +100,12 @@ export function useProjectsState({
     }
   }, [locationSearch]);
   useEffect(() => {
-    /** Entering a concrete session defaults to its live TUI unless the URL explicitly selects another tab. */
+    /** Open persisted sessions in the readable transcript unless the URL selects a tab explicitly. */
     if (!selectedSession?.id) return;
     const routeParams = new URLSearchParams(locationSearch);
     const explicitTab = routeParams.get('tab');
     if (!explicitTab) {
-      setActiveTab(selectedSession.__provider === 'hermes' || routeParams.get('provider') === 'hermes' ? 'chat' : 'shell');
+      setActiveTab('chat');
     }
   }, [locationSearch, selectedSession?.__provider, selectedSession?.id]);
   useEffect(() => {
@@ -367,9 +367,10 @@ export function useProjectsState({
   );
   const handleSessionSelect = useCallback(
     (session: ProjectSession) => {
+      /** Selecting stored history prioritizes the rendered user/agent transcript. */
       setSelectedSession(session);
       setSelectedWorkflow(null);
-      setActiveTab(session.__provider === 'hermes' ? 'chat' : 'shell');
+      setActiveTab('chat');
       const sessionProjectName = session.__projectName || selectedProject?.name || '';
       const sessionProjectPath = session.projectPath || selectedProject?.fullPath || selectedProject?.path || '';
       const sessionProject = {
@@ -534,12 +535,16 @@ export function useProjectsState({
       setSelectedProject(projectWithSyntheticSession);
       setSelectedSession(syntheticSession);
       setSelectedWorkflow(null);
-      // New sessions start in the live terminal; rendered history is opened explicitly.
+      // New sessions retain the live terminal entry point; stored history opens in chat.
       setActiveTab('shell');
       const baseRoute = targetWorkflow
         ? buildWorkflowChildSessionRoute(projectWithSyntheticSession, targetWorkflow, syntheticSession)
         : buildProjectSessionRoute(projectWithSyntheticSession, syntheticSession);
-      navigate(provider === 'codex' ? baseRoute : `${baseRoute}?provider=${encodeURIComponent(provider)}`);
+      const newSessionParams = new URLSearchParams({ tab: 'shell' });
+      if (provider !== 'codex') {
+        newSessionParams.set('provider', provider);
+      }
+      navigate(`${baseRoute}?${newSessionParams.toString()}`);
       return { ok: true as const };
     },
     [navigate, projects],

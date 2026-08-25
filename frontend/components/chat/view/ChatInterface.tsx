@@ -258,6 +258,7 @@ function ChatInterface({
   autoScrollToBottom,
   externalMessageUpdate,
   renderSnapshotRequestId = 0,
+  renderTranscriptOnMount = false,
   onRenderSnapshotLoadingChange,
 }: ChatInterfaceProps) {
   const { t } = useTranslation('chat');
@@ -286,6 +287,7 @@ function ChatInterface({
   const renderSnapshotHistoryRawLineBoundaryRef = useRef<number | null>(null);
   const renderSnapshotUserInteractionRevisionRef = useRef(0);
   const lastHandledRenderSnapshotRequestIdRef = useRef(0);
+  const autoRenderedSessionKeyRef = useRef<string | null>(null);
   const pendingRenderSnapshotScrollRestoreRef = useRef<ReturnType<typeof captureSessionScrollSnapshot>>(null);
   const pendingRenderSnapshotScrollRestoreRevisionRef = useRef<number | null>(null);
   const [workflowTurnOutcomes, setWorkflowTurnOutcomes] = useState<Record<string, 'completed' | 'failed'>>({});
@@ -385,7 +387,10 @@ function ChatInterface({
     selectedSession?.routeIndex,
   ]);
   const [renderSnapshotState, setRenderSnapshotState] = useState(() =>
-    createInitialRenderSnapshotState({ tuiSessionKey: chatTuiSessionKey }),
+    createInitialRenderSnapshotState({
+      tuiSessionKey: chatTuiSessionKey,
+      mode: renderTranscriptOnMount ? 'renderedSnapshot' : 'tui',
+    }),
   );
   const renderSnapshotStateRef = useRef<RenderSnapshotState>(renderSnapshotState);
   renderSnapshotStateRef.current = renderSnapshotState;
@@ -405,8 +410,11 @@ function ChatInterface({
     pendingRenderSnapshotScrollRestoreRef.current = null;
     pendingRenderSnapshotScrollRestoreRevisionRef.current = null;
     renderSnapshotUserInteractionRevisionRef.current = 0;
-    setRenderSnapshotState(createInitialRenderSnapshotState({ tuiSessionKey: chatTuiSessionKey }));
-  }, [chatTuiSessionKey]);
+    setRenderSnapshotState(createInitialRenderSnapshotState({
+      tuiSessionKey: chatTuiSessionKey,
+      mode: renderTranscriptOnMount ? 'renderedSnapshot' : 'tui',
+    }));
+  }, [chatTuiSessionKey, renderTranscriptOnMount]);
 
   const {
     chatMessages,
@@ -1091,6 +1099,18 @@ function ChatInterface({
       onRenderSnapshotLoadingChange?.(false);
     };
   }, [onRenderSnapshotLoadingChange]);
+
+  useEffect(() => {
+    /** Wait for persisted rows so the reader's first snapshot is never an empty pre-hydration view. */
+    if (!renderTranscriptOnMount || !selectedSession || chatMessages.length === 0) {
+      return;
+    }
+    if (autoRenderedSessionKeyRef.current === chatTuiSessionKey) {
+      return;
+    }
+    autoRenderedSessionKeyRef.current = chatTuiSessionKey;
+    void handleRenderSnapshot();
+  }, [chatMessages.length, chatTuiSessionKey, handleRenderSnapshot, renderTranscriptOnMount, selectedSession]);
 
   useEffect(() => {
     /**

@@ -35,9 +35,10 @@ function createLocalAuthToken() {
  * Open the long fixture session so message bookmarks are available.
  */
 async function openBookmarkFixture(page) {
+  /** Stored history opens directly in the rendered reader, without a TUI transition. */
   await page.goto(`/session/${HISTORY_SCROLL_SESSION_ID}`, { waitUntil: 'networkidle' });
   await expect(page.getByTestId('tab-chat')).toBeVisible();
-  await page.getByTestId('tab-chat').click();
+  await expect(page.getByTestId('tab-chat')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('chat-rendered-snapshot-pane')).toBeVisible();
   await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 80');
 }

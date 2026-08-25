@@ -108,8 +108,11 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
   // Thinking block collapse state — persisted across streaming updates
   // for the same message (messageKey stays stable during streaming).
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [reasoningExpanded, setReasoningExpanded] = useState(false);
   useEffect(() => {
+    /** Reset deferred process detail when a virtualized row receives a new message. */
     setThinkingExpanded(false);
+    setReasoningExpanded(false);
   }, [message.messageKey]);
 
   const userStyles = useMemo(() => {
@@ -536,15 +539,21 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
               <div className="text-sm text-gray-700 dark:text-gray-300">
                 {/* Thinking accordion for reasoning */}
                 {showThinking && message.reasoning && (
-                  <details className="mb-3">
+                  <details
+                    className="mb-3"
+                    open={reasoningExpanded}
+                    onToggle={(event) => setReasoningExpanded(event.currentTarget.open)}
+                  >
                     <summary className="cursor-pointer text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 font-medium">
                       {'\u22EF'}
                     </summary>
-                    <div className="mt-2 text-sm text-gray-700 dark:text-gray-300">
-                      <div className="whitespace-pre-wrap">
-                        {message.reasoning}
+                    {reasoningExpanded && (
+                      <div className="mt-2 text-sm text-gray-700 dark:text-gray-300">
+                        <div className="whitespace-pre-wrap">
+                          {message.reasoning}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </details>
                 )}
 
