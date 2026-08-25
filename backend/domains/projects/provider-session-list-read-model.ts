@@ -98,10 +98,12 @@ function mergeSessionTitle(
   const legacyPrefix = Array.from(providerTitle).slice(0, 50).join('');
   const isLegacyAutoSummary = providerTitle.length > legacyPrefix.length
     && routeTitle === `${legacyPrefix}...`;
+  const replacementTitle = providerValue || providerComparisonValue || routeValue;
   return isGeneratedManualRouteTitle(routeValue, routeSession)
     || isLegacyAutoSummary
     || isProviderFallbackPlaceholder(routeValue)
-    ? (providerValue || routeValue)
+    || isCodexBootstrapTitle(routeValue)
+    ? replacementTitle
     : routeValue;
 }
 
@@ -113,6 +115,18 @@ function mergeSessionTitle(
 function isProviderFallbackPlaceholder(value: unknown): boolean {
   const title = String(value || '').trim();
   return title === 'Codex Session' || title === 'Pi Session' || title === 'Claude Session';
+}
+
+/**
+ * Identify stale route titles written from Codex's injected AGENTS bootstrap.
+ */
+function isCodexBootstrapTitle(value: unknown): boolean {
+  /**
+   * PURPOSE: Existing cN routes may have persisted internal bootstrap text
+   * before header parsing learned the source-path variant, so repair them from
+   * the provider's real first user request on the next list refresh.
+   */
+  return /^# AGENTS\.md instructions(?:\s+for\b[^\n]*)?\s*$/im.test(String(value || '').trim().split('\n').slice(0, 1).join(''));
 }
 
 /**

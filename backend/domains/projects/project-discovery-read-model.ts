@@ -140,6 +140,7 @@ export async function getProjects(_progress: unknown = null, options: LooseRecor
     if (!lightweightList) {
       project.codexSessions = await getCodexSessions(projectPath, {
         includeHidden: true,
+        excludeWorkflowChildSessions: true,
         providerSessionIndex: hydratedIndexes?.codex,
         skipProviderScan: true,
       });
@@ -243,6 +244,7 @@ async function appendProviderOnlyProjects(
       project.codexSessions = candidate.provider === 'codex'
         ? await getCodexSessions(normalizedPath, {
           includeHidden: true,
+          excludeWorkflowChildSessions: true,
           providerSessionIndex: hydratedIndexes?.codex,
           skipProviderScan: true,
         })

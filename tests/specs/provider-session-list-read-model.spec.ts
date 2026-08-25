@@ -102,6 +102,42 @@ test('Provider 会话列表不会让缺失时间的旧 cN 路由挤掉最近 pro
   await writeEvidenceSnapshot('untimestamped-route-order.json', output);
 });
 
+test('Provider 会话列表用真实用户请求修复旧的 AGENTS 内部路由标题', () => {
+  /**
+   * 业务场景：旧版本把 Codex 注入的 AGENTS.md 内容写进 cN 路由后，
+   * 刷新列表应立即恢复为 provider 解析出的首条真实用户请求。
+   */
+  const output = buildProviderSessionListReadModel({
+    provider: 'codex',
+    providerSessions: [
+      {
+        id: 'provider-real-request',
+        title: '修复会话清单的内部标题',
+        routeTitle: '修复会话清单的内部标题',
+        lastActivity: '2026-08-25T10:00:00.000Z',
+      },
+    ],
+    manualDrafts: [
+      {
+        id: 'c8',
+        routeIndex: 8,
+        provider: 'codex',
+        providerSessionId: 'provider-real-request',
+        title: '# AGENTS.md instructions for /Users/example/dotfiles\n\n<INSTRUCTIONS>内部内容</INSTRUCTIONS>',
+        routeTitle: '# AGENTS.md instructions for /Users/example/dotfiles',
+        summary: '# AGENTS.md instructions for /Users/example/dotfiles',
+        lastActivity: '2026-08-25T10:00:01.000Z',
+      },
+    ],
+  });
+
+  assert.equal(output.length, 1);
+  assert.equal(output[0].id, 'c8');
+  assert.equal(output[0].title, '修复会话清单的内部标题');
+  assert.equal(output[0].routeTitle, '修复会话清单的内部标题');
+  assert.equal(output[0].summary, '修复会话清单的内部标题');
+});
+
 test('Provider 会话列表过滤旧版本误标为 manual 的 workflow 角色提示会话', async () => {
   /**
    * 业务场景：历史 workflow 子会话曾以 cN manual route 形态持久化，项目首页不能把这些内部角色会话展示成手动会话。

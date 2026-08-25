@@ -102,7 +102,7 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
       model = String(record.payload.model || record.payload.model_provider || model || '');
       const subagentParentThreadId = getCodexSubagentParentThreadId(record.payload);
       sourceSessionId ||= subagentParentThreadId || String(record.payload.id || '');
-      if (subagentParentThreadId) {
+      if (isCodexSubagentSession(record.payload)) {
         origin = 'workflow';
       }
     }
@@ -177,9 +177,7 @@ function getCodexSubagentParentThreadId(payload: LooseRecord): string {
    * state has not enumerated them, so classification must not depend on titles.
    */
   const threadSpawn = payload?.source?.subagent?.thread_spawn;
-  const isSubagent = payload?.thread_source === 'subagent'
-    || (threadSpawn && typeof threadSpawn === 'object');
-  if (!isSubagent) {
+  if (!isCodexSubagentSession(payload)) {
     return '';
   }
   return String(
@@ -188,6 +186,19 @@ function getCodexSubagentParentThreadId(payload: LooseRecord): string {
     || payload?.forked_from_id
     || '',
   ).trim();
+}
+
+/**
+ * Identify Codex child threads even when their rollout metadata omits a parent id.
+ */
+function isCodexSubagentSession(payload: LooseRecord): boolean {
+  /**
+   * PURPOSE: A missing parent id is incomplete provider metadata, not evidence
+   * that a thread_source=subagent session was created by the user.
+   */
+  const threadSpawn = payload?.source?.subagent?.thread_spawn;
+  return payload?.thread_source === 'subagent'
+    || Boolean(threadSpawn && typeof threadSpawn === 'object');
 }
 
 /**
@@ -2084,7 +2095,7 @@ function stringifyMessageContent(content: unknown): string {
 }
 
 const CODEX_INTERNAL_USER_BLOCK_TAGS = ['environment_context', 'system-reminder', 'codex_internal_context'];
-const CODEX_AGENTS_INSTRUCTIONS_PATTERN = /^# AGENTS\.md instructions\s*\n+\s*<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>\s*/i;
+const CODEX_AGENTS_INSTRUCTIONS_PATTERN = /^# AGENTS\.md instructions(?:\s+for\b[^\n]*)?\s*\n+\s*<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>\s*/i;
 
 /**
  * Remove Codex bootstrap instructions from role=user transcript text.

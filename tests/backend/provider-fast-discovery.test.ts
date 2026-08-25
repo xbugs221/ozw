@@ -159,6 +159,107 @@ test('Codex subagent metadata classifies internal sessions as workflow-owned', a
   });
 });
 
+test('Codex subagent sessions without a parent id stay out of manual project sessions', async () => {
+  await withTemporaryHome(async (homeDir) => {
+    const projectPath = path.join(homeDir, 'work', 'codex-subagent-filter-project');
+    const childSessionPath = path.join(
+      homeDir,
+      '.codex',
+      'sessions',
+      '2026',
+      '07',
+      '15',
+      'rollout-2026-07-15T02-00-00-codex-child-without-parent.jsonl',
+    );
+    const manualSessionPath = path.join(
+      homeDir,
+      '.codex',
+      'sessions',
+      '2026',
+      '07',
+      '15',
+      'rollout-2026-07-15T02-01-00-codex-manual.jsonl',
+    );
+
+    await fs.mkdir(projectPath, { recursive: true });
+    await addProjectManually(projectPath, 'Codex Subagent Filter');
+    await writeJsonl(childSessionPath, [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-07-15T02:00:00.000Z',
+        payload: { id: 'codex-child-without-parent', cwd: projectPath, thread_source: 'subagent' },
+      }),
+    ]);
+    await writeJsonl(manualSessionPath, [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-07-15T02:01:00.000Z',
+        payload: { id: 'codex-manual', cwd: projectPath },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        timestamp: '2026-07-15T02:01:01.000Z',
+        payload: { type: 'user_message', message: '保留用户手动会话' },
+      }),
+    ]);
+
+    const projects = await getProjects();
+    const project = projects.find((entry) => entry.fullPath === projectPath);
+    const sessionIds = (project?.codexSessions || []).map((session) => session.id);
+
+    assert.equal(sessionIds.includes('codex-child-without-parent'), false);
+    assert.equal(sessionIds.includes('codex-manual'), true);
+  });
+});
+
+test('Codex session headers ignore AGENTS instructions that include their source path', async () => {
+  await withTemporaryHome(async (homeDir) => {
+    const projectPath = path.join(homeDir, 'work', 'codex-agents-title-project');
+    const sessionPath = path.join(
+      homeDir,
+      '.codex',
+      'sessions',
+      '2026',
+      '07',
+      '16',
+      'rollout-2026-07-16T02-00-00-codex-agents-source-path.jsonl',
+    );
+    const prompt = '修复手动会话列表的内部标题';
+
+    await fs.mkdir(projectPath, { recursive: true });
+    await writeJsonl(sessionPath, [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-07-16T02:00:00.000Z',
+        payload: { id: 'codex-agents-source-path', cwd: projectPath },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        timestamp: '2026-07-16T02:00:01.000Z',
+        payload: {
+          type: 'user_message',
+          message: [
+            '# AGENTS.md instructions for /Users/example/dotfiles',
+            '',
+            '<INSTRUCTIONS>',
+            '- 这是内部指令',
+            '</INSTRUCTIONS>',
+            '<environment_context>',
+            '<cwd>/Users/example/project</cwd>',
+            '</environment_context>',
+            prompt,
+          ].join('\n'),
+        },
+      }),
+    ]);
+
+    const header = await parseCodexSessionHeader(sessionPath);
+
+    assert.equal(header.title, prompt);
+    assert.equal(header.routeTitle, prompt);
+  });
+});
+
 test('Codex old-format fixture falls back to deep parse for cwd discovery', async () => {
   await withTemporaryHome(async (homeDir) => {
     const projectPath = path.join(homeDir, 'work', 'codex-old');
