@@ -43,6 +43,7 @@ const CLAUDE_HISTORY_CURSOR_PART_BASE = 1_000_000;
 const CLAUDE_HISTORY_OVERSIZED_STATE_BASE = 500_000;
 const CLAUDE_HISTORY_DEFAULT_LIMIT = 50;
 const CLAUDE_HISTORY_MAX_LIMIT = 500;
+const CLAUDE_HEADER_TAIL_READ_BYTES = 256 * 1024;
 let lastClaudeHistoryReadStats = {
   filePath: '',
   bytesRead: 0,
@@ -253,7 +254,37 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
   };
 }
 
-/** Parse the first usable Claude record for lightweight project discovery. */
+/**
+ * Read the last timestamped Claude JSONL row without treating a filesystem
+ * touch as user-visible session activity.
+ */
+async function readClaudeLastTranscriptTimestamp(filePath: string, fileSize: number): Promise<string> {
+  /** The bounded tail keeps startup indexing cheap for long Claude transcripts. */
+  const bytesToRead = Math.min(Math.max(0, fileSize), CLAUDE_HEADER_TAIL_READ_BYTES);
+  if (bytesToRead === 0) return '';
+  const handle = await fs.open(filePath, 'r').catch(() => null);
+  if (!handle) return '';
+  try {
+    const buffer = Buffer.alloc(bytesToRead);
+    await handle.read(buffer, 0, bytesToRead, Math.max(0, fileSize - bytesToRead));
+    const lines = buffer.toString('utf8').split('\n');
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      try {
+        const timestamp = JSON.parse(lines[index])?.timestamp;
+        if (typeof timestamp === 'string' && !Number.isNaN(new Date(timestamp).getTime())) {
+          return timestamp;
+        }
+      } catch {
+        // A partial first tail line or provider-written incomplete final line is ignored.
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+  return '';
+}
+
+/** Parse Claude session metadata while preserving transcript, rather than file, activity time. */
 export async function parseClaudeSessionHeader(filePath = ''): Promise<LooseRecord | null> {
   let first: LooseRecord | null = null;
   for await (const record of readJsonlRecords(filePath)) {
@@ -262,11 +293,13 @@ export async function parseClaudeSessionHeader(filePath = ''): Promise<LooseReco
   if (!first) return null;
   const stat = await fs.stat(filePath).catch(() => null);
   const timestamp = String(first.timestamp || (stat ? new Date(stat.mtimeMs).toISOString() : new Date().toISOString()));
-  const lastActivity = stat ? new Date(stat.mtimeMs).toISOString() : timestamp;
+  const transcriptTimestamp = stat ? await readClaudeLastTranscriptTimestamp(filePath, stat.size) : '';
+  const lastActivity = transcriptTimestamp || timestamp;
+  const activityMtimeMs = new Date(lastActivity).getTime();
   const sessionId = String(first.sessionId);
   const firstContent = typeof first.message?.content === 'string' ? first.message.content : '';
   const title = summarizeText(firstContent) || 'Claude Session';
-  return { id: sessionId, provider: 'claude', __provider: 'claude', sourceSessionId: sessionId, cwd: String(first.cwd), projectPath: String(first.cwd), createdAt: timestamp, lastActivity, updated_at: lastActivity, summary: title, title, routeTitle: summarizeText(title, 20, false), messageCount: null, messageCountKnown: false, filePath, fileMtimeMs: stat?.mtimeMs || 0, sessionFileName: path.basename(filePath) };
+  return { id: sessionId, provider: 'claude', __provider: 'claude', sourceSessionId: sessionId, cwd: String(first.cwd), projectPath: String(first.cwd), createdAt: timestamp, lastActivity, updated_at: lastActivity, summary: title, title, routeTitle: summarizeText(title, 20, false), messageCount: null, messageCountKnown: false, filePath, fileMtimeMs: Number.isFinite(activityMtimeMs) ? activityMtimeMs : (stat?.mtimeMs || 0), sessionFileName: path.basename(filePath) };
 }
 
 

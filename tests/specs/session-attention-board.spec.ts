@@ -13,6 +13,7 @@ import Database from 'better-sqlite3';
 import { providerSessionIndexDb } from '../../backend/provider-session-index-store.ts';
 import { sessionAttentionDb } from '../../backend/session-attention-store.ts';
 import { workflowOverviewIndexDb } from '../../backend/workflow-overview-index-store.ts';
+import { parseClaudeSessionHeader } from '../../backend/domains/projects/provider-transcript-read-model.ts';
 
 let tempDir = '';
 let db: Database.Database;
@@ -100,6 +101,49 @@ test('批量确认只记录观察版本并保留并发新活动', () => {
     'codex:shared',
   ]);
   assert.equal((db.prepare('SELECT COUNT(*) AS count FROM provider_session_index').get() as { count: number }).count, 3);
+});
+
+test('Claude 文件被触碰但没有新消息时，已完成会话不会重新出现', async () => {
+  /** Claude Code may rewrite metadata or restore files; only transcript timestamps count as activity. */
+  const isolatedDb = new Database(':memory:');
+  sessionAttentionDb.ensureSchema(isolatedDb);
+  const projectPath = path.join(tempDir, 'claude-project');
+  const sessionPath = path.join(tempDir, 'claude-session.jsonl');
+  const sessionId = 'claude-stable-timestamp';
+  await fs.writeFile(sessionPath, [
+    JSON.stringify({ sessionId, cwd: projectPath, timestamp: '2026-08-01T10:00:00.000Z', type: 'user', message: { content: 'first prompt' } }),
+    JSON.stringify({ sessionId, cwd: projectPath, timestamp: '2026-08-01T10:00:05.000Z', type: 'assistant', message: { content: 'first reply' } }),
+  ].join('\n') + '\n', 'utf8');
+
+  const initial = await parseClaudeSessionHeader(sessionPath);
+  assert.ok(initial);
+  providerSessionIndexDb.upsert(isolatedDb, initial);
+  const observed = sessionAttentionDb.list(isolatedDb, { limit: 100 }).find((row) => row.sessionId === sessionId);
+  assert.ok(observed);
+  sessionAttentionDb.markHandled(isolatedDb, [{
+    provider: observed.provider,
+    sessionId: observed.sessionId,
+    observedRevision: observed.activityRevision,
+  }]);
+
+  await fs.utimes(sessionPath, new Date('2026-08-02T10:00:00.000Z'), new Date('2026-08-02T10:00:00.000Z'));
+  const afterTouch = await parseClaudeSessionHeader(sessionPath);
+  assert.ok(afterTouch);
+  providerSessionIndexDb.upsert(isolatedDb, afterTouch);
+  assert.equal(
+    sessionAttentionDb.list(isolatedDb, { limit: 100 }).some((row) => row.sessionId === sessionId),
+    false,
+  );
+
+  await fs.appendFile(sessionPath, `${JSON.stringify({ sessionId, cwd: projectPath, timestamp: '2026-08-01T10:01:00.000Z', type: 'user', message: { content: 'follow-up' } })}\n`);
+  const afterMessage = await parseClaudeSessionHeader(sessionPath);
+  assert.ok(afterMessage);
+  providerSessionIndexDb.upsert(isolatedDb, afterMessage);
+  assert.equal(
+    sessionAttentionDb.list(isolatedDb, { limit: 100 }).some((row) => row.sessionId === sessionId),
+    true,
+  );
+  isolatedDb.close();
 });
 
 test('非法或未来观察版本被拒绝', () => {
