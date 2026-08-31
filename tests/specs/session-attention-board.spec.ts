@@ -13,7 +13,11 @@ import Database from 'better-sqlite3';
 import { providerSessionIndexDb } from '../../backend/provider-session-index-store.ts';
 import { sessionAttentionDb } from '../../backend/session-attention-store.ts';
 import { workflowOverviewIndexDb } from '../../backend/workflow-overview-index-store.ts';
-import { parseClaudeSessionHeader } from '../../backend/domains/projects/provider-transcript-read-model.ts';
+import {
+  parseClaudeSessionHeader,
+  parseCodexSessionHeader,
+  parsePiSessionHeader,
+} from '../../backend/domains/projects/provider-transcript-read-model.ts';
 
 let tempDir = '';
 let db: Database.Database;
@@ -66,6 +70,33 @@ test('三种 Provider 共用有界读模型且复合身份不重复', () => {
   ]);
 });
 
+test('待处理读模型返回完整首条和最新请求', () => {
+  /** 卡片展示必须使用未裁剪正文，而不是路由标题。 */
+  const isolatedDb = new Database(':memory:');
+  sessionAttentionDb.ensureSchema(isolatedDb);
+  const firstRequest = '首条请求\n保留完整换行和所有细节';
+  const latestRequest = '最新请求\n同样不能被标题长度截断';
+  providerSessionIndexDb.upsert(isolatedDb, {
+    provider: 'codex',
+    id: 'full-request-copy',
+    projectPath: '/tmp/session-attention/codex',
+    title: '简短标题',
+    firstRequest,
+    latestRequest,
+    filePath: '/tmp/session-attention/codex/full-request-copy.jsonl',
+    createdAt: '2026-08-30T00:00:00.000Z',
+    lastActivity: '2026-08-30T00:01:00.000Z',
+    fileMtimeMs: 1_788_048_060_000,
+  });
+
+  const row = sessionAttentionDb.list(isolatedDb, { limit: 100 })
+    .find((item) => item.sessionId === 'full-request-copy');
+  assert.ok(row);
+  assert.equal(row.firstRequest, firstRequest);
+  assert.equal(row.latestRequest, latestRequest);
+  isolatedDb.close();
+});
+
 test('看板只按创建时间排序，后续回复不会改变卡片位置', () => {
   /** 较旧会话即使刚收到回复，仍排在较新创建的会话之后。 */
   const isolatedDb = new Database(':memory:');
@@ -84,6 +115,34 @@ test('看板只按创建时间排序，后续回复不会改变卡片位置', ()
   assert.deepEqual(beforeReply, ['newer-stable', 'older-stable']);
   assert.deepEqual(afterReply, beforeReply);
   isolatedDb.close();
+});
+
+test('Codex 和 Pi 索引头提取完整首尾请求', async () => {
+  /** 两种会话格式都在建立快速索引时保留用户正文。 */
+  const projectPath = path.join(tempDir, 'request-copy-project');
+  const codexPath = path.join(tempDir, 'rollout-2026-08-30T00-00-00-request-copy-codex.jsonl');
+  const piPath = path.join(tempDir, 'request-copy-pi.jsonl');
+  await fs.writeFile(codexPath, [
+    JSON.stringify({ type: 'session_meta', timestamp: '2026-08-30T00:00:00.000Z', payload: { id: 'request-copy-codex', cwd: projectPath } }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-08-30T00:00:01.000Z', payload: { type: 'user_message', message: '首条 Codex 请求\n完整第二行' } }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-08-30T00:00:02.000Z', payload: { type: 'agent_message', message: '回复' } }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-08-30T00:00:03.000Z', payload: { type: 'user_message', message: '最新 Codex 请求\n不裁剪' } }),
+  ].join('\n') + '\n', 'utf8');
+  await fs.writeFile(piPath, [
+    JSON.stringify({ type: 'session', id: 'request-copy-pi', cwd: projectPath, timestamp: '2026-08-30T00:00:00.000Z' }),
+    JSON.stringify({ type: 'message', timestamp: '2026-08-30T00:00:01.000Z', message: { role: 'user', content: '首条 Pi 请求\n完整第二行' } }),
+    JSON.stringify({ type: 'message', timestamp: '2026-08-30T00:00:02.000Z', message: { role: 'assistant', content: '回复' } }),
+    JSON.stringify({ type: 'message', timestamp: '2026-08-30T00:00:03.000Z', message: { role: 'user', content: '最新 Pi 请求\n不裁剪' } }),
+  ].join('\n') + '\n', 'utf8');
+
+  const [codexHeader, piHeader] = await Promise.all([
+    parseCodexSessionHeader(codexPath),
+    parsePiSessionHeader(piPath),
+  ]);
+  assert.equal(codexHeader?.firstRequest, '首条 Codex 请求\n完整第二行');
+  assert.equal(codexHeader?.latestRequest, '最新 Codex 请求\n不裁剪');
+  assert.equal(piHeader?.firstRequest, '首条 Pi 请求\n完整第二行');
+  assert.equal(piHeader?.latestRequest, '最新 Pi 请求\n不裁剪');
 });
 
 test('批量确认只记录观察版本并保留并发新活动', () => {
@@ -117,7 +176,12 @@ test('Claude 文件被触碰但没有新消息时，已完成会话不会重新�
 
   const initial = await parseClaudeSessionHeader(sessionPath);
   assert.ok(initial);
-  providerSessionIndexDb.upsert(isolatedDb, initial);
+  assert.equal(initial.firstRequest, 'first prompt');
+  assert.equal(initial.latestRequest, 'first prompt');
+  providerSessionIndexDb.upsert(
+    isolatedDb,
+    initial as Parameters<typeof providerSessionIndexDb.upsert>[1],
+  );
   const observed = sessionAttentionDb.list(isolatedDb, { limit: 100 }).find((row) => row.sessionId === sessionId);
   assert.ok(observed);
   sessionAttentionDb.markHandled(isolatedDb, [{
@@ -129,7 +193,10 @@ test('Claude 文件被触碰但没有新消息时，已完成会话不会重新�
   await fs.utimes(sessionPath, new Date('2026-08-02T10:00:00.000Z'), new Date('2026-08-02T10:00:00.000Z'));
   const afterTouch = await parseClaudeSessionHeader(sessionPath);
   assert.ok(afterTouch);
-  providerSessionIndexDb.upsert(isolatedDb, afterTouch);
+  providerSessionIndexDb.upsert(
+    isolatedDb,
+    afterTouch as Parameters<typeof providerSessionIndexDb.upsert>[1],
+  );
   assert.equal(
     sessionAttentionDb.list(isolatedDb, { limit: 100 }).some((row) => row.sessionId === sessionId),
     false,
@@ -138,7 +205,12 @@ test('Claude 文件被触碰但没有新消息时，已完成会话不会重新�
   await fs.appendFile(sessionPath, `${JSON.stringify({ sessionId, cwd: projectPath, timestamp: '2026-08-01T10:01:00.000Z', type: 'user', message: { content: 'follow-up' } })}\n`);
   const afterMessage = await parseClaudeSessionHeader(sessionPath);
   assert.ok(afterMessage);
-  providerSessionIndexDb.upsert(isolatedDb, afterMessage);
+  assert.equal(afterMessage.firstRequest, 'first prompt');
+  assert.equal(afterMessage.latestRequest, 'follow-up');
+  providerSessionIndexDb.upsert(
+    isolatedDb,
+    afterMessage as Parameters<typeof providerSessionIndexDb.upsert>[1],
+  );
   assert.equal(
     sessionAttentionDb.list(isolatedDb, { limit: 100 }).some((row) => row.sessionId === sessionId),
     true,

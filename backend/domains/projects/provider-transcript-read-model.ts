@@ -89,6 +89,7 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
   let model = '';
   let messageCount = 0;
   let firstUserMessage = '';
+  let latestUserMessage = '';
   let sourceSessionId = '';
   let origin = '';
   let hasSessionMeta = false;
@@ -115,6 +116,7 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
       if (content && !isCodexInternalUserContent(content)) {
         messageCount += 1;
         firstUserMessage ||= content;
+        latestUserMessage = content;
       }
     }
     if (record.type === 'response_item' && record.payload?.type === 'message') {
@@ -135,6 +137,7 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
       const content = cleanCodexUserContent(stringifyMessageContent(record.payload.content));
       if (content && !isCodexInternalUserContent(content)) {
         firstUserMessage ||= content;
+        latestUserMessage = content;
       }
     }
   }
@@ -158,6 +161,8 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     summary: hasSessionMeta ? 'Codex Session' : fallbackTitle,
     title: fallbackTitle,
     routeTitle: firstUserRouteTitle || fallbackTitle,
+    firstRequest: firstUserMessage || undefined,
+    latestRequest: latestUserMessage || firstUserMessage || undefined,
     messageCount,
     messageCountKnown: true,
     filePath,
@@ -210,6 +215,7 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
   let lastTimestamp = '';
   let messageCount = 0;
   let firstUserMessage = '';
+  let latestUserMessage = '';
   for await (const record of readJsonlRecords(filePath)) {
     firstRecord ||= record;
     if (typeof record.timestamp === 'string') {
@@ -217,8 +223,10 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
     }
     if (record.type === 'message') {
       messageCount += 1;
-      if (!firstUserMessage && record.message?.role === 'user') {
-        firstUserMessage = stringifyMessageContent(record.message?.content);
+      if (record.message?.role === 'user') {
+        const content = stringifyMessageContent(record.message?.content).trim();
+        firstUserMessage ||= content;
+        latestUserMessage = content || latestUserMessage;
       }
     }
   }
@@ -246,6 +254,8 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
     summary: title,
     title,
     routeTitle: summarizeText(title, 20, false),
+    firstRequest: firstUserMessage || undefined,
+    latestRequest: latestUserMessage || firstUserMessage || undefined,
     messageCount,
     messageCountKnown: true,
     filePath,
@@ -254,52 +264,71 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
   };
 }
 
+/** Extract user-authored text without folding tool results into the request. */
+function readClaudeUserRequest(record: LooseRecord): string {
+  /** Claude persists tool results as user-role rows, so only text parts are requests. */
+  if (record.type !== 'user' || record.isSidechain) return '';
+  const content = record.message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  return content.flatMap((part) => {
+    if (typeof part === 'string') return [part];
+    if (!part || typeof part !== 'object') return [];
+    const typedPart = part as LooseRecord;
+    return typedPart.type === 'text' && typeof typedPart.text === 'string' ? [typedPart.text] : [];
+  }).join('\n').trim();
+}
+
 /**
- * Read the last timestamped Claude JSONL row without treating a filesystem
- * touch as user-visible session activity.
+ * Read Claude's latest activity and visible request from a bounded transcript tail.
  */
-async function readClaudeLastTranscriptTimestamp(filePath: string, fileSize: number): Promise<string> {
+async function readClaudeTailHeader(filePath: string, fileSize: number): Promise<{ lastTimestamp: string; latestRequest: string }> {
   /** The bounded tail keeps startup indexing cheap for long Claude transcripts. */
   const bytesToRead = Math.min(Math.max(0, fileSize), CLAUDE_HEADER_TAIL_READ_BYTES);
-  if (bytesToRead === 0) return '';
+  if (bytesToRead === 0) return { lastTimestamp: '', latestRequest: '' };
   const handle = await fs.open(filePath, 'r').catch(() => null);
-  if (!handle) return '';
+  if (!handle) return { lastTimestamp: '', latestRequest: '' };
   try {
     const buffer = Buffer.alloc(bytesToRead);
     await handle.read(buffer, 0, bytesToRead, Math.max(0, fileSize - bytesToRead));
     const lines = buffer.toString('utf8').split('\n');
+    let lastTimestamp = '';
+    let latestRequest = '';
     for (let index = lines.length - 1; index >= 0; index -= 1) {
       try {
-        const timestamp = JSON.parse(lines[index])?.timestamp;
-        if (typeof timestamp === 'string' && !Number.isNaN(new Date(timestamp).getTime())) {
-          return timestamp;
-        }
+        const record = JSON.parse(lines[index]) as LooseRecord;
+        const timestamp = record.timestamp;
+        if (!lastTimestamp && typeof timestamp === 'string' && !Number.isNaN(new Date(timestamp).getTime())) lastTimestamp = timestamp;
+        latestRequest ||= readClaudeUserRequest(record);
+        if (lastTimestamp && latestRequest) break;
       } catch {
         // A partial first tail line or provider-written incomplete final line is ignored.
       }
     }
+    return { lastTimestamp, latestRequest };
   } finally {
     await handle.close();
   }
-  return '';
 }
 
 /** Parse Claude session metadata while preserving transcript, rather than file, activity time. */
 export async function parseClaudeSessionHeader(filePath = ''): Promise<LooseRecord | null> {
   let first: LooseRecord | null = null;
+  let firstRequest = '';
   for await (const record of readJsonlRecords(filePath)) {
-    if (record.cwd && record.sessionId) { first = record; break; }
+    if (!first && record.cwd && record.sessionId) first = record;
+    firstRequest ||= readClaudeUserRequest(record);
+    if (first && firstRequest) break;
   }
   if (!first) return null;
   const stat = await fs.stat(filePath).catch(() => null);
   const timestamp = String(first.timestamp || (stat ? new Date(stat.mtimeMs).toISOString() : new Date().toISOString()));
-  const transcriptTimestamp = stat ? await readClaudeLastTranscriptTimestamp(filePath, stat.size) : '';
-  const lastActivity = transcriptTimestamp || timestamp;
+  const tail = stat ? await readClaudeTailHeader(filePath, stat.size) : { lastTimestamp: '', latestRequest: '' };
+  const lastActivity = tail.lastTimestamp || timestamp;
   const activityMtimeMs = new Date(lastActivity).getTime();
   const sessionId = String(first.sessionId);
-  const firstContent = typeof first.message?.content === 'string' ? first.message.content : '';
-  const title = summarizeText(firstContent) || 'Claude Session';
-  return { id: sessionId, provider: 'claude', __provider: 'claude', sourceSessionId: sessionId, cwd: String(first.cwd), projectPath: String(first.cwd), createdAt: timestamp, lastActivity, updated_at: lastActivity, summary: title, title, routeTitle: summarizeText(title, 20, false), messageCount: null, messageCountKnown: false, filePath, fileMtimeMs: Number.isFinite(activityMtimeMs) ? activityMtimeMs : (stat?.mtimeMs || 0), sessionFileName: path.basename(filePath) };
+  const title = summarizeText(firstRequest) || 'Claude Session';
+  return { id: sessionId, provider: 'claude', __provider: 'claude', sourceSessionId: sessionId, cwd: String(first.cwd), projectPath: String(first.cwd), createdAt: timestamp, lastActivity, updated_at: lastActivity, summary: title, title, routeTitle: summarizeText(title, 20, false), firstRequest: firstRequest || undefined, latestRequest: tail.latestRequest || undefined, messageCount: null, messageCountKnown: false, filePath, fileMtimeMs: Number.isFinite(activityMtimeMs) ? activityMtimeMs : (stat?.mtimeMs || 0), sessionFileName: path.basename(filePath) };
 }
 
 

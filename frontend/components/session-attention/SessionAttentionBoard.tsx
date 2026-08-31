@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionProvider } from '../../types/app';
 import { api } from '../../utils/api';
-import SessionProviderLogo from '../llm-logo-provider/SessionProviderLogo';
+import SessionAttentionCard from './SessionAttentionCard';
 
 type AttentionItem = {
   provider: SessionProvider;
@@ -13,6 +13,8 @@ type AttentionItem = {
   projectPath: string;
   title: string;
   summary: string;
+  firstRequest: string;
+  latestRequest: string;
   lastActivity: string;
   activityRevision: number;
 };
@@ -74,9 +76,9 @@ export default function SessionAttentionBoard({ onNavigateToSession }: SessionAt
     void load();
   }, [load]);
 
-  const markHandled = async (targets: AttentionItem[]) => {
+  const markHandled = async (targets: AttentionItem[]): Promise<boolean> => {
     /** 发送卡片渲染时观察到的版本，不使用请求时的最新值。 */
-    if (targets.length === 0 || submittingIds.size > 0) return;
+    if (targets.length === 0 || submittingIds.size > 0) return false;
     setSubmittingIds(new Set(targets.map(attentionIdentity)));
     setError('');
     try {
@@ -88,8 +90,11 @@ export default function SessionAttentionBoard({ onNavigateToSession }: SessionAt
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error || '处理会话失败');
       await load();
+      const newerActivity = new Set(Array.isArray(payload?.newerActivity) ? payload.newerActivity : []);
+      return targets.every((item) => !newerActivity.has(attentionIdentity(item)));
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : '处理会话失败');
+      return false;
     } finally {
       setSubmittingIds(new Set());
     }
@@ -105,7 +110,7 @@ export default function SessionAttentionBoard({ onNavigateToSession }: SessionAt
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold text-foreground">待处理会话</h1>
-            <p className="mt-1 text-sm text-muted-foreground">打开会话不会自动标记完成</p>
+            <p className="mt-1 text-sm text-muted-foreground">点击打开会话，向右滑动卡片即可完成</p>
           </div>
           {items.length > 0 && (
             <button type="button" disabled={submittingIds.size > 0} className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50" onClick={() => void markHandled(items)}>全部处理完成</button>
@@ -121,20 +126,19 @@ export default function SessionAttentionBoard({ onNavigateToSession }: SessionAt
         {items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">暂无待处理会话</div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 pb-4">
             {items.map((item) => (
-              <div key={attentionIdentity(item)} data-testid={`session-attention-card-${attentionIdentity(item)}`} role="button" tabIndex={0} className="cursor-pointer rounded-xl border border-border bg-card px-4 py-3.5 transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onNavigateToSession(item.sessionId, { provider: item.provider, projectPath: item.projectPath })} onKeyDown={(event) => { if (event.key === 'Enter') onNavigateToSession(item.sessionId, { provider: item.provider, projectPath: item.projectPath }); }}>
-                <div className="line-clamp-2 w-full break-words text-base font-medium leading-6 text-foreground">
-                  {item.title || item.summary}
-                </div>
-                <div className="mt-3 flex min-w-0 items-center gap-2.5 border-t border-border/60 pt-3">
-                  <input data-testid={`session-attention-select-${attentionIdentity(item)}`} aria-label="处理完成" title="处理完成" type="checkbox" checked={submittingIds.has(attentionIdentity(item))} disabled={submittingIds.size > 0} className="h-5 w-5 shrink-0 accent-primary disabled:opacity-60" onClick={(event) => event.stopPropagation()} onChange={(event) => { if (event.target.checked) void markHandled([item]); }} />
-                  <span className="shrink-0 text-muted-foreground" title={item.provider}>
-                    <SessionProviderLogo provider={item.provider} className="h-5 w-5" />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{projectLabel(item.projectPath)}</span>
-                </div>
-              </div>
+              <SessionAttentionCard
+                key={attentionIdentity(item)}
+                provider={item.provider}
+                sessionId={item.sessionId}
+                projectName={projectLabel(item.projectPath)}
+                firstRequest={item.firstRequest || item.title || item.summary}
+                latestRequest={item.latestRequest || item.firstRequest || item.title || item.summary}
+                isSubmitting={submittingIds.has(attentionIdentity(item))}
+                onNavigate={() => onNavigateToSession(item.sessionId, { provider: item.provider, projectPath: item.projectPath })}
+                onHandled={() => markHandled([item])}
+              />
             ))}
           </div>
         )}

@@ -13,6 +13,8 @@ type ProviderSessionIndexRecord = {
   summary?: string | null;
   title?: string | null;
   routeTitle?: string | null;
+  firstRequest?: string | null;
+  latestRequest?: string | null;
   model?: string | null;
   thread?: string | null;
   sessionFileName?: string | null;
@@ -33,6 +35,8 @@ type ProviderSessionIndexRow = {
   summary: string | null;
   title: string | null;
   route_title: string | null;
+  first_request: string | null;
+  latest_request: string | null;
   model: string | null;
   thread: string | null;
   session_file_name: string | null;
@@ -115,6 +119,8 @@ function ensureProviderSessionIndexSchema(db: any): void {
       summary TEXT,
       title TEXT,
       route_title TEXT,
+      first_request TEXT,
+      latest_request TEXT,
       model TEXT,
       thread TEXT,
       session_file_name TEXT,
@@ -153,6 +159,12 @@ function ensureProviderSessionIndexSchema(db: any): void {
   }
   if (!columnNames.has('activity_revision')) {
     db.exec('ALTER TABLE provider_session_index ADD COLUMN activity_revision INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!columnNames.has('first_request')) {
+    db.exec('ALTER TABLE provider_session_index ADD COLUMN first_request TEXT');
+  }
+  if (!columnNames.has('latest_request')) {
+    db.exec('ALTER TABLE provider_session_index ADD COLUMN latest_request TEXT');
   }
   const ackColumns = db.prepare('PRAGMA table_info(session_attention_ack)').all() as Array<{ name: string }>;
   if (!ackColumns.some((column) => column.name === 'legacy_pending_migrated')) {
@@ -194,6 +206,8 @@ function rowToSession(row: ProviderSessionIndexRow): Record<string, unknown> {
     summary: row.summary || row.title || row.route_title || fallbackTitle,
     title: row.title || row.route_title || row.summary || fallbackTitle,
     routeTitle,
+    firstRequest: row.first_request || row.title || row.route_title || row.summary || fallbackTitle,
+    latestRequest: row.latest_request || row.first_request || row.title || row.route_title || row.summary || fallbackTitle,
     messageCount: row.message_count,
     messageCountKnown: row.message_count_known === 1,
     createdAt: row.created_at || undefined,
@@ -242,6 +256,8 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
       summary,
       title,
       route_title,
+      first_request,
+      latest_request,
       model,
       thread,
       session_file_name,
@@ -253,7 +269,7 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
       file_mtime_ms,
       activity_revision,
       indexed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
     ON CONFLICT(provider, session_id) DO UPDATE SET
       source_session_id = excluded.source_session_id,
       origin = COALESCE(excluded.origin, provider_session_index.origin),
@@ -262,6 +278,12 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
       summary = excluded.summary,
       title = excluded.title,
       route_title = excluded.route_title,
+      first_request = COALESCE(excluded.first_request, provider_session_index.first_request),
+      latest_request = COALESCE(
+        excluded.latest_request,
+        provider_session_index.latest_request,
+        excluded.first_request
+      ),
       model = excluded.model,
       thread = excluded.thread,
       session_file_name = excluded.session_file_name,
@@ -287,6 +309,8 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
     record.summary || null,
     record.title || record.summary || null,
     record.routeTitle || record.title || record.summary || null,
+    record.firstRequest || null,
+    record.latestRequest || record.firstRequest || null,
     record.model || null,
     record.thread || null,
     record.sessionFileName || null,
@@ -324,6 +348,8 @@ function listProviderSessionsForProject(db: any, provider: string, projectPath: 
       p.summary,
       p.title,
       p.route_title,
+      p.first_request,
+      p.latest_request,
       p.model,
       p.thread,
       p.session_file_name,

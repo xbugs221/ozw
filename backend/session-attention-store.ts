@@ -19,6 +19,8 @@ type AttentionRow = AttentionIdentity & {
   projectPath: string;
   title: string;
   summary: string;
+  firstRequest: string;
+  latestRequest: string;
   createdAt: string;
   lastActivity: string;
   activityRevision: number;
@@ -86,6 +88,8 @@ function list(db: Database.Database, options: { limit: number }): AttentionRow[]
       p.project_path,
       p.title,
       p.summary,
+      p.first_request,
+      p.latest_request,
       p.created_at,
       p.last_activity,
       p.activity_revision,
@@ -117,6 +121,8 @@ function list(db: Database.Database, options: { limit: number }): AttentionRow[]
     projectPath: String(row.project_path || ''),
     title: String(row.title || row.summary || '未命名会话'),
     summary: String(row.summary || row.title || '未命名会话'),
+    firstRequest: String(row.first_request || row.title || row.summary || '未命名会话'),
+    latestRequest: String(row.latest_request || row.first_request || row.title || row.summary || '未命名会话'),
     createdAt: String(row.created_at || row.last_activity || ''),
     lastActivity: String(row.last_activity || ''),
     activityRevision: Number(row.activity_revision || 1),

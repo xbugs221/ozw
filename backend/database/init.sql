@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS provider_session_index (
     summary TEXT,
     title TEXT,
     route_title TEXT,
+    first_request TEXT,
+    latest_request TEXT,
     model TEXT,
     thread TEXT,
     session_file_name TEXT,
