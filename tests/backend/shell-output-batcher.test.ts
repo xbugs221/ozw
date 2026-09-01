@@ -46,7 +46,7 @@ async function wait(milliseconds: number): Promise<void> {
 test('Provider TUI burst is merged into one scheduled websocket frame', async () => {
   const { session, messages } = createSession();
 
-  assert.equal(PROVIDER_TUI_OUTPUT_INTERVAL_MS, 1_000);
+  assert.equal(PROVIDER_TUI_OUTPUT_INTERVAL_MS, 16);
 
   queueShellOutput({ session, data: 'first', isPlainShell: false, WebSocketState, intervalMs: 20 });
   queueShellOutput({ session, data: ' second', isPlainShell: false, WebSocketState, intervalMs: 20 });

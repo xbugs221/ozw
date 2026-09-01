@@ -4,7 +4,7 @@
  */
 import type { WebSocket } from 'ws';
 
-export const PROVIDER_TUI_OUTPUT_INTERVAL_MS = 1_000;
+export const PROVIDER_TUI_OUTPUT_INTERVAL_MS = 16;
 export const PROVIDER_TUI_INTERACTIVE_OUTPUT_DELAY_MS = 16;
 export const SHELL_REPLAY_BATCH_LIMIT = 60;
 
@@ -68,7 +68,7 @@ export function flushShellOutput(session: ShellOutputSession, WebSocketState: We
 }
 
 /**
- * 合并一段 PTY 输出；普通 Shell 立即发送，Provider TUI 默认每秒发送一次。
+ * 合并一段 PTY 输出；普通 Shell 立即发送，Provider TUI 默认每 16ms 发送一次。
  */
 export function queueShellOutput({
     session,
