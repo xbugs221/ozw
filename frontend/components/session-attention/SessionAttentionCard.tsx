@@ -4,7 +4,7 @@
  */
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { SessionProvider } from '../../types/app';
-import SessionProviderLogo from '../llm-logo-provider/SessionProviderLogo';
+import { formatTimestamp } from '../../utils/dateUtils';
 
 type SessionAttentionCardProps = {
   provider: SessionProvider;
@@ -12,6 +12,7 @@ type SessionAttentionCardProps = {
   projectName: string;
   firstRequest: string;
   latestRequest: string;
+  lastActivity: string;
   isSubmitting: boolean;
   onNavigate: () => void;
   onHandled: () => Promise<boolean>;
@@ -57,6 +58,7 @@ export default function SessionAttentionCard({
   projectName,
   firstRequest,
   latestRequest,
+  lastActivity,
   isSubmitting,
   onNavigate,
   onHandled,
@@ -70,6 +72,7 @@ export default function SessionAttentionCard({
   const dragXRef = useRef(0);
   const suppressClickRef = useRef(false);
   const hasDistinctLatestRequest = latestRequest.trim() !== firstRequest.trim();
+  const activityTimestamp = formatTimestamp(lastActivity, { includeTime: true }) || '未知时间';
   const hintId = `session-attention-hint-${provider}-${sessionId}`;
 
   /** 将拖动距离换算为当前卡片宽度下的完成阈值。 */
@@ -214,9 +217,14 @@ export default function SessionAttentionCard({
         onKeyDown={handleKeyDown}
       >
         <div className="mb-4 flex min-w-0 items-center gap-2.5">
-          <span className="shrink-0 text-muted-foreground" title={provider}>
-            <SessionProviderLogo provider={provider} className="h-5 w-5" />
-          </span>
+          <time
+            data-slot="session-attention-time"
+            dateTime={lastActivity}
+            title={`最后活动时间 ${activityTimestamp}`}
+            className="shrink-0 text-xs tabular-nums text-muted-foreground"
+          >
+            {activityTimestamp}
+          </time>
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground">{projectName}</span>
           <span id={hintId} className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground/80">
             <SwipeArrowIcon className="h-4 w-4" />

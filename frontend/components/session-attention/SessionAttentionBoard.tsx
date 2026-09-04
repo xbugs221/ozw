@@ -135,6 +135,7 @@ export default function SessionAttentionBoard({ onNavigateToSession }: SessionAt
                 projectName={projectLabel(item.projectPath)}
                 firstRequest={item.firstRequest || item.title || item.summary}
                 latestRequest={item.latestRequest || item.firstRequest || item.title || item.summary}
+                lastActivity={item.lastActivity}
                 isSubmitting={submittingIds.has(attentionIdentity(item))}
                 onNavigate={() => onNavigateToSession(item.sessionId, { provider: item.provider, projectPath: item.projectPath })}
                 onHandled={() => markHandled([item])}

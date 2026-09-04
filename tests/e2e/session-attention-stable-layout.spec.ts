@@ -4,7 +4,12 @@
  */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { PLAYWRIGHT_FIXTURE_AUTH_DB } from './helpers/playwright-fixture.ts';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {
+  PLAYWRIGHT_FIXTURE_AUTH_DB,
+  PLAYWRIGHT_FIXTURE_HOME,
+} from './helpers/playwright-fixture.ts';
 
 declare global {
   interface Window {
@@ -14,14 +19,21 @@ declare global {
 
 process.env.DATABASE_PATH = PLAYWRIGHT_FIXTURE_AUTH_DB;
 
-const [{ generateToken }, { db, userDb }, { providerSessionIndexDb }] = await Promise.all([
+const [{ generateToken }, { userDb }, { indexProviderSessionFile }] = await Promise.all([
   import('../../backend/middleware/auth.ts'),
   import('../../backend/database/db.ts'),
-  import('../../backend/provider-session-index-store.ts'),
+  import('../../backend/domains/projects/project-domain-service.ts'),
 ]);
 
 const FULL_FIRST_REQUEST = '这是用户的完整首条请求，卡片不得按二十、五十或八十个字符提前裁短。\n第二行也必须完整显示。';
 const FULL_LATEST_REQUEST = '这是用户的最新一条请求，中间的助手回复和历史请求都不在首页展开。\n但最新请求本身不能被截断。';
+const FULL_REQUEST_TRANSCRIPT_DIR = path.join(PLAYWRIGHT_FIXTURE_HOME, 'attention-card-transcript');
+const FULL_REQUEST_TRANSCRIPT_PATH = path.join(FULL_REQUEST_TRANSCRIPT_DIR, 'playwright-full-title-session.jsonl');
+
+test.afterAll(async () => {
+  /** 业务目的：测试结束后不在系统临时目录留下会话转录。 */
+  await fs.rm(FULL_REQUEST_TRANSCRIPT_DIR, { recursive: true, force: true });
+});
 
 /**
  * 创建隔离测试用户的浏览器登录令牌。
@@ -36,21 +48,32 @@ function createLocalAuthToken(): string {
 /**
  * 写入一条完整长标题的真实 Provider 索引记录。
  */
-function indexLongTitleAttentionFixture(): void {
-  /** 业务目的：让浏览器通过正式接口验证标题在数据链路中未被裁短。 */
-  providerSessionIndexDb.upsert(db, {
-    provider: 'codex',
-    id: 'playwright-full-title-session',
-    projectPath: '/tmp/playwright-full-title-project',
-    title: '完整请求测试会话',
-    summary: '完整请求测试会话',
-    firstRequest: FULL_FIRST_REQUEST,
-    latestRequest: FULL_LATEST_REQUEST,
-    createdAt: '2036-07-23T00:00:00.000Z',
-    lastActivity: '2036-07-23T00:00:00.000Z',
-    filePath: '/tmp/playwright-full-title-session.jsonl',
-    fileMtimeMs: 2_100_000_000_000,
-  });
+async function indexLongTitleAttentionFixture(): Promise<void> {
+  /** 业务目的：从真实转录文件进入快速索引，覆盖首尾请求的数据传递。 */
+  await fs.mkdir(FULL_REQUEST_TRANSCRIPT_DIR, { recursive: true });
+  await fs.writeFile(FULL_REQUEST_TRANSCRIPT_PATH, [
+    JSON.stringify({
+      type: 'session_meta',
+      timestamp: '2036-07-23T00:00:00.000Z',
+      payload: { id: 'playwright-full-title-session', cwd: '/tmp/playwright-full-title-project' },
+    }),
+    JSON.stringify({
+      type: 'event_msg',
+      timestamp: '2036-07-23T00:00:01.000Z',
+      payload: { type: 'user_message', message: FULL_FIRST_REQUEST },
+    }),
+    JSON.stringify({
+      type: 'event_msg',
+      timestamp: '2036-07-23T00:00:02.000Z',
+      payload: { type: 'agent_message', message: '中间回复不会在卡片中展开。' },
+    }),
+    JSON.stringify({
+      type: 'event_msg',
+      timestamp: '2036-07-23T00:00:03.000Z',
+      payload: { type: 'user_message', message: FULL_LATEST_REQUEST },
+    }),
+  ].join('\n') + '\n', 'utf8');
+  await indexProviderSessionFile('codex', FULL_REQUEST_TRANSCRIPT_PATH);
 }
 
 /**
@@ -92,7 +115,7 @@ test('待处理卡片完整显示首尾请求且右滑直接完成', async ({ pa
     };
     window.localStorage.setItem('auth-token', token);
   }, createLocalAuthToken());
-  indexLongTitleAttentionFixture();
+  await indexLongTitleAttentionFixture();
   await page.goto('/', { waitUntil: 'networkidle' });
   expect(new URL(page.url()).pathname).toBe('/');
   await expect(page).toHaveTitle(/\S+/);
@@ -111,6 +134,11 @@ test('待处理卡片完整显示首尾请求且右滑直接完成', async ({ pa
   await expect(firstCard.getByText(FULL_FIRST_REQUEST, { exact: true })).toBeVisible();
   await expect(firstCard.getByText(FULL_LATEST_REQUEST, { exact: true })).toBeVisible();
   await expect(firstCard.getByText('...', { exact: true })).toBeVisible();
+  await expect(firstCard.locator('time[data-slot="session-attention-time"]')).toHaveAttribute(
+    'datetime',
+    '2036-07-23T00:00:03.000Z',
+  );
+  await expect(firstCard.locator('[title="codex"]')).toHaveCount(0);
   await expect(firstCard.getByText('首条请求', { exact: true })).toHaveCount(0);
   await expect(firstCard.getByText('最新请求', { exact: true })).toHaveCount(0);
   const singleRequestCard = board.locator('[data-testid^="session-attention-card-"]')

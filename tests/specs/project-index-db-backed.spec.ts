@@ -326,6 +326,11 @@ test('启动 backfill 同步写入 provider_session_index 和 project_index', as
           timestamp: '2026-06-17T03:00:01.000Z',
           payload: { type: 'user_message', message: 'Codex CLI session for startup backfill' },
         }),
+        JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-06-17T03:00:02.000Z',
+          payload: { type: 'user_message', message: 'Codex CLI latest request for startup backfill' },
+        }),
       ].join('\n') + '\n',
       'utf8',
     );
@@ -344,6 +349,14 @@ test('启动 backfill 同步写入 provider_session_index 和 project_index', as
           message: {
             role: 'user',
             content: [{ type: 'text', text: 'Pi CLI session for startup backfill' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'message',
+          timestamp: '2026-06-17T03:10:02.000Z',
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'Pi CLI latest request for startup backfill' }],
           },
         }),
       ].join('\n') + '\n',
@@ -374,7 +387,7 @@ test('启动 backfill 同步写入 provider_session_index 和 project_index', as
         const { db } = await import('./backend/database/db.ts');
         const result = await backfillProjectIndex();
         const providerRows = db.prepare(\`
-          SELECT provider, session_id
+          SELECT provider, session_id, first_request, latest_request
           FROM provider_session_index
           WHERE normalized_project_path = ?
           ORDER BY provider, session_id
@@ -395,8 +408,18 @@ test('启动 backfill 同步写入 provider_session_index 和 project_index', as
 
     const result = JSON.parse(output.split('\n').filter(Boolean).at(-1) || '{}');
     assert.deepEqual(result.providerRows, [
-      { provider: 'codex', session_id: 'codex-backfill-cli' },
-      { provider: 'pi', session_id: 'pi-backfill-cli' },
+      {
+        provider: 'codex',
+        session_id: 'codex-backfill-cli',
+        first_request: 'Codex CLI session for startup backfill',
+        latest_request: 'Codex CLI latest request for startup backfill',
+      },
+      {
+        provider: 'pi',
+        session_id: 'pi-backfill-cli',
+        first_request: 'Pi CLI session for startup backfill',
+        latest_request: 'Pi CLI latest request for startup backfill',
+      },
     ]);
     assert.deepEqual(result.projectRows, [
       { project_path: path.resolve(projectPath) },

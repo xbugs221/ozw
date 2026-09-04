@@ -18,6 +18,10 @@ import {
   parseCodexSessionHeader,
   parsePiSessionHeader,
 } from '../../backend/domains/projects/provider-transcript-read-model.ts';
+import {
+  configureProviderSessionReadModel,
+  upsertProviderSessionIndex,
+} from '../../backend/domains/projects/provider-session-read-model.ts';
 
 let tempDir = '';
 let db: Database.Database;
@@ -95,6 +99,39 @@ test('待处理读模型返回完整首条和最新请求', () => {
   assert.equal(row.firstRequest, firstRequest);
   assert.equal(row.latestRequest, latestRequest);
   isolatedDb.close();
+});
+
+test('增量索引把完整首尾请求写入待处理读模型', async () => {
+  /** 文件 watcher 更新会话时，首条和末条用户请求都必须穿过索引边界。 */
+  const capturedRecords: Array<Record<string, unknown>> = [];
+  configureProviderSessionReadModel({
+    getDb: async () => db,
+    getProviderSessionIndexDb: async () => ({
+      upsert: (_db: Database.Database, record: Record<string, unknown>) => {
+        /** 捕获写入参数，隔离验证增量索引字段传递。 */
+        capturedRecords.push(record);
+      },
+    }),
+    parseCodexSessionHeader: async () => null,
+    parseCodexSessionFile: async () => null,
+    buildCodexSessionFromHeader: (session) => session,
+    parsePiSessionHeader: async () => null,
+    parseClaudeSessionHeader: async () => null,
+    warn: () => undefined,
+  });
+
+  await upsertProviderSessionIndex('codex', {
+    id: 'incremental-full-requests',
+    projectPath: '/tmp/session-attention/incremental',
+    filePath: '/tmp/session-attention/incremental.jsonl',
+    firstRequest: '增量首条完整请求',
+    latestRequest: '增量末条完整请求',
+  });
+
+  const capturedRecord = capturedRecords[0];
+  assert.ok(capturedRecord);
+  assert.equal(capturedRecord?.firstRequest, '增量首条完整请求');
+  assert.equal(capturedRecord?.latestRequest, '增量末条完整请求');
 });
 
 test('看板只按创建时间排序，后续回复不会改变卡片位置', () => {

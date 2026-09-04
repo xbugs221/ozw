@@ -58,6 +58,8 @@ export async function upsertProviderSessionIndex(provider: ProviderName, session
       summary: session.summary || session.title || null,
       title: session.title || session.summary || null,
       routeTitle: session.routeTitle || session.title || session.summary || null,
+      firstRequest: session.firstRequest || null,
+      latestRequest: session.latestRequest || session.firstRequest || null,
       model: session.model || null,
       thread: session.thread || null,
       sessionFileName: session.sessionFileName || session.session_file_name || null,
