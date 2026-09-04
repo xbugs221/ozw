@@ -197,25 +197,10 @@ export function useShellTerminal({
         (event.ctrlKey || event.metaKey) &&
         event.key?.toLowerCase() === 'v'
       ) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
-          navigator.clipboard
-            .readText()
-            .then((text) => {
-              if (!text) {
-                return;
-              }
-
-              sendShellMessage({
-                type: 'input',
-                data: text,
-              });
-            })
-            .catch(() => {});
-        }
-
+        /**
+         * PURPOSE: Stop xterm from sending ^V to the remote TUI while leaving
+         * the browser default intact so its paste event can expose image data.
+         */
         return false;
       }
 

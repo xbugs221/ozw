@@ -28,6 +28,7 @@ import {
 import { buildConversationBookmarks } from '../utils/conversationBookmarks';
 import { buildChatTuiSessionKey } from '../tui/chatTuiSessionKey';
 import {
+  getPastedClipboardImageFiles,
   readClipboardImageFiles,
   type ClipboardImageReader,
 } from '../tui/clipboardImageFiles';
@@ -1293,6 +1294,21 @@ function ChatInterface({
     }
   }, [handleTuiAttachmentUpload, t]);
 
+  const handleTuiTerminalPaste = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+    /**
+     * PURPOSE: Upload images from the browser's trusted paste event so Ctrl+V
+     * works even when public HTTP access disables navigator.clipboard.read().
+     */
+    const imageFiles = getPastedClipboardImageFiles(event.clipboardData);
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    void handleTuiAttachmentUpload(imageFiles);
+  }, [handleTuiAttachmentUpload]);
+
   const handleSetCodexModel = useCallback(
     (nextModel: string) => {
       const normalizedNextModel = nextModel.trim().toLowerCase();
@@ -1829,6 +1845,7 @@ function ChatInterface({
                   provider={effectiveProvider}
                   autoConnect
                   headerActions={tuiHeaderActions}
+                  onTerminalPaste={handleTuiTerminalPaste}
                   onTerminalInputReady={handleTuiTerminalInputReady}
                 />
               )}

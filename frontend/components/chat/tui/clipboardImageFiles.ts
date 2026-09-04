@@ -12,6 +12,14 @@ export interface ClipboardImageReader {
   read: () => Promise<ClipboardImageItem[]>;
 }
 
+export interface PastedClipboardData {
+  files: ArrayLike<File>;
+  items: ArrayLike<{
+    type: string;
+    getAsFile: () => File | null;
+  }>;
+}
+
 /**
  * Choose a conventional filename extension for one clipboard image MIME type.
  */
@@ -47,4 +55,21 @@ export async function readClipboardImageFiles(reader: ClipboardImageReader): Pro
   }
 
   return imageFiles;
+}
+
+/**
+ * Read image files exposed by a user-initiated paste event, including on HTTP
+ * origins where the asynchronous Clipboard API is unavailable.
+ */
+export function getPastedClipboardImageFiles(clipboardData: PastedClipboardData): File[] {
+  const itemImages = Array.from(clipboardData.items)
+    .filter((item) => item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file));
+
+  if (itemImages.length > 0) {
+    return itemImages;
+  }
+
+  return Array.from(clipboardData.files).filter((file) => file.type.startsWith('image/'));
 }

@@ -4,6 +4,7 @@
  * 业务意义：桌面终端不再固定到底部 dock，记录/详情与终端通过主视图切换。
  */
 import { test, expect } from '@playwright/test';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 
 process.env.DATABASE_PATH = path.join(process.env.HOME || '', '.ozw', 'auth.db');
@@ -113,6 +114,48 @@ test('desktop shell main view keeps one websocket while staying in workspace', a
   const terminalBox = await page.locator('.xterm').boundingBox();
   expect(terminalBox?.width).toBeGreaterThan(700);
   expect(terminalBox?.height).toBeGreaterThan(300);
+});
+
+test('Ctrl+V uploads a browser clipboard image and inserts its path into the terminal', async ({ page, context }: { page: any; context: any }) => {
+  /** Public browser paste must upload the image instead of asking the server-side TUI for its clipboard. */
+  await openShellProject(page);
+  await page.getByRole('button', { name: /^Shell$|^终端$/ }).click();
+  await waitForOpenShellSocket(page);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  const terminal = page.locator('.xterm');
+  await expect(terminal).toBeVisible({ timeout: 10_000 });
+  const uploadResponse = page.waitForResponse((response) => (
+    response.url().includes('/upload-attachments') && response.request().method() === 'POST'
+  ));
+  await page.evaluate(async () => {
+    const png = Uint8Array.from(atob(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    ), (character) => character.charCodeAt(0));
+    await navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': new Blob([png], { type: 'image/png' }) }),
+    ]);
+  });
+  await terminal.click();
+  await page.keyboard.press('Control+V');
+
+  const response = await uploadResponse;
+  expect(response.ok()).toBe(true);
+  const payload = await response.json();
+  const uploadRoot = String(payload.rootPath || '');
+  const pastedPath = String(payload.attachments?.[0]?.absolutePath || '');
+  expect(pastedPath).not.toBe('');
+
+  try {
+    await expect.poll(() => page.evaluate((expectedPath) => (
+      window.__sentShellInputData.some((input) => input.includes(`@${expectedPath}`))
+    ), pastedPath)).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.__sentShellInputData)).not.toContain('\x16');
+  } finally {
+    if (uploadRoot.includes('/ozw-uploads/')) {
+      await fs.rm(uploadRoot, { recursive: true, force: true });
+    }
+  }
 });
 
 test('session route opens terminal first and Render switches to the record view', async ({ page }: { page: any }) => {

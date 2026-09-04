@@ -3,7 +3,7 @@
  * Keeps the terminal lifecycle and connection controls aligned with the current project/session context.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ClipboardEventHandler, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import '@xterm/xterm/css/xterm.css';
 import type { Project, ProjectSession } from '../../../types/app';
@@ -18,6 +18,8 @@ import ShellHeader from './subcomponents/ShellHeader';
 import ShellMinimalView from './subcomponents/ShellMinimalView';
 import ShellMobileKeyBar from './subcomponents/ShellMobileKeyBar';
 import { PROVIDER_RUNTIME_POLICY } from '../../../utils/providerRuntimePolicy';
+import { authenticatedFetch } from '../../../utils/api';
+import { getPastedClipboardImageFiles } from '../../chat/tui/clipboardImageFiles';
 
 type ShellProps = {
   selectedProject?: Project | null;
@@ -30,6 +32,7 @@ type ShellProps = {
   autoConnect?: boolean;
   isActive?: boolean;
   headerActions?: ReactNode;
+  onTerminalPaste?: ClipboardEventHandler<HTMLDivElement>;
   onTerminalInputReady?: (sendInput: ((data: string) => boolean) | null) => void;
   onTerminalTerminateReady?: (terminate: (() => boolean) | null) => void;
 };
@@ -40,6 +43,17 @@ function getHandoffWarningKey(reason: string): string {
     return 'shell.handoff.activeWarning';
   }
   return 'shell.handoff.unknownWarning';
+}
+
+/** Build the file mentions that the terminal TUI accepts as prompt input. */
+function buildPastedImageInsertion(attachments: Array<{ absolutePath?: string; relativePath?: string }>): string {
+  const mentions = attachments
+    .map((attachment) => attachment.absolutePath || attachment.relativePath || '')
+    .map((filePath) => filePath.trim())
+    .filter(Boolean)
+    .map((filePath) => `@${filePath}`)
+    .join(' ');
+  return mentions ? ` ${mentions} ` : '';
 }
 
 export default function Shell({
@@ -53,12 +67,15 @@ export default function Shell({
   autoConnect = false,
   isActive,
   headerActions,
+  onTerminalPaste,
   onTerminalInputReady,
   onTerminalTerminateReady,
 }: ShellProps) {
   const { t } = useTranslation('chat');
   const { isDarkMode } = useTheme();
   const [isRestarting, setIsRestarting] = useState(false);
+  const [isPastingImage, setIsPastingImage] = useState(false);
+  const [pasteImageError, setPasteImageError] = useState('');
 
   // Keep the public API stable for existing callers that still pass `isActive`.
   void isActive;
@@ -189,6 +206,61 @@ export default function Shell({
     }, SHELL_RESTART_DELAY_MS);
   }, []);
 
+  const handleTerminalPaste: ClipboardEventHandler<HTMLDivElement> = useCallback((event) => {
+    /**
+     * PURPOSE: Give specialized callers first ownership, then provide every
+     * standalone Shell with the same browser-image upload behavior.
+     */
+    if (onTerminalPaste) {
+      onTerminalPaste(event);
+      return;
+    }
+
+    const imageFiles = getPastedClipboardImageFiles(event.clipboardData);
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const projectName = selectedSession?.__projectName || selectedProject?.name || '';
+    if (!projectName) {
+      setPasteImageError(t('input.uploadProjectMissing', { defaultValue: '无法确定上传项目' }));
+      return;
+    }
+
+    setIsPastingImage(true);
+    setPasteImageError('');
+    void (async () => {
+      try {
+        const formData = new FormData();
+        imageFiles.forEach((file) => formData.append('attachments', file));
+        formData.append('relativePaths', JSON.stringify(imageFiles.map((file) => file.name)));
+        const response = await authenticatedFetch(
+          `/api/projects/${encodeURIComponent(projectName)}/upload-attachments`,
+          { method: 'POST', headers: {}, body: formData },
+        );
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json() as {
+          attachments?: Array<{ absolutePath?: string; relativePath?: string }>;
+        };
+        const insertion = buildPastedImageInsertion(payload.attachments || []);
+        if (!insertion || !sendTerminalInput(insertion)) {
+          throw new Error(t('input.tuiNotReady', { defaultValue: 'TUI 未连接，图片路径未插入' }));
+        }
+      } catch (error) {
+        setPasteImageError(error instanceof Error
+          ? error.message
+          : t('input.uploadFailed', { defaultValue: '上传失败' }));
+      } finally {
+        setIsPastingImage(false);
+      }
+    })();
+  }, [onTerminalPaste, selectedProject?.name, selectedSession?.__projectName, sendTerminalInput, t]);
+
   if (!selectedProject) {
     return (
       <ShellEmptyState
@@ -206,6 +278,10 @@ export default function Shell({
         <div className="min-h-0 flex-1">
           <ShellMinimalView
             terminalContainerRef={terminalContainerRef}
+            onTerminalPaste={handleTerminalPaste}
+            pasteStatusMessage={isPastingImage
+              ? t('input.uploading', { defaultValue: '上传中…' })
+              : pasteImageError}
             authUrl={authUrl}
             authUrlVersion={authUrlVersion}
             initialCommand={initialCommand}
@@ -270,9 +346,19 @@ export default function Shell({
         <div className="relative min-h-0 flex-1 p-2">
           <div
             ref={terminalContainerRef}
+            onPasteCapture={handleTerminalPaste}
             className="h-full w-full bg-white focus:outline-none dark:bg-gray-900"
             style={{ outline: 'none' }}
           />
+
+          {(isPastingImage || pasteImageError) && (
+            <div
+              role={pasteImageError ? 'alert' : 'status'}
+              className="absolute right-3 top-3 z-20 rounded bg-gray-900/90 px-2 py-1 text-xs text-white"
+            >
+              {isPastingImage ? t('input.uploading', { defaultValue: '上传中…' }) : pasteImageError}
+            </div>
+          )}
 
           {overlayMode && (
             <ShellConnectionOverlay

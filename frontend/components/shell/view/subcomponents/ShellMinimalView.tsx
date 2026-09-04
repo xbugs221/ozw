@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { RefObject } from 'react';
+import type { ClipboardEventHandler, RefObject } from 'react';
 import type { AuthCopyStatus } from '../../types/types';
 import { resolveAuthUrlForDisplay } from '../../utils/auth';
 
 type ShellMinimalViewProps = {
   terminalContainerRef: RefObject<HTMLDivElement>;
+  onTerminalPaste?: ClipboardEventHandler<HTMLDivElement>;
+  pasteStatusMessage?: string;
   authUrl: string;
   authUrlVersion: number;
   initialCommand: string | null | undefined;
@@ -15,6 +17,8 @@ type ShellMinimalViewProps = {
 
 export default function ShellMinimalView({
   terminalContainerRef,
+  onTerminalPaste,
+  pasteStatusMessage = '',
   authUrl,
   authUrlVersion,
   initialCommand,
@@ -44,9 +48,19 @@ export default function ShellMinimalView({
     <div className="h-full w-full bg-white relative dark:bg-gray-900">
       <div
         ref={terminalContainerRef}
+        onPasteCapture={onTerminalPaste}
         className="h-full w-full bg-white focus:outline-none dark:bg-gray-900"
         style={{ outline: 'none' }}
       />
+
+      {pasteStatusMessage && (
+        <div
+          role="status"
+          className="absolute right-3 top-3 z-20 rounded bg-gray-900/90 px-2 py-1 text-xs text-white"
+        >
+          {pasteStatusMessage}
+        </div>
+      )}
 
       {showMobileAuthPanel && (
         <div className="absolute inset-x-0 bottom-14 z-20 border-t border-gray-200/80 bg-white/95 p-3 backdrop-blur-sm md:hidden dark:border-gray-700/80 dark:bg-gray-900/95">
