@@ -1,0 +1,22 @@
+{
+  "scenario": "two terminal conversations in /home/zzl/projects/ozw",
+  "terminals": [
+    {
+      "provider": "codex",
+      "route": "c1",
+      "tmuxSession": "ozw_projects_ozw_4e69f59d",
+      "tmuxWindow": "codex_c1",
+      "closeAction": "kill-window"
+    },
+    {
+      "provider": "pi",
+      "route": "c2",
+      "tmuxSession": "ozw_projects_ozw_4e69f59d",
+      "tmuxWindow": "pi_c2",
+      "closeAction": "kill-window"
+    }
+  ],
+  "topLevelSessionCount": 1,
+  "gracePeriodMinutes": 5,
+  "activeOutputDefersCleanup": true
+}

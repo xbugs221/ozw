@@ -1,0 +1,18 @@
+{
+  "scenario": "two terminal conversations in /home/zzl/projects/ozw",
+  "terminals": [
+    {
+      "provider": "codex",
+      "route": "c1",
+      "tmuxSession": "ozw_projects_ozw_c1",
+      "closeAction": "kill-session"
+    },
+    {
+      "provider": "pi",
+      "route": "c2",
+      "tmuxSession": "ozw_projects_ozw_c2",
+      "closeAction": "kill-session"
+    }
+  ],
+  "topLevelSessionCount": 2
+}

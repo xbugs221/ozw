@@ -231,15 +231,11 @@ test('Claude TUI 启动和恢复都会加载可配置 provider 环境文件', ()
   assert.match(shellSource, /\. \$\{quotedEnvironmentFile\}/, 'Claude 环境文件必须通过 POSIX source 语义加载');
 });
 
-test('非 plain-shell 的 TUI WebSocket 断开后继续保留 PTY 会话', () => {
+test('非 plain-shell 的 TUI WebSocket 断开后保留 tmux window 五分钟', () => {
   const source = readRequiredSource(SHELL_WEBSOCKET_PATH, '后端 shell WebSocket PTY 保活');
 
-  assert.doesNotMatch(
-    source,
-    /ws\.on\(['"]close['"][\s\S]{0,1800}(?:pty\.kill|shellProcess\.kill)/,
-    'Provider TUI 断开 WebSocket 后不能直接 kill PTY',
-  );
-  assert.match(source, /detach-client/, 'Provider TUI 断开 WebSocket 后只应 detach tmux client');
+  assert.match(source, /scheduleTmuxCleanup/, 'Provider TUI 断开 WebSocket 后必须延迟回收 window');
+  assert.match(source, /latestMarker[\s\S]{0,240}scheduleTmuxCleanup/, '后台仍有输出时必须重新计时');
   assert.match(source, /primaryPtySessionKey[\s\S]{0,180}provider/, 'PTY session key 必须包含 provider，避免 Codex/Pi 混用');
   assert.match(source, /buffer\.push|ring buffer|buffer:/, '后端必须保留可回放输出 buffer');
   assert.match(source, /capture-pane[\s\S]{0,120}-p[\s\S]{0,120}-e/, '重连必须优先捕获 tmux 当前屏幕');
@@ -250,7 +246,7 @@ test('隐藏 TUI 卸载网络转发且终端不再周期闪烁光标', () => {
   const chatSource = readRequiredSource(CHAT_INTERFACE_PATH, '聊天 TUI 可见性入口');
   const constantsSource = readRequiredSource(TERMINAL_CONSTANTS_PATH, '终端渲染设置');
 
-  assert.match(chatSource, /renderSnapshotState\.mode === 'tui' && \([\s\S]{0,240}<Shell/, '仅可见 TUI 可以挂载网络终端');
+  assert.match(chatSource, /renderSnapshotState\.mode === 'tui'[\s\S]{0,160}<Shell/, '仅可见 TUI 可以挂载网络终端');
   assert.match(constantsSource, /cursorBlink:\s*false/, '终端光标必须保持稳定，避免无业务更新时持续闪烁');
 });
 

@@ -43,6 +43,8 @@ type PendingForceHandoffOffer = {
 };
 
 const FORCE_HANDOFF_OFFER_TTL_MS = 60_000;
+type TmuxCleanupState = { token: symbol; timer: NodeJS.Timeout | null };
+const tmuxCleanupTimers = new Map<string, TmuxCleanupState>();
 
 /**
  * 归一化聊天 TUI provider，保留 Codex/Pi 的 PTY 边界。
@@ -196,16 +198,26 @@ export function buildManagedTerminalEnvironment(baseEnv: NodeJS.ProcessEnv = pro
  * 业务逻辑：项目目录可能被测试清理或用户删除；先清理工作目录失效的旧 session，
  * 再创建新 session，避免 shell 启动时调用 getcwd() 失败。
  */
-function buildManagedTmuxShellCommand(sessionName: string, projectPath: string, shellCommand: string): string {
-    const quotedSessionName = quotePosixShell(sessionName);
+function buildManagedTmuxShellCommand(
+    tmuxRuntime: ReturnType<typeof createTmuxTerminalRuntime>,
+    activeTarget: string,
+    projectPath: string,
+    shellCommand: string,
+): string {
+    const quotedActiveTarget = quotePosixShell(activeTarget);
+    const quotedTarget = quotePosixShell(tmuxRuntime.target);
+    const quotedSessionName = quotePosixShell(tmuxRuntime.sessionName);
+    const quotedWindowName = quotePosixShell(tmuxRuntime.windowName);
     const quotedProjectPath = quotePosixShell(projectPath);
     const quotedShellCommand = quotePosixShell(shellCommand);
+    const invalidTargetCleanup = activeTarget === tmuxRuntime.target
+        ? `tmux kill-window -t ${quotedActiveTarget} 2>/dev/null || true`
+        : `tmux kill-session -t ${quotedActiveTarget} 2>/dev/null || true`;
 
     return [
         `if [ ! -d ${quotedProjectPath} ]; then echo "Ozw project directory does not exist: ${quotedProjectPath}" >&2; exit 1; fi`,
-        `if tmux has-session -t ${quotedSessionName} 2>/dev/null; then tmux list-panes -t ${quotedSessionName} -F '#{pane_current_path}' 2>/dev/null | while IFS= read -r pane_path; do if [ -z "$pane_path" ] || [ ! -d "$pane_path" ]; then tmux kill-session -t ${quotedSessionName} 2>/dev/null || true; break; fi; done; fi`,
-        `tmux has-session -t ${quotedSessionName} 2>/dev/null || tmux new-session -d -s ${quotedSessionName} -e HOME="$HOME" -e USERPROFILE="\${USERPROFILE:-$HOME}" -e PATH="$PATH" -e SHELL="\${SHELL:-/bin/bash}" ${quotedShellCommand}`,
-        `tmux attach-session -t ${quotedSessionName}`,
+        `if tmux has-session -t ${quotedActiveTarget} 2>/dev/null; then tmux list-panes -t ${quotedActiveTarget} -F '#{pane_current_path}' 2>/dev/null | while IFS= read -r pane_path; do if [ -z "$pane_path" ] || [ ! -d "$pane_path" ]; then ${invalidTargetCleanup}; break; fi; done; fi`,
+        `if tmux has-session -t ${quotedActiveTarget} 2>/dev/null; then tmux attach-session -t ${quotedActiveTarget}; else if tmux has-session -t ${quotedSessionName} 2>/dev/null; then tmux new-window -d -t ${quotedSessionName} -n ${quotedWindowName} ${quotedShellCommand}; else tmux new-session -d -s ${quotedSessionName} -n ${quotedWindowName} -e HOME="$HOME" -e USERPROFILE="\${USERPROFILE:-$HOME}" -e PATH="$PATH" -e SHELL="\${SHELL:-/bin/bash}" ${quotedShellCommand}; fi; tmux attach-session -t ${quotedTarget}; fi`,
     ].join('; ');
 }
 
@@ -221,6 +233,64 @@ function executeTmuxLifecycleCommand(args: string[], actionLabel: string): void 
         }
 
         console.log(`tmux ${actionLabel} command completed`);
+    });
+}
+
+/**
+ * 取消等待回收的 tmux window，五分钟内重连时保留原现场。
+ */
+function cancelTmuxCleanup(targets: string[]): void {
+    for (const target of targets) {
+        const state = tmuxCleanupTimers.get(target);
+        if (state) {
+            if (state.timer) clearTimeout(state.timer);
+            tmuxCleanupTimers.delete(target);
+        }
+    }
+}
+
+/**
+ * 读取 window 的活动时间和可见内容，避免回收仍在后台输出的长任务。
+ */
+async function readTmuxActivityMarker(target: string): Promise<string> {
+    const activity = await new Promise<string>((resolve) => {
+        execFile(
+            'tmux',
+            ['display-message', '-p', '-t', target, '#{window_activity}:#{pane_dead}:#{pane_current_command}'],
+            (error, stdout) => resolve(error ? '' : String(stdout || '').trim()),
+        );
+    });
+    const snapshot = await captureTmuxPane(target);
+    return `${activity}\n${snapshot}`;
+}
+
+/**
+ * 断开后延迟回收会话 window；旧版独立 session 则整个关闭。
+ */
+function scheduleTmuxCleanup(
+    tmuxRuntime: ReturnType<typeof createTmuxTerminalRuntime>,
+    activeTarget: string,
+    delayMs: number,
+): void {
+    cancelTmuxCleanup([activeTarget]);
+    const state: TmuxCleanupState = { token: Symbol(activeTarget), timer: null };
+    tmuxCleanupTimers.set(activeTarget, state);
+    void readTmuxActivityMarker(activeTarget).then((initialMarker) => {
+        if (tmuxCleanupTimers.get(activeTarget)?.token !== state.token) return;
+        const timer = setTimeout(() => {
+            void readTmuxActivityMarker(activeTarget).then((latestMarker) => {
+                if (tmuxCleanupTimers.get(activeTarget)?.token !== state.token) return;
+                if (latestMarker && latestMarker !== initialMarker) {
+                    scheduleTmuxCleanup(tmuxRuntime, activeTarget, delayMs);
+                    return;
+                }
+                tmuxCleanupTimers.delete(activeTarget);
+                const cleanupArgs = tmuxRuntime.terminateTerminal(activeTarget);
+                executeTmuxLifecycleCommand(cleanupArgs.slice(1), cleanupArgs[1]);
+            });
+        }, delayMs);
+        timer.unref?.();
+        state.timer = timer;
     });
 }
 
@@ -254,7 +324,7 @@ function captureTmuxPane(sessionName: string): Promise<string> {
  * 返回当前 runtime 已存在的 tmux 名称，兼容短名称和旧 base64 名称。
  */
 async function findExistingTmuxSessionName(tmuxRuntime: ReturnType<typeof createTmuxTerminalRuntime>): Promise<string> {
-    for (const sessionName of [tmuxRuntime.sessionName, ...tmuxRuntime.legacySessionNames]) {
+    for (const sessionName of [tmuxRuntime.target, ...tmuxRuntime.legacySessionNames]) {
         if (await tmuxSessionExists(sessionName)) {
             return sessionName;
         }
@@ -300,6 +370,10 @@ function resolveShellSessionIdentity(data: LooseRecord): {
  * 关闭并清理所有缓存 PTY session。
  */
 export function closeShellPtySessions(runtime: any): void {
+    for (const state of tmuxCleanupTimers.values()) {
+        if (state.timer) clearTimeout(state.timer);
+    }
+    tmuxCleanupTimers.clear();
     for (const [, session] of runtime.ptySessionsMap.entries()) {
         if (session.timeoutId) {
             clearTimeout(session.timeoutId);
@@ -430,7 +504,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     const candidatePtySessionKeys = [primaryPtySessionKey, ...legacyPtySessionKeys];
                     ptySessionKey = primaryPtySessionKey;
                     let tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
-                    let activeTmuxSessionName = tmuxRuntime.sessionName;
+                    let activeTmuxSessionName = tmuxRuntime.target;
                     let managedTmuxExists = false;
 
                     // Kill any existing login session before starting fresh
@@ -472,6 +546,11 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             }
                         }
                     }
+                    cancelTmuxCleanup([
+                        tmuxRuntime.target,
+                        activeTmuxSessionName,
+                        ...tmuxRuntime.legacySessionNames,
+                    ]);
 
                     const existingSession = isLoginCommand || isPlainShell ? null : ptySessionsMap.get(ptySessionKey);
                     if (existingSession) {
@@ -722,6 +801,7 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         if (os.platform() !== 'win32') {
                             const sessionName = activeTmuxSessionName;
                             const managedTmuxCommand = buildManagedTmuxShellCommand(
+                                tmuxRuntime,
                                 sessionName,
                                 projectPath,
                                 shellCommand,
@@ -773,17 +853,19 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                             routeSessionId,
                             providerSessionId,
                             tmuxSessionName: activeTmuxSessionName,
+                            tmuxTarget: activeTmuxSessionName,
                             isPlainShell,
                             provider,
                             pendingOutput: '',
                             outputFlushTimer: null,
                             interactiveOutputPending: false,
                         });
+                        const spawnedShellProcess = shellProcess;
 
                         // Handle data output
-                        shellProcess.onData((data: string) => {
+                        spawnedShellProcess.onData((data: string) => {
                             const session = ptySessionsMap.get(ptySessionKey);
-                            if (!session) return;
+                            if (!session || session.pty !== spawnedShellProcess) return;
 
                             let outputData = data;
                             const cleanChunk = stripAnsiSequences(data);
@@ -836,9 +918,12 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         });
 
                         // Handle process exit
-                        shellProcess.onExit((exitCode: { exitCode: number; signal?: string }) => {
+                        spawnedShellProcess.onExit((exitCode: { exitCode: number; signal?: string }) => {
                             console.log('🔚 Shell process exited with code:', exitCode.exitCode, 'signal:', exitCode.signal);
                             const session = ptySessionsMap.get(ptySessionKey);
+                            if (session && session.pty !== spawnedShellProcess) {
+                                return;
+                            }
                             if (session) {
                                 flushShellOutput(session, WebSocket);
                             }
@@ -898,10 +983,11 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     if (ptySessionKey) {
                         const tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
                         const session = ptySessionsMap.get(ptySessionKey);
-                        const targetTmuxSessionName = session?.tmuxSessionName || tmuxRuntime.sessionName;
-                        console.log('🧹 Explicit terminal termination requested:', ['tmux', 'kill-session', '-t', targetTmuxSessionName].join(' '));
-                        const killSessionArgs = ['kill-session', '-t', targetTmuxSessionName];
-                        executeTmuxLifecycleCommand(killSessionArgs, 'kill-session');
+                        const targetTmuxTarget = session?.tmuxTarget || tmuxRuntime.target;
+                        const terminateArgs = tmuxRuntime.terminateTerminal(targetTmuxTarget);
+                        console.log('🧹 Explicit terminal termination requested:', terminateArgs.join(' '));
+                        cancelTmuxCleanup([targetTmuxTarget]);
+                        executeTmuxLifecycleCommand(terminateArgs.slice(1), terminateArgs[1]);
                         if (session?.timeoutId) {
                             clearTimeout(session.timeoutId);
                         }
@@ -937,8 +1023,15 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         return;
                     }
 
-                    if (session.tmuxSessionName) {
-                        executeTmuxLifecycleCommand(['detach-client', '-s', session.tmuxSessionName], 'detach-client');
+                    if (session.tmuxTarget || session.tmuxSessionName) {
+                        const tmuxRuntime = createTmuxTerminalRuntime(ptySessionKey);
+                        const activeTarget = session.tmuxTarget || session.tmuxSessionName;
+                        scheduleTmuxCleanup(tmuxRuntime, activeTarget, PTY_SESSION_TIMEOUT);
+                        resetShellOutputQueue(session);
+                        ptySessionsMap.delete(ptySessionKey);
+                        if (session.pty && session.pty.kill) {
+                            session.pty.kill();
+                        }
                     }
                     session.ws = null;
                 }

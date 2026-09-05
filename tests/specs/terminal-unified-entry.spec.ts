@@ -43,9 +43,11 @@ const SHELL_RUNTIME_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell
 const SHELL_VIEW_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'view', 'Shell.tsx');
 const SHELL_TYPES_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'shell', 'types', 'types.ts');
 const CHAT_INTERFACE_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'chat', 'view', 'ChatInterface.tsx');
+const PROJECT_OVERVIEW_RUNTIME_PATH = path.join(REPO_ROOT, 'frontend', 'components', 'main-content', 'project-overview', 'ProjectOverviewPanelRuntime.impl.tsx');
 const SHELL_WEBSOCKET_PATH = path.join(REPO_ROOT, 'backend', 'server', 'shell-websocket.ts');
 const CODEX_ATTACH_PLAN_PATH = path.join(REPO_ROOT, 'backend', 'server', 'codex-terminal-attach-plan.ts');
 const TMUX_RUNTIME_PATH = path.join(REPO_ROOT, 'backend', 'server', 'terminal-tmux-runtime.ts');
+const SERVER_RUNTIME_PATH = path.join(REPO_ROOT, 'backend', 'server', 'server-runtime.impl.ts');
 
 /**
  * Read a required source file for stable business-boundary assertions.
@@ -69,6 +71,7 @@ function readSessionEntrySources(): {
     readRequiredSource(MAIN_CONTENT_PATH, '主工作区'),
     readRequiredSource(SHELL_CONNECTION_PATH, '终端连接 hook'),
     readRequiredSource(CHAT_INTERFACE_PATH, '会话记录视图'),
+    readRequiredSource(PROJECT_OVERVIEW_RUNTIME_PATH, '项目总览新建会话入口'),
   ].join('\n');
 
   return { overviewSource, combinedSource };
@@ -108,9 +111,8 @@ test('会话卡片用 cN 短路由打开 chat 内保活 TUI', () => {
     /terminalLaunchCommand|terminalSessionId|terminalProviderSessionId|terminalRouteIndex|terminalSessionProvider/,
     '会话卡片入口不得把启动命令或会话身份写入 URL 查询参数',
   );
-  assert.match(combinedSource, /project-new-session-provider-codex/, '新建会话必须保留 Codex provider 入口');
-  assert.match(combinedSource, /project-new-session-provider-pi/, '新建会话必须保留 Pi provider 入口');
-  assert.match(combinedSource, /project-new-session-provider-claude/, '新建会话必须保留 Claude provider 入口');
+  assert.match(combinedSource, /project-new-session-provider-\$\{provider\}/, '新建会话必须按 provider 生成稳定入口');
+  assert.match(combinedSource, /provider === 'codex'[\s\S]{0,100}provider === 'pi'[\s\S]{0,100}Claude Code/, '新建会话必须保留 Codex、Pi 和 Claude 标识');
   assert.doesNotMatch(
     combinedSource,
     /会话终端|managedSessionTerminal|sessionTerminalOnly|isSessionTerminal/,
@@ -134,33 +136,32 @@ test('移动端会话终端传递 cN 身份而不是降级为普通 Shell', () =
   );
 });
 
-test('tmux 承载所有终端且 close 只 detach', () => {
+test('tmux 按项目承载终端并延迟回收断开的 window', () => {
   const shellSource = readRequiredSource(SHELL_WEBSOCKET_PATH, 'shell WebSocket relay');
   const runtimeSource = readRequiredSource(TMUX_RUNTIME_PATH, 'tmux terminal runtime');
   const shellRuntimeSource = readRequiredSource(SHELL_RUNTIME_PATH, '前端 shell runtime');
   const mainContentSource = readRequiredSource(MAIN_CONTENT_PATH, '主工作区终端视图');
+  const serverRuntimeSource = readRequiredSource(SERVER_RUNTIME_PATH, '后端终端回收配置');
   const combinedSource = `${shellSource}\n${runtimeSource}`;
 
   assert.match(combinedSource, /\btmux\b/, '后端必须显式使用 tmux 承载终端');
   assert.match(combinedSource, /has-session|list-sessions/, '后端必须能检测已有 tmux session');
   assert.match(combinedSource, /new-session|new\s+-d|-d\s+-s/, '后端必须能创建后台 tmux session');
+  assert.match(combinedSource, /new-window/, '同项目的新会话必须创建独立 window');
   assert.match(combinedSource, /attach-session|attach\s+-t|capture-pane/, '后端必须能重新 attach 或读取 session');
   assert.match(shellSource, /pane_current_path/, '复连前必须检查 tmux pane 的工作目录');
   assert.match(shellSource, /!\s*-d[\s\S]{0,40}pane_path/, '失效工作目录必须被识别');
   assert.match(shellSource, /tmux kill-session/, '失效工作目录对应的 tmux session 必须被清理');
   assert.match(combinedSource, /send-keys|load-buffer|paste-buffer/, '启动命令必须通过 tmux 输入通道注入');
   assert.doesNotMatch(shellSource, /keepSessionAliveOnDisconnect\s*=\s*!isPlainShell/, '普通 shell 和 TUI 不得分叉保活策略');
-  assert.doesNotMatch(
-    shellSource,
-    /ws\.on\(['"]close['"][\s\S]{0,1800}(?:pty\.kill|shellProcess\.kill)/,
-    'WebSocket close 不能直接 kill 终端进程',
-  );
-  assert.match(shellSource, /detach-client/, 'WebSocket close 必须 detach 当前 tmux client');
+  assert.match(shellSource, /scheduleTmuxCleanup/, 'WebSocket close 必须进入延迟回收链路');
+  assert.match(shellSource, /readTmuxActivityMarker/, '后台仍有输出时必须顺延回收');
+  assert.match(serverRuntimeSource, /PTY_SESSION_TIMEOUT\s*=\s*5\s*\*\s*60\s*\*\s*1000/, '静默 window 必须在五分钟宽限期后回收');
   assert.match(shellSource, /execFile\(['"]tmux['"]/, 'tmux 生命周期命令必须真实执行');
   assert.match(
     shellSource,
-    /killSessionArgs[\s\S]{0,240}executeTmuxLifecycleCommand\(killSessionArgs,\s*['"]kill-session['"]\)/,
-    '显式终止路径必须实际执行 tmux kill-session',
+    /terminateTerminal\(targetTmuxTarget\)[\s\S]{0,300}executeTmuxLifecycleCommand/,
+    '显式终止路径必须实际关闭对应 tmux window',
   );
   assert.match(shellRuntimeSource, /type:\s*['"]kill_terminal['"]/, '前端必须能发送终止终端消息');
   assert.match(
@@ -170,14 +171,16 @@ test('tmux 承载所有终端且 close 只 detach', () => {
   );
 });
 
-test('tmux session 名称使用项目短路径和 cN 路由', async () => {
+test('tmux session 使用项目身份，window 使用 provider 和 cN 路由', async () => {
   const runtimeModule = await import(pathToFileURL(TMUX_RUNTIME_PATH).href);
 
-  assert.equal(
-    runtimeModule.createTmuxSessionName('/home/zzl/projects/ozw_codex_route:c7'),
-    'ozw_projects_ozw_c7',
-    'tmux session 名称应类似 projects/ozw/cN，并统一转成下划线',
+  const rawKey = '/home/zzl/projects/ozw_codex_route:c7';
+  assert.match(
+    runtimeModule.createTmuxSessionName(rawKey),
+    /^ozw_projects_ozw_[a-f0-9]{8}$/,
+    'tmux session 应由可读项目名和防冲突后缀组成',
   );
+  assert.equal(runtimeModule.createTmuxWindowName(rawKey), 'codex_c7', 'window 应呈现 provider 和短路由');
   assert.match(
     runtimeModule.createLegacyTmuxSessionName('/home/zzl/projects/ozw_codex_route:c7'),
     /^ozw_[A-Za-z0-9_-]+$/,

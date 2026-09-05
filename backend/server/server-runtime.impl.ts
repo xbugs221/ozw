@@ -749,7 +749,8 @@ const setupGoRunnerWatchers = providerWatcherController.setupGoRunnerWatchers;
 const closeProjectsWatchers = providerWatcherController.closeProjectsWatchers;
 const closeGoRunnerWatchers = providerWatcherController.closeGoRunnerWatchers;
 let sessionPathScanIntervalHandle: NodeJS.Timeout | null = null;
-const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
+// 浏览器断开后保留五分钟重连窗口，持续有输出的后台任务会自动顺延。
+const PTY_SESSION_TIMEOUT = 5 * 60 * 1000;
 const SHELL_URL_PARSE_BUFFER_LIMIT = 32768;
 const ANSI_ESCAPE_SEQUENCE_REGEX = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
 const TRAILING_URL_PUNCTUATION_REGEX = /[)\]}>.,;:!?]+$/;
