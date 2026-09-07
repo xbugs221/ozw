@@ -289,3 +289,34 @@ test('Codex afterLine boundaries preserve totals without full-file reads', async
     });
   });
 });
+
+test('finite Codex history pages parse bounded tail windows and reuse their line index', async () => {
+  /** Older-page navigation must not reparse every JSON payload in a long transcript. */
+  await withTemporaryHome(async (tempHome) => {
+    const fixture = await writeCodexTranscript(tempHome);
+    const projectsModule = await import('../../backend/projects.ts');
+    const { getJsonlHistoryReadStatsForTest } = await import(
+      '../../backend/domains/projects/provider-transcript-read-model.ts'
+    );
+    projectsModule.clearProjectDirectoryCache?.();
+
+    const firstPage = await projectsModule.getCodexSessionMessages(CODEX_SESSION_ID, 4, 0, null);
+    const firstStats = getJsonlHistoryReadStatsForTest();
+    const secondPage = await projectsModule.getCodexSessionMessages(
+      CODEX_SESSION_ID,
+      4,
+      firstPage.nextRawLineOffset,
+      null,
+    );
+    const secondStats = getJsonlHistoryReadStatsForTest();
+    const fileSize = (await fs.stat(fixture.filePath)).size;
+
+    assert.equal(firstPage.hasMore, true);
+    assert.equal(secondPage.hasMore, true);
+    assert.ok(firstStats.parsedLines < fixture.totalLines);
+    assert.ok(firstStats.pageBytesRead < fileSize);
+    assert.equal(secondStats.indexBytesRead, 0, 'continuation must reuse the existing byte index');
+    assert.ok(secondStats.parsedLines < fixture.totalLines);
+    assert.ok(secondStats.pageBytesRead < fileSize);
+  });
+});

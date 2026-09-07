@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS session_attention_ack (
     handled_revision INTEGER NOT NULL DEFAULT 0,
     manual_pending INTEGER NOT NULL DEFAULT 0,
     legacy_pending_migrated INTEGER NOT NULL DEFAULT 0,
+    conversation_revision_migrated INTEGER NOT NULL DEFAULT 1,
     handled_at TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (provider, session_id)

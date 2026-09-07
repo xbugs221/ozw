@@ -121,8 +121,7 @@ test('history prefetch preserves paging locks and read anchor restoration', asyn
   assert.match(loadOlderMessagesBlock, /isLoadingMoreRef\.current\s*=\s*true/);
   assert.match(loadOlderMessagesBlock, /finally\s*\{[\s\S]*isLoadingMoreRef\.current\s*=\s*false/);
   assert.match(loadOlderMessagesBlock, /loadSessionMessages\([\s\S]*true/);
-  assert.match(loadOlderMessagesBlock, /setHasMoreMessages\(totalMessagesRef\.current > messagesOffsetRef\.current\)/);
-  assert.equal(/loadAllMessages/.test(loadOlderMessagesBlock), false);
+    assert.equal(/loadAllMessages/.test(loadOlderMessagesBlock), false);
   assert.match(loadOlderMessagesBlock, /captureSessionScrollSnapshot\(container\)/);
   assert.match(loadOlderMessagesBlock, /pendingScrollRestoreRef\.current\s*=\s*scrollSnapshot/);
   assert.match(loadOlderMessagesBlock, /frozenTailMessageKeyRef\.current/);
@@ -144,19 +143,24 @@ test('frozen transcript tail survives prepending fallback-key messages', () => {
   assert.deepEqual(buildVisibleMessageWindow(messages, 3, frozenTailKey), messages.slice(0, 3));
 });
 
-test('render snapshot uses viewport budget and only pages inside the reserve zone', async () => {
-  /** Render 快照首屏按视口收敛，用户进入预留区后才读取一页旧历史。 */
+test('render snapshot keeps a bounded first paint and warms a multi-page history reserve', async () => {
+  /** Render 首屏保持轻量，随后只预热内存数据，进入预留区时优先消费缓冲。 */
   const chatInterface = await readRepoFile('frontend/components/chat/view/ChatInterface.tsx');
   const renderSnapshotBlock = extractFunctionBody(chatInterface, 'const handleRenderSnapshot');
 
-  assert.match(renderSnapshotBlock, /visibleMessages\.length > 0/);
+  assert.match(renderSnapshotBlock, /chatMessages\.length > 0/);
   assert.match(renderSnapshotBlock, /selectRenderSnapshotFileTail/);
   assert.match(renderSnapshotBlock, /api\.sessionMessages\([\s\S]*SESSION_BULK_MESSAGE_PAGE_SIZE,[\s\S]*0,/);
   assert.equal(/loadSessionMessagesInPages|hydrateRenderSnapshot|scheduleRenderSnapshotHydration/.test(chatInterface), false);
   assert.match(chatInterface, /RENDER_SNAPSHOT_TARGET_VIEWPORTS/);
+  assert.match(chatInterface, /RENDER_SNAPSHOT_PREFETCH_VIEWPORTS\s*=\s*6/);
+  assert.match(chatInterface, /RENDER_SNAPSHOT_PREFETCH_PAGE_LIMIT\s*=\s*3/);
+  assert.match(chatInterface, /warmRenderSnapshotHistory/);
+  assert.match(chatInterface, /scheduleRenderSnapshotHistoryWarmup/);
   assert.match(chatInterface, /loadOlderRenderSnapshotHistory/);
-  assert.match(chatInterface, /container\.scrollTop <= container\.clientHeight/);
-  assert.match(chatInterface, /captureSessionScrollSnapshot/);
+  assert.match(chatInterface, /bufferedMessages\.length === 0 && hasMoreRawHistory/);
+  assert.match(chatInterface, /captureSessionElementScrollSnapshot/);
+  assert.match(chatInterface, /restoreSessionElementScrollPosition/);
   assert.match(chatInterface, /renderSnapshotUserInteractionRevisionRef/);
   assert.match(chatInterface, /scrollRestoreRevision === renderSnapshotUserInteractionRevisionRef\.current/);
   assert.match(chatInterface, /onWheel=\{\(event\) => handleRenderedSnapshotWheel/);

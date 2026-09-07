@@ -8,7 +8,7 @@
 - `pnpm exec tsx --test tests/specs/codex-app-server-protocol-mapping.spec.ts`
 - `pnpm exec tsx --test tests/specs/provider-runtime-boundary.spec.ts`
 
-### 需求：Codex 历史消息分页必须使用稳定 raw line 游标
+### 需求：Codex 历史分页必须按对话内容推进并使用稳定 raw line 游标
 
 #### 场景：向上加载更早历史不会重叠或跳过消息
 
@@ -18,6 +18,8 @@
 - **则** 第二页请求必须使用后端返回的 raw line 游标
 - **且** 第二页 raw line 范围不得与第一页重叠
 - **且** 已加载消息合并后不得重复用户气泡、不得丢失对应 assistant/tool 上下文
+- **且** 折叠的 thinking、tool use 和 tool result 不得消耗对话分页配额
+- **且** 工具密集的页仍必须至少达到一条用户问题及 assistant 对话内容
 
 ### 需求：Codex read model 不得返回 provider 内部角色消息
 

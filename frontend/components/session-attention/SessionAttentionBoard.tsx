@@ -100,6 +100,23 @@ export default function SessionAttentionBoard({ onNavigateToSession }: SessionAt
     }
   };
 
+  const markAllHandled = async (): Promise<void> => {
+    /** 服务端会确认整个待处理集合，不只是当前返回的 100 张卡片。 */
+    if (items.length === 0 || submittingIds.size > 0) return;
+    setSubmittingIds(new Set(items.map(attentionIdentity)));
+    setError('');
+    try {
+      const response = await api.markAllSessionAttentionHandled();
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || '处理全部会话失败');
+      await load();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : '处理全部会话失败');
+    } finally {
+      setSubmittingIds(new Set());
+    }
+  };
+
   if (isLoading) {
     return <div data-testid="session-attention-board" className="flex h-full items-center justify-center text-sm text-muted-foreground">正在读取待处理会话…</div>;
   }
@@ -113,7 +130,7 @@ export default function SessionAttentionBoard({ onNavigateToSession }: SessionAt
             <p className="mt-1 text-sm text-muted-foreground">点击打开会话，向右滑动卡片即可完成</p>
           </div>
           {items.length > 0 && (
-            <button type="button" disabled={submittingIds.size > 0} className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50" onClick={() => void markHandled(items)}>全部处理完成</button>
+            <button type="button" disabled={submittingIds.size > 0} className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50" onClick={() => void markAllHandled()}>全部处理完成</button>
           )}
         </div>
 

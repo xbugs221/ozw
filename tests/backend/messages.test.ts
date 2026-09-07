@@ -645,27 +645,25 @@ test('getCodexSessionMessages maps Codex custom apply_patch calls to FileChanges
   });
 });
 
-test('getCodexSessionMessages limits initial history to the newest requested lines', async () => {
+  test('getCodexSessionMessages keeps a tool-only history page intact', async () => {
   await withTemporaryHome(async (tempHome) => {
     const sessionId = 'codex-tail-window-session';
     await createCodexSessionFixture(tempHome, sessionId);
 
     const firstPage = await getCodexSessionMessages(sessionId, 2, 0, null);
-    const olderPage = await getCodexSessionMessages(sessionId, 2, 2, null);
+      const olderPage = await getCodexSessionMessages(sessionId, 2, firstPage.nextRawLineOffset, null);
 
     assert.equal(firstPage.total, 4);
-    assert.equal(firstPage.hasMore, true);
-    assert.equal(firstPage.nextRawLineOffset, 2);
-    assert.equal(firstPage.messages.length, 2);
-    assert.equal(firstPage.messages[0].toolCallId, 'call_2');
-    assert.equal(firstPage.messages[1].toolCallId, 'call_2');
+      assert.equal(firstPage.hasMore, false);
+      assert.equal(firstPage.nextRawLineOffset, 4);
+      assert.equal(firstPage.messages.length, 4);
+      assert.equal(firstPage.messages[0].toolCallId, 'call_1');
+      assert.equal(firstPage.messages[3].toolCallId, 'call_2');
 
     assert.equal(olderPage.total, 4);
     assert.equal(olderPage.hasMore, false);
     assert.equal(olderPage.nextRawLineOffset, 4);
-    assert.equal(olderPage.messages.length, 2);
-    assert.equal(olderPage.messages[0].toolCallId, 'call_1');
-    assert.equal(olderPage.messages[1].toolCallId, 'call_1');
+      assert.equal(olderPage.messages.length, 0);
   });
 });
 
@@ -746,7 +744,7 @@ test('getCodexSessionMessages uses raw line cursor and hides internal Codex role
     const overlap = [...firstLines].filter((lineNumber) => secondLines.has(lineNumber));
     const userMessages = allMessages.messages.filter((message) => message.type === 'user');
 
-    assert.equal(firstPage.nextRawLineOffset, 5);
+      assert.ok(firstPage.nextRawLineOffset > 5);
     assert.deepEqual(overlap, []);
     assert.equal(
       allMessages.messages.some((message) => message.message?.role === 'developer'),

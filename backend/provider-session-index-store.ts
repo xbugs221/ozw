@@ -144,6 +144,7 @@ function ensureProviderSessionIndexSchema(db: any): void {
       handled_revision INTEGER NOT NULL DEFAULT 0,
       manual_pending INTEGER NOT NULL DEFAULT 0,
       legacy_pending_migrated INTEGER NOT NULL DEFAULT 0,
+      conversation_revision_migrated INTEGER NOT NULL DEFAULT 1,
       handled_at TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (provider, session_id)
@@ -293,7 +294,12 @@ function upsertProviderSessionIndex(db: any, record: ProviderSessionIndexRecord)
       message_count = excluded.message_count,
       message_count_known = excluded.message_count_known,
       activity_revision = CASE
-        WHEN excluded.file_mtime_ms <> provider_session_index.file_mtime_ms
+        WHEN excluded.last_activity <> provider_session_index.last_activity
+          AND (
+            excluded.message_count_known = 0
+            OR provider_session_index.message_count_known = 0
+            OR excluded.message_count <> provider_session_index.message_count
+          )
           THEN provider_session_index.activity_revision + 1
         ELSE provider_session_index.activity_revision
       END,

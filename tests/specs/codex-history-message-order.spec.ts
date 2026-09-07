@@ -265,6 +265,30 @@ test('Codex history pagination exposes a raw line cursor and adjacent pages do n
   });
 });
 
+test('Codex history pages advance by conversation content instead of folded process rows', async () => {
+  /**
+   * One tool-heavy turn can occupy dozens of JSONL rows. Loading an older page
+   * must still reach a user question and its answer instead of returning only
+   * folded thinking/tool details.
+   */
+  await withTemporaryHome(async (tempHome) => {
+    const sessionId = '019ecodex-history-order-conversation-page';
+    await writeRolloutSession(tempHome, sessionId, buildRolloutHistory(sessionId));
+
+    const page = await getCodexSessionMessages(sessionId, 4, 0, null);
+    const visibleMessages = convertSessionMessages(page.messages);
+    const userMessages = visibleMessages.filter((message) => message.type === 'user');
+    const processMessages = visibleMessages.filter((message) => message.isThinking || message.isToolUse);
+
+    assert.ok(userMessages.length >= 1, 'a tool-heavy history page must include a user question');
+    assert.ok(
+      page.messages.some((message) => message.type === 'assistant'),
+      'a tool-heavy history page must include assistant conversation content',
+    );
+    assert.ok(processMessages.length > 4, 'the fixture must contain more folded rows than the requested page size');
+  });
+});
+
 test('Codex history full load keeps user bubbles in turn order and away from the transcript tail', async () => {
   /**
    * Duplicate Codex user echoes should collapse to one visible user bubble, and

@@ -29,6 +29,10 @@ const FULL_FIRST_REQUEST = '这是用户的完整首条请求，卡片不得按�
 const FULL_LATEST_REQUEST = '这是用户的最新一条请求，中间的助手回复和历史请求都不在首页展开。\n但最新请求本身不能被截断。';
 const FULL_REQUEST_TRANSCRIPT_DIR = path.join(PLAYWRIGHT_FIXTURE_HOME, 'attention-card-transcript');
 const FULL_REQUEST_TRANSCRIPT_PATH = path.join(FULL_REQUEST_TRANSCRIPT_DIR, 'playwright-full-title-session.jsonl');
+const FIX_EVIDENCE_DIR = path.join(
+  process.cwd(),
+  'tests/evidence/fixes/20260907-history-attention-pagination',
+);
 
 test.afterAll(async () => {
   /** 业务目的：测试结束后不在系统临时目录留下会话转录。 */
@@ -43,6 +47,17 @@ function createLocalAuthToken(): string {
   const user = userDb.getFirstUser();
   if (!user) throw new Error('No active user found for Playwright authentication');
   return generateToken(user);
+}
+
+/** Save review screenshots only during an explicit evidence refresh. */
+async function captureFixEvidence(page: Page, state: 'before' | 'after'): Promise<void> {
+  /** Normal regression runs must remain clean and independent from tracked evidence output. */
+  if (process.env.UPDATE_FIX_EVIDENCE !== '1') return;
+  const directory = path.join(FIX_EVIDENCE_DIR, state);
+  await fs.mkdir(directory, { recursive: true });
+  await page.screenshot({
+    path: path.join(directory, `pending-board-${state}-mark-all.png`),
+  });
 }
 
 /**
@@ -193,6 +208,10 @@ test('待处理卡片完整显示首尾请求且右滑直接完成', async ({ pa
   await keyboardCard.focus();
   await page.keyboard.press('ArrowRight');
   await expect(board.locator('[data-testid^="session-attention-card-"]')).toHaveCount(beforeHandledCount - 2);
+  await captureFixEvidence(page, 'before');
+  await board.getByRole('button', { name: '全部处理完成' }).click();
+  await expect(board.getByText('暂无待处理会话', { exact: true })).toBeVisible();
+  await captureFixEvidence(page, 'after');
   const relevantBrowserIssues = browserIssues.filter((issue) => (
     !issue.includes('React Router Future Flag Warning')
     && !issue.includes('WebSocket is closed before the connection is established')

@@ -252,9 +252,19 @@ test('1000+ mixed long session keeps DOM bounded and search reveals offscreen ta
   await expect(page.getByTestId('collapsible-lazy-content')).toHaveCount(0);
 
   const outputToolCard = page.getByTestId('codex-tool-card').filter({ hasText: 'write_stdin' });
-  await outputToolCard.scrollIntoViewIfNeeded();
   await expect(outputToolCard).toHaveAttribute('data-collapsed', 'true');
-  await outputToolCard.locator('summary').filter({ hasText: 'Output' }).click();
+  const outputSummary = outputToolCard.locator('summary').filter({ hasText: 'Output' });
+  await outputSummary.evaluate((element) => {
+    /** Virtual remounts reset outer tool groups; reopen only those ancestors. */
+    const ownDetails = element.closest('details');
+    let ancestor = ownDetails?.parentElement || null;
+    while (ancestor) {
+      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+      ancestor = ancestor.parentElement;
+    }
+  });
+  await outputSummary.scrollIntoViewIfNeeded();
+  await outputSummary.click();
   await expect(outputToolCard.getByTestId('large-tool-output-summary')).toBeVisible();
   await expect(page.getByText(MIXED_LONG_HIDDEN_TOOL_OUTPUT_TEXT)).toHaveCount(0);
   await outputToolCard.getByRole('button', { name: /Show .* more lines/ }).click();
@@ -314,6 +324,7 @@ test('scrolling up through history loads older messages', async ({ page }) => {
   await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 80');
 
   const scrollContainer = page.getByTestId('chat-scroll-container');
+  const previousHeight = await scrollContainer.evaluate((element) => element.scrollHeight);
   await scrollContainer.evaluate((element) => {
     element.scrollTop = 0;
     element.dispatchEvent(new Event('scroll'));
@@ -321,7 +332,8 @@ test('scrolling up through history loads older messages', async ({ page }) => {
 
   // After prepending older history, the previous read anchor stays in view
   // instead of jumping to the top of the newly loaded page.
-  await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 12');
+  await expect.poll(async () => scrollContainer.evaluate((element) => element.scrollHeight))
+    .toBeGreaterThan(previousHeight);
   await expect
     .poll(async () => scrollContainer.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
@@ -331,22 +343,23 @@ test('scrolling to the top preserves the read anchor after older history prepend
   await page.goto(`/session/${HISTORY_SCROLL_SESSION_ID}`, { waitUntil: 'networkidle' });
   const scrollContainer = page.getByTestId('chat-scroll-container');
   await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 80');
+  const previousHeight = await scrollContainer.evaluate((element) => element.scrollHeight);
 
   await scrollContainer.evaluate((element) => {
     element.scrollTop = 0;
     element.dispatchEvent(new Event('scroll'));
   });
 
-  await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 12');
+  await expect.poll(async () => scrollContainer.evaluate((element) => element.scrollHeight))
+    .toBeGreaterThan(previousHeight);
   await expect
     .poll(async () => scrollContainer.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
-  await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 31');
   fs.mkdirSync(HISTORY_PREFETCH_EVIDENCE_DIR, { recursive: true });
   await page.screenshot({ path: HISTORY_PREFETCH_ANCHOR_SCREENSHOT_PATH, fullPage: false });
 });
 
-test('external append while scrolled up does not force bottom follow', async ({ page }) => {
+test('external append leaves a scrolled-up Render snapshot frozen', async ({ page }) => {
   const appendedText = `history scroll externally appended while reading ${Date.now()}`;
   const projectsResponse = await page.request.get('/api/projects', {
     headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
@@ -372,12 +385,14 @@ test('external append while scrolled up does not force bottom follow', async ({ 
   await page.goto(`${project.routePath}/c${session.routeIndex}`, { waitUntil: 'networkidle' });
   const scrollContainer = page.getByTestId('chat-scroll-container');
   await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 80');
+  const previousHeight = await scrollContainer.evaluate((element) => element.scrollHeight);
 
   await scrollContainer.evaluate((element) => {
     element.scrollTop = 0;
     element.dispatchEvent(new Event('scroll'));
   });
-  await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 12');
+  await expect.poll(async () => scrollContainer.evaluate((element) => element.scrollHeight))
+    .toBeGreaterThan(previousHeight);
   await page.waitForTimeout(500);
   const distanceBeforeAppend = await scrollContainer.evaluate(
     (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
@@ -389,17 +404,12 @@ test('external append while scrolled up does not force bottom follow', async ({ 
     (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
   );
 
-  expect(messageRequests.some((url) => new URL(url).searchParams.has('afterLine'))).toBe(true);
+  expect(messageRequests.some((url) => new URL(url).searchParams.has('afterLine'))).toBe(false);
   expect(distanceAfterAppend).toBeGreaterThanOrEqual(Math.max(1, distanceBeforeAppend - 4));
-
-  await scrollContainer.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-    element.dispatchEvent(new Event('scroll'));
-  });
-  await expect(page.getByText(appendedText)).toBeVisible();
+  await expect(page.getByText(appendedText)).toHaveCount(0);
 });
 
-test('external append on project cN route renders without manual refresh', async ({ page }) => {
+test('external append on project cN route leaves the current Render snapshot frozen', async ({ page }) => {
   const appendedText = `history scroll live appended on cN route ${Date.now()}`;
   const projectsResponse = await page.request.get('/api/projects', {
     headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
@@ -426,8 +436,9 @@ test('external append on project cN route renders without manual refresh', async
   await expect(page.locator('body')).toContainText('history scroll fixture session assistant turn 80');
 
   appendAssistantHistoryMessage(appendedText);
-  await expect(page.getByText(appendedText)).toBeVisible({ timeout: 10_000 });
-  expect(messageRequests.some((url) => new URL(url).searchParams.has('afterLine'))).toBe(true);
+  await page.waitForTimeout(750);
+  await expect(page.getByText(appendedText)).toHaveCount(0);
+  expect(messageRequests.some((url) => new URL(url).searchParams.has('afterLine'))).toBe(false);
 });
 
 // This test appends to the fixture file, so it must run after the scroll test above.

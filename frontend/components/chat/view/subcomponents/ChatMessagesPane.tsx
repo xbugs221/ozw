@@ -316,6 +316,7 @@ export default function ChatMessagesPane({
                 ref={(element) => measureMessage(blockKey, element)}
                 className="mb-3 sm:mb-4 last:mb-0"
                 data-virtual-row="chat-message"
+                data-virtual-row-key={blockKey}
               >
                 {block.kind === 'turn-non-body-group' ? (
                   <TurnNonBodyGroup

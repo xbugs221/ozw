@@ -29,7 +29,7 @@ const API_KEY_PREFIX_LENGTH = 8;
 const SINGLE_USER_NAME = 'ozw';
 const DISABLED_PASSWORD_HASH = '!';
 // Increment together with every init.sql schema change; the contract test pins both.
-const CURRENT_DATABASE_SCHEMA_VERSION = 1;
+const CURRENT_DATABASE_SCHEMA_VERSION = 2;
 
 // Use DATABASE_PATH environment variable if set, otherwise use default location
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATABASE_ASSET_DIRECTORY, 'ozw.db');

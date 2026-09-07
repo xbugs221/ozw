@@ -115,6 +115,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ items }),
     }),
+  markAllSessionAttentionHandled: (): Promise<Response> =>
+    authenticatedFetch('/api/session-attention/handled-all', {
+      method: 'POST',
+    }),
   setSessionAttentionPending: (provider: string, sessionId: string, pending: boolean): Promise<Response> =>
     authenticatedFetch(`/api/session-attention/${encodeRouteSegment(provider)}/${encodeRouteSegment(sessionId)}/pending`, {
       method: 'PUT',

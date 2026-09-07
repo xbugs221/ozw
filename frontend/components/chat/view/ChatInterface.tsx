@@ -45,7 +45,10 @@ import {
 } from '../session/renderSnapshotController';
 import { SESSION_BULK_MESSAGE_PAGE_SIZE } from '../session/sessionBulkMessageLoader';
 import { getSessionMessageRawLineCursor } from '../session/sessionMessageLoader';
-import { captureSessionScrollSnapshot } from '../session/sessionScrollAnchor';
+import {
+  captureSessionElementScrollSnapshot,
+  restoreSessionElementScrollPosition,
+} from '../session/sessionScrollAnchor';
 import { useChatSearchNavigation } from './chatInterfaceSearchNavigation';
 import { useChatStatusReconcile } from './chatInterfaceStatusReconcile';
 
@@ -73,6 +76,10 @@ const RENDER_SNAPSHOT_MIN_VIEWPORTS = 1.75;
 const RENDER_SNAPSHOT_MAX_VIEWPORTS = 3.5;
 const RENDER_SNAPSHOT_ESTIMATED_ROW_HEIGHT = 120;
 const RENDER_SNAPSHOT_MAX_PAGE_ATTEMPTS = 100;
+const RENDER_SNAPSHOT_PREFETCH_VIEWPORTS = 6;
+const RENDER_SNAPSHOT_REVEAL_VIEWPORTS = 3;
+const RENDER_SNAPSHOT_TRIGGER_VIEWPORTS = 1;
+const RENDER_SNAPSHOT_PREFETCH_PAGE_LIMIT = 3;
 
 type RenderSnapshotRawPage = {
   messages: RenderSnapshotMessage[];
@@ -289,14 +296,18 @@ function ChatInterface({
   const renderSnapshotUserInteractionRevisionRef = useRef(0);
   const lastHandledRenderSnapshotRequestIdRef = useRef(0);
   const autoRenderedSessionKeyRef = useRef<string | null>(null);
-  const pendingRenderSnapshotScrollRestoreRef = useRef<ReturnType<typeof captureSessionScrollSnapshot>>(null);
+  const pendingRenderSnapshotScrollRestoreRef = useRef<ReturnType<typeof captureSessionElementScrollSnapshot>>(null);
   const pendingRenderSnapshotScrollRestoreRevisionRef = useRef<number | null>(null);
+  const renderSnapshotRawHistoryHasMoreRef = useRef(false);
+  const renderSnapshotPrefetchPromiseRef = useRef<Promise<void> | null>(null);
+  const renderSnapshotPrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [workflowTurnOutcomes, setWorkflowTurnOutcomes] = useState<Record<string, 'completed' | 'failed'>>({});
   const [isFollowingLatest, setIsFollowingLatest] = useState(false);
   const [searchHighlightRetry, setSearchHighlightRetry] = useState(0);
   const [, setActiveTurnStartedAt] = useState<string | null>(null);
   const [bookmarkScrollTargetKey, setBookmarkScrollTargetKey] = useState<string | null>(null);
   const [isRenderingSnapshot, setIsRenderingSnapshot] = useState(false);
+  const [renderSnapshotPrefetchState, setRenderSnapshotPrefetchState] = useState<'idle' | 'warming' | 'ready' | 'exhausted' | 'error'>('idle');
   const [, setRenderedSnapshotInput] = useState('');
   const [isUploadingTuiAttachment, setIsUploadingTuiAttachment] = useState(false);
   const [tuiUploadError, setTuiUploadError] = useState('');
@@ -408,9 +419,16 @@ function ChatInterface({
     renderSnapshotBudgetRequestCountRef.current = 0;
     renderSnapshotCalibrationCountsRef.current.clear();
     renderSnapshotSearchFailureTargetRef.current = null;
+    renderSnapshotRawHistoryHasMoreRef.current = false;
+    renderSnapshotPrefetchPromiseRef.current = null;
+    if (renderSnapshotPrefetchTimerRef.current) {
+      clearTimeout(renderSnapshotPrefetchTimerRef.current);
+      renderSnapshotPrefetchTimerRef.current = null;
+    }
     pendingRenderSnapshotScrollRestoreRef.current = null;
     pendingRenderSnapshotScrollRestoreRevisionRef.current = null;
     renderSnapshotUserInteractionRevisionRef.current = 0;
+    setRenderSnapshotPrefetchState('idle');
     setRenderSnapshotState(createInitialRenderSnapshotState({
       tuiSessionKey: chatTuiSessionKey,
       mode: renderTranscriptOnMount ? 'renderedSnapshot' : 'tui',
@@ -431,6 +449,7 @@ function ChatInterface({
     hasMoreMessages,
     historySnapshotRawLineOffset,
     totalMessages,
+    historyMessageOffset,
     setIsSystemSessionChange,
     canAbortSession,
     setCanAbortSession,
@@ -516,6 +535,8 @@ function ChatInterface({
     renderSnapshotCalibrationCountsRef.current.clear();
     renderSnapshotSearchFailureTargetRef.current = null;
     renderSnapshotBufferedOlderRef.current = [];
+    renderSnapshotRawHistoryHasMoreRef.current = false;
+    setRenderSnapshotPrefetchState('idle');
     setBookmarkScrollTargetKey(null);
     setIsRenderingSnapshot(true);
     onRenderSnapshotLoadingChange?.(true);
@@ -536,20 +557,22 @@ function ChatInterface({
         return;
       }
 
+      const loadedHistory = (chatMessages.length > 0 ? chatMessages : visibleMessages) as RenderSnapshotMessage[];
       const loadedWindow = selectRenderSnapshotFileTail(
-        (visibleMessages.length > 0 ? visibleMessages : chatMessages) as RenderSnapshotMessage[],
+        loadedHistory,
         SESSION_BULK_MESSAGE_PAGE_SIZE,
       );
       if (loadedWindow.length > 0) {
         renderSnapshotHistoryRawLineBoundaryRef.current = historySnapshotRawLineOffset;
+        renderSnapshotRawHistoryHasMoreRef.current = hasMoreMessages;
         const snapshotMessages = loadedWindow as RenderSnapshotMessage[];
-        renderSnapshotBootstrapMessagesRef.current = snapshotMessages;
+        renderSnapshotBootstrapMessagesRef.current = loadedHistory;
         setRenderSnapshotState((previous) =>
           applyUserRenderSnapshot(previous, {
             messages: snapshotMessages,
             loadedAt: new Date().toISOString(),
-            nextHistoryOffset: SESSION_BULK_MESSAGE_PAGE_SIZE,
-            hasMoreHistory: hasMoreMessages || totalMessages > SESSION_BULK_MESSAGE_PAGE_SIZE,
+            nextHistoryOffset: Math.max(SESSION_BULK_MESSAGE_PAGE_SIZE, historyMessageOffset),
+            hasMoreHistory: hasMoreMessages || loadedHistory.length > snapshotMessages.length,
           }),
         );
         return;
@@ -577,6 +600,7 @@ function ChatInterface({
       renderSnapshotHistoryRawLineBoundaryRef.current = Number.isSafeInteger(Number(data?.historySnapshotRawLineOffset))
         ? Number(data.historySnapshotRawLineOffset)
         : null;
+      renderSnapshotRawHistoryHasMoreRef.current = Boolean(data?.hasMore);
       const snapshotMessages = convertSessionMessages(messages) as RenderSnapshotMessage[];
       renderSnapshotBootstrapMessagesRef.current = snapshotMessages;
       setRenderSnapshotState((previous) =>
@@ -601,8 +625,8 @@ function ChatInterface({
     selectedProject?.path,
     selectedSession,
     hasMoreMessages,
+    historyMessageOffset,
     historySnapshotRawLineOffset,
-    totalMessages,
     visibleMessages,
   ]);
 
@@ -646,6 +670,81 @@ function ChatInterface({
     };
   }, [currentSessionId, effectiveProvider, selectedProject, selectedSession]);
 
+  const warmRenderSnapshotHistory = useCallback((): Promise<void> => {
+    /** Fill an in-memory high-water mark after first paint without mounting older rows. */
+    if (renderSnapshotPrefetchPromiseRef.current) return renderSnapshotPrefetchPromiseRef.current;
+    const current = renderSnapshotStateRef.current;
+    const container = renderedSnapshotScrollContainerRef.current;
+    if (current.mode !== 'renderedSnapshot' || !container || container.clientHeight <= 0) {
+      return Promise.resolve();
+    }
+    const targetBufferedMessages = Math.max(
+      1,
+      Math.ceil(container.clientHeight / RENDER_SNAPSHOT_ESTIMATED_ROW_HEIGHT) * RENDER_SNAPSHOT_PREFETCH_VIEWPORTS,
+    );
+    if (renderSnapshotBufferedOlderRef.current.length >= targetBufferedMessages) {
+      setRenderSnapshotPrefetchState('ready');
+      return Promise.resolve();
+    }
+    if (!renderSnapshotRawHistoryHasMoreRef.current) {
+      setRenderSnapshotPrefetchState(renderSnapshotBufferedOlderRef.current.length > 0 ? 'ready' : 'exhausted');
+      return Promise.resolve();
+    }
+
+    const generation = renderSnapshotGenerationRef.current;
+    setRenderSnapshotPrefetchState('warming');
+    const prefetchPromise = (async () => {
+      let nextOffset = renderSnapshotStateRef.current.nextHistoryOffset;
+      let hasMoreRawHistory = renderSnapshotRawHistoryHasMoreRef.current;
+      for (
+        let attempt = 0;
+        attempt < RENDER_SNAPSHOT_PREFETCH_PAGE_LIMIT
+          && renderSnapshotBufferedOlderRef.current.length < targetBufferedMessages
+          && hasMoreRawHistory;
+        attempt += 1
+      ) {
+        const page = await requestOlderRenderSnapshotRawPage(nextOffset);
+        if (generation !== renderSnapshotGenerationRef.current || !page || !page.madeProgress) break;
+        nextOffset = page.nextOffset;
+        hasMoreRawHistory = page.hasMore;
+        renderSnapshotBufferedOlderRef.current = mergeUniqueRenderSnapshotMessages(
+          page.messages,
+          renderSnapshotBufferedOlderRef.current,
+        );
+      }
+      if (generation !== renderSnapshotGenerationRef.current) return;
+      renderSnapshotRawHistoryHasMoreRef.current = hasMoreRawHistory;
+      const bufferedMessages = renderSnapshotBufferedOlderRef.current;
+      setRenderSnapshotState((previous) => replaceRenderSnapshotBudget(previous, {
+        messages: previous.snapshotMessages,
+        nextHistoryOffset: nextOffset,
+        hasMoreHistory: bufferedMessages.length > 0 || hasMoreRawHistory,
+      }));
+      setRenderSnapshotPrefetchState(
+        bufferedMessages.length > 0 ? 'ready' : hasMoreRawHistory ? 'idle' : 'exhausted',
+      );
+    })()
+      .catch((error) => {
+        if (generation !== renderSnapshotGenerationRef.current) return;
+        console.error('Error warming render snapshot history:', error);
+        setRenderSnapshotPrefetchState('error');
+      })
+      .finally(() => {
+        renderSnapshotPrefetchPromiseRef.current = null;
+      });
+    renderSnapshotPrefetchPromiseRef.current = prefetchPromise;
+    return prefetchPromise;
+  }, [requestOlderRenderSnapshotRawPage]);
+
+  const scheduleRenderSnapshotHistoryWarmup = useCallback(() => {
+    /** Defer disk and conversion work until the newest messages have painted. */
+    if (renderSnapshotPrefetchTimerRef.current) clearTimeout(renderSnapshotPrefetchTimerRef.current);
+    renderSnapshotPrefetchTimerRef.current = setTimeout(() => {
+      renderSnapshotPrefetchTimerRef.current = null;
+      void warmRenderSnapshotHistory();
+    }, 50);
+  }, [warmRenderSnapshotHistory]);
+
   useLayoutEffect(() => {
     /** Calibrate the first frozen window from actual folded layout height. */
     if (!renderSnapshotBudgetPreparingRef.current || renderSnapshotState.mode !== 'renderedSnapshot') {
@@ -688,7 +787,7 @@ function ChatInterface({
     if (
       viewportRatio < RENDER_SNAPSHOT_MIN_VIEWPORTS
       && currentCount >= bootstrapMessages.length
-      && renderSnapshotState.hasMoreHistory
+      && renderSnapshotRawHistoryHasMoreRef.current
     ) {
       if (renderSnapshotLoadingRef.current) {
         return;
@@ -710,6 +809,7 @@ function ChatInterface({
         .then((page) => {
           if (generation !== renderSnapshotGenerationRef.current) return;
           if (!page || !page.madeProgress) {
+            renderSnapshotRawHistoryHasMoreRef.current = false;
             setRenderSnapshotState((previous) => replaceRenderSnapshotBudget(previous, {
               messages: previous.snapshotMessages,
               nextHistoryOffset: page?.nextOffset ?? offset,
@@ -717,6 +817,7 @@ function ChatInterface({
             }));
             return;
           }
+          renderSnapshotRawHistoryHasMoreRef.current = page.hasMore;
           const expandedMessages = mergeUniqueRenderSnapshotMessages(page.messages, bootstrapMessages);
           renderSnapshotBootstrapMessagesRef.current = expandedMessages;
           renderSnapshotCalibrationCountsRef.current.clear();
@@ -734,6 +835,7 @@ function ChatInterface({
           renderSnapshotBudgetPreparingRef.current = false;
           renderSnapshotNavigationReadyRef.current = true;
           renderSnapshotTopLoadLockRef.current = false;
+          scheduleRenderSnapshotHistoryWarmup();
           const currentMessages = renderSnapshotStateRef.current.snapshotMessages;
           const fileTailMessage = [...currentMessages].sort((left, right) => (
             (getSessionMessageRawLineCursor(right) ?? -1) - (getSessionMessageRawLineCursor(left) ?? -1)
@@ -782,6 +884,7 @@ function ChatInterface({
         ) {
           renderSnapshotNavigationReadyRef.current = true;
           renderSnapshotTopLoadLockRef.current = false;
+          scheduleRenderSnapshotHistoryWarmup();
         }
       });
     });
@@ -791,6 +894,7 @@ function ChatInterface({
     renderSnapshotState.nextHistoryOffset,
     renderSnapshotState.snapshotMessages.length,
     requestOlderRenderSnapshotRawPage,
+    scheduleRenderSnapshotHistoryWarmup,
   ]);
 
   useLayoutEffect(() => {
@@ -804,7 +908,7 @@ function ChatInterface({
       pendingRenderSnapshotScrollRestoreRevisionRef.current
       === renderSnapshotUserInteractionRevisionRef.current
     ) {
-      container.scrollTop = snapshot.top;
+      restoreSessionElementScrollPosition(snapshot, container);
     }
     pendingRenderSnapshotScrollRestoreRef.current = null;
     pendingRenderSnapshotScrollRestoreRevisionRef.current = null;
@@ -823,17 +927,18 @@ function ChatInterface({
 
     const generation = renderSnapshotGenerationRef.current;
     const baselineScrollHeight = container.scrollHeight;
-    const targetAddedHeight = Math.max(1, container.clientHeight);
-    const logicalPageScrollSnapshot = captureSessionScrollSnapshot(container);
+    const targetAddedHeight = Math.max(1, container.clientHeight * RENDER_SNAPSHOT_REVEAL_VIEWPORTS);
+    const logicalPageScrollSnapshot = captureSessionElementScrollSnapshot(container);
     const logicalPageInteractionRevision = renderSnapshotUserInteractionRevisionRef.current;
     let nextOffset = current.nextHistoryOffset;
-    let hasMoreRawHistory: boolean = current.hasMoreHistory;
+    let hasMoreRawHistory = renderSnapshotRawHistoryHasMoreRef.current;
     let bufferedMessages = [...renderSnapshotBufferedOlderRef.current];
     let requestAttempts = 0;
-    let requestedRawPage = false;
     renderSnapshotLoadingRef.current = true;
     renderSnapshotTopLoadLockRef.current = true;
-    setRenderSnapshotState((previous) => setRenderSnapshotHistoryLoading(previous, true));
+    if (bufferedMessages.length === 0) {
+      setRenderSnapshotState((previous) => setRenderSnapshotHistoryLoading(previous, true));
+    }
 
     try {
       while (
@@ -841,11 +946,16 @@ function ChatInterface({
         && (bufferedMessages.length > 0 || hasMoreRawHistory)
         && requestAttempts < RENDER_SNAPSHOT_MAX_PAGE_ATTEMPTS
       ) {
-        if ((hasMoreRawHistory && !requestedRawPage) || bufferedMessages.length === 0) {
+        if (bufferedMessages.length === 0 && renderSnapshotPrefetchPromiseRef.current) {
+          await renderSnapshotPrefetchPromiseRef.current;
+          bufferedMessages = [...renderSnapshotBufferedOlderRef.current];
+          nextOffset = renderSnapshotStateRef.current.nextHistoryOffset;
+          hasMoreRawHistory = renderSnapshotRawHistoryHasMoreRef.current;
+        }
+        if (bufferedMessages.length === 0 && hasMoreRawHistory) {
           const page = await requestOlderRenderSnapshotRawPage(nextOffset);
           requestAttempts += 1;
           if (generation !== renderSnapshotGenerationRef.current || !page) return;
-          requestedRawPage = true;
           nextOffset = page.nextOffset;
           hasMoreRawHistory = page.hasMore;
           if (page.madeProgress) {
@@ -856,13 +966,16 @@ function ChatInterface({
           if (bufferedMessages.length === 0) continue;
         }
 
-        const logicalPageSize = Math.max(1, Math.ceil(container.clientHeight / RENDER_SNAPSHOT_ESTIMATED_ROW_HEIGHT));
+        const logicalPageSize = Math.max(
+          1,
+          Math.ceil(container.clientHeight / RENDER_SNAPSHOT_ESTIMATED_ROW_HEIGHT) * RENDER_SNAPSHOT_REVEAL_VIEWPORTS,
+        );
         const logicalPage = selectRenderSnapshotFileTail(bufferedMessages, logicalPageSize);
         const logicalPageMessages = new Set(logicalPage);
         bufferedMessages = bufferedMessages.filter((message) => !logicalPageMessages.has(message));
         if (logicalPage.length === 0) break;
 
-        const scrollSnapshot = captureSessionScrollSnapshot(container);
+        const scrollSnapshot = captureSessionElementScrollSnapshot(container);
         const scrollRestoreRevision = renderSnapshotUserInteractionRevisionRef.current;
         pendingRenderSnapshotScrollRestoreRef.current = scrollSnapshot;
         pendingRenderSnapshotScrollRestoreRevisionRef.current = scrollRestoreRevision;
@@ -883,12 +996,13 @@ function ChatInterface({
           await waitForStableRenderSnapshotHeight(container, scrollSnapshot.height);
           if (generation !== renderSnapshotGenerationRef.current) return;
           if (scrollRestoreRevision === renderSnapshotUserInteractionRevisionRef.current) {
-            container.scrollTop = scrollSnapshot.top;
+            restoreSessionElementScrollPosition(scrollSnapshot, container);
           }
         }
       }
 
       renderSnapshotBufferedOlderRef.current = bufferedMessages;
+      renderSnapshotRawHistoryHasMoreRef.current = hasMoreRawHistory;
       setRenderSnapshotState((previous) => ({
         ...replaceRenderSnapshotBudget(previous, {
           messages: previous.snapshotMessages,
@@ -904,7 +1018,7 @@ function ChatInterface({
         await waitForStableRenderSnapshotHeight(container, logicalPageScrollSnapshot.height);
         if (generation !== renderSnapshotGenerationRef.current) return;
         if (logicalPageInteractionRevision === renderSnapshotUserInteractionRevisionRef.current) {
-          container.scrollTop = logicalPageScrollSnapshot.top;
+          restoreSessionElementScrollPosition(logicalPageScrollSnapshot, container);
         }
       }
     } catch (error) {
@@ -912,20 +1026,25 @@ function ChatInterface({
       setRenderSnapshotState((previous) => setRenderSnapshotHistoryLoading(previous, false));
     } finally {
       renderSnapshotLoadingRef.current = false;
-      renderSnapshotTopLoadLockRef.current = container.scrollTop <= container.clientHeight;
+      renderSnapshotTopLoadLockRef.current = container.scrollTop
+        <= container.clientHeight * RENDER_SNAPSHOT_TRIGGER_VIEWPORTS;
+      scheduleRenderSnapshotHistoryWarmup();
     }
-  }, [requestOlderRenderSnapshotRawPage]);
+  }, [requestOlderRenderSnapshotRawPage, scheduleRenderSnapshotHistoryWarmup]);
 
   const handleRenderedSnapshotScroll = useCallback((container: HTMLDivElement) => {
-    /** Trigger only when the reader enters the one-viewport history reserve. */
+    /** Trigger before the reader can consume the warmed multi-viewport reserve. */
     if (!renderSnapshotNavigationReadyRef.current) {
       return;
     }
-    if (container.scrollTop > container.clientHeight) {
+    if (container.scrollTop > container.clientHeight * RENDER_SNAPSHOT_TRIGGER_VIEWPORTS) {
       renderSnapshotTopLoadLockRef.current = false;
       return;
     }
-    if (container.scrollTop <= container.clientHeight && !renderSnapshotTopLoadLockRef.current) {
+    if (
+      container.scrollTop <= container.clientHeight * RENDER_SNAPSHOT_TRIGGER_VIEWPORTS
+      && !renderSnapshotTopLoadLockRef.current
+    ) {
       renderSnapshotTopLoadLockRef.current = true;
       void loadOlderRenderSnapshotHistory(container);
     }
@@ -938,7 +1057,7 @@ function ChatInterface({
       renderSnapshotBudgetPreparingRef.current
       || renderSnapshotLoadingRef.current
       || deltaY >= 0
-      || container.scrollTop > container.clientHeight
+      || container.scrollTop > container.clientHeight * RENDER_SNAPSHOT_TRIGGER_VIEWPORTS
     ) {
       return;
     }
@@ -1100,6 +1219,17 @@ function ChatInterface({
       onRenderSnapshotLoadingChange?.(false);
     };
   }, [onRenderSnapshotLoadingChange]);
+
+  useEffect(() => {
+    /** Cancel deferred history warm-up work when the chat surface unmounts. */
+    return () => {
+      renderSnapshotGenerationRef.current += 1;
+      if (renderSnapshotPrefetchTimerRef.current) {
+        clearTimeout(renderSnapshotPrefetchTimerRef.current);
+        renderSnapshotPrefetchTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     /** Wait for persisted rows so the reader's first snapshot is never an empty pre-hydration view. */
@@ -1859,6 +1989,8 @@ function ChatInterface({
               data-display-mode={renderSnapshotState.mode}
               data-has-more-history={String(renderSnapshotState.hasMoreHistory)}
               data-next-history-offset={renderSnapshotState.nextHistoryOffset}
+              data-history-revision={renderSnapshotState.historyRevision}
+              data-history-prefetch-state={renderSnapshotPrefetchState}
               data-history-order={renderedSnapshotHistoryOrder}
               className="relative min-h-0 flex-1 flex flex-col"
             >
@@ -1873,49 +2005,49 @@ function ChatInterface({
                 </div>
               )}
               <ChatMessagesPane
-            scrollContainerRef={renderedSnapshotScrollContainerRef}
-            onTranscriptScroll={handleRenderedSnapshotScroll}
-            onWheel={(event) => handleRenderedSnapshotWheel(event.currentTarget, event.deltaY)}
-            onTouchStart={handleRenderedSnapshotUserInteraction}
-            onTouchMove={handleRenderedSnapshotUserInteraction}
-            onKeyDown={handleRenderedSnapshotKeyDown}
-            onPointerDown={handleRenderedSnapshotUserInteraction}
-            isLoadingSessionMessages={false}
-            sessionMessagesError={sessionMessagesError}
-            chatMessages={renderSnapshotState.snapshotMessages as any[]}
-            selectedSession={selectedSession}
-            currentSessionId={currentSessionId}
-            provider={effectiveProvider}
-            setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
-            textareaRef={renderedSnapshotTextareaRef}
-            codexModel={codexModel}
-            setCodexModel={handleSetCodexModel}
-            codexModelOptions={codexModelOptions}
-            codexReasoningEffort={codexReasoningEffort}
-            setCodexReasoningEffort={handleSetCodexReasoningEffort}
-            codexReasoningOptions={codexReasoningOptions}
-            setInput={setRenderedSnapshotInput}
-            isLoadingMoreMessages={renderSnapshotState.isLoadingHistory}
-            hasMoreMessages={renderSnapshotState.hasMoreHistory}
-            totalMessages={totalMessages}
-            visibleMessageCount={renderSnapshotState.snapshotMessages.length}
-            visibleMessages={renderSnapshotState.snapshotMessages as any[]}
-            loadEarlierMessages={loadEarlierMessages}
-            loadAllMessages={loadAllMessages}
-            allMessagesLoaded={allMessagesLoaded}
-            isLoadingAllMessages={isLoadingAllMessages}
-            loadAllJustFinished={loadAllJustFinished}
-            showLoadAllOverlay={showLoadAllOverlay}
-            createDiff={createDiff}
-            onFileOpen={onFileOpen}
-            onShowSettings={onShowSettings}
-            autoExpandTools={autoExpandTools}
-            showRawParameters={showRawParameters}
-            showThinking={showThinking}
-            isFollowingLatest={isFollowingLatest}
-            selectedProject={selectedProject}
-            scrollTargetMessageKey={bookmarkScrollTargetKey}
-          />
+                scrollContainerRef={renderedSnapshotScrollContainerRef}
+                onTranscriptScroll={handleRenderedSnapshotScroll}
+                onWheel={(event) => handleRenderedSnapshotWheel(event.currentTarget, event.deltaY)}
+                onTouchStart={handleRenderedSnapshotUserInteraction}
+                onTouchMove={handleRenderedSnapshotUserInteraction}
+                onKeyDown={handleRenderedSnapshotKeyDown}
+                onPointerDown={handleRenderedSnapshotUserInteraction}
+                isLoadingSessionMessages={false}
+                sessionMessagesError={sessionMessagesError}
+                chatMessages={renderSnapshotState.snapshotMessages as any[]}
+                selectedSession={selectedSession}
+                currentSessionId={currentSessionId}
+                provider={effectiveProvider}
+                setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
+                textareaRef={renderedSnapshotTextareaRef}
+                codexModel={codexModel}
+                setCodexModel={handleSetCodexModel}
+                codexModelOptions={codexModelOptions}
+                codexReasoningEffort={codexReasoningEffort}
+                setCodexReasoningEffort={handleSetCodexReasoningEffort}
+                codexReasoningOptions={codexReasoningOptions}
+                setInput={setRenderedSnapshotInput}
+                isLoadingMoreMessages={renderSnapshotState.isLoadingHistory}
+                hasMoreMessages={renderSnapshotState.hasMoreHistory}
+                totalMessages={totalMessages}
+                visibleMessageCount={renderSnapshotState.snapshotMessages.length}
+                visibleMessages={renderSnapshotState.snapshotMessages as any[]}
+                loadEarlierMessages={loadEarlierMessages}
+                loadAllMessages={loadAllMessages}
+                allMessagesLoaded={allMessagesLoaded}
+                isLoadingAllMessages={isLoadingAllMessages}
+                loadAllJustFinished={loadAllJustFinished}
+                showLoadAllOverlay={showLoadAllOverlay}
+                createDiff={createDiff}
+                onFileOpen={onFileOpen}
+                onShowSettings={onShowSettings}
+                autoExpandTools={autoExpandTools}
+                showRawParameters={showRawParameters}
+                showThinking={showThinking}
+                isFollowingLatest={isFollowingLatest}
+                selectedProject={selectedProject}
+                scrollTargetMessageKey={bookmarkScrollTargetKey}
+              />
             </div>
           )}
 

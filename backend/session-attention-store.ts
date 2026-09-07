@@ -34,6 +34,10 @@ type BatchResult = {
   missing: string[];
 };
 
+type MarkAllResult = {
+  handledCount: number;
+};
+
 const schemaReadyDbs = new WeakSet<object>();
 
 /**
@@ -55,6 +59,7 @@ function ensureSchema(db: Database.Database): void {
       handled_revision INTEGER NOT NULL DEFAULT 0,
       manual_pending INTEGER NOT NULL DEFAULT 0,
       legacy_pending_migrated INTEGER NOT NULL DEFAULT 0,
+      conversation_revision_migrated INTEGER NOT NULL DEFAULT 1,
       handled_at TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (provider, session_id)
@@ -68,6 +73,41 @@ function ensureSchema(db: Database.Database): void {
       ALTER TABLE session_attention_ack
         ADD COLUMN legacy_pending_migrated INTEGER NOT NULL DEFAULT 0;
       UPDATE session_attention_ack SET legacy_pending_migrated = 1;
+    `);
+  }
+  if (!ackColumns.some((column) => column.name === 'conversation_revision_migrated')) {
+    /**
+     * Older builds incremented activity_revision from file mtime. If the stored
+     * conversation predates the acknowledgement, advance only those legacy
+     * acknowledgement cursors once and then retire timestamp-based repair.
+     */
+    db.exec(`
+      ALTER TABLE session_attention_ack
+        ADD COLUMN conversation_revision_migrated INTEGER NOT NULL DEFAULT 0;
+      UPDATE session_attention_ack
+      SET handled_revision = COALESCE((
+            SELECT p.activity_revision
+            FROM provider_session_index p
+            WHERE p.provider = session_attention_ack.provider
+              AND p.session_id = session_attention_ack.session_id
+          ), handled_revision),
+          conversation_revision_migrated = 1,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE conversation_revision_migrated = 0
+        AND handled_revision > 0
+        AND handled_at IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM provider_session_index p
+          WHERE p.provider = session_attention_ack.provider
+            AND p.session_id = session_attention_ack.session_id
+            AND p.activity_revision > session_attention_ack.handled_revision
+            AND julianday(p.last_activity) IS NOT NULL
+            AND julianday(p.last_activity) <= julianday(session_attention_ack.handled_at)
+        );
+      UPDATE session_attention_ack
+      SET conversation_revision_migrated = 1
+      WHERE conversation_revision_migrated = 0;
     `);
   }
   schemaReadyDbs.add(db);
@@ -148,12 +188,14 @@ function markHandled(db: Database.Database, items: ObservedAttentionIdentity[]):
     `);
     const writeAck = db.prepare(`
       INSERT INTO session_attention_ack (
-        provider, session_id, handled_revision, manual_pending, legacy_pending_migrated, handled_at, updated_at
-      ) VALUES (?, ?, ?, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        provider, session_id, handled_revision, manual_pending, legacy_pending_migrated,
+        conversation_revision_migrated, handled_at, updated_at
+      ) VALUES (?, ?, ?, 0, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(provider, session_id) DO UPDATE SET
         handled_revision = MAX(session_attention_ack.handled_revision, excluded.handled_revision),
         manual_pending = 0,
         legacy_pending_migrated = 1,
+        conversation_revision_migrated = 1,
         handled_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
     `);
@@ -181,6 +223,54 @@ function markHandled(db: Database.Database, items: ObservedAttentionIdentity[]):
 }
 
 /**
+ * 确认当前全部待处理会话，不受首页 100 条查询上限影响。
+ */
+function markAllHandled(db: Database.Database): MarkAllResult {
+  /** 业务目的：“全部处理完成”在一个事务中确认用户当时可见的全部活动版本。 */
+  ensureSchema(db);
+  const run = db.transaction((): MarkAllResult => {
+    const pending = db.prepare(`
+      SELECT p.provider, p.session_id, p.activity_revision
+      FROM provider_session_index p
+      LEFT JOIN session_attention_ack a
+        ON a.provider = p.provider AND a.session_id = p.session_id
+      WHERE (
+        p.activity_revision > COALESCE(a.handled_revision, 0)
+        OR COALESCE(a.manual_pending, 0) = 1
+      )
+        AND COALESCE(p.origin, 'manual') <> 'workflow'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM workflow_overview_index w,
+            json_each(w.workflow_json, '$.workflowOwnedSessionRefs') AS owned
+          WHERE w.visible = 1
+            AND w.normalized_project_path = p.normalized_project_path
+            AND json_extract(owned.value, '$.sessionId') = p.session_id
+            AND COALESCE(json_extract(owned.value, '$.provider'), 'codex') = p.provider
+        )
+    `).all() as Array<{ provider: string; session_id: string; activity_revision: number }>;
+    const writeAck = db.prepare(`
+      INSERT INTO session_attention_ack (
+        provider, session_id, handled_revision, manual_pending, legacy_pending_migrated,
+        conversation_revision_migrated, handled_at, updated_at
+      ) VALUES (?, ?, ?, 0, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(provider, session_id) DO UPDATE SET
+        handled_revision = MAX(session_attention_ack.handled_revision, excluded.handled_revision),
+        manual_pending = 0,
+        legacy_pending_migrated = 1,
+        conversation_revision_migrated = 1,
+        handled_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+    for (const row of pending) {
+      writeAck.run(row.provider, row.session_id, row.activity_revision);
+    }
+    return { handledCount: pending.length };
+  });
+  return run();
+}
+
+/**
  * 将旧项目配置中的 pending 真值至多迁移一次。
  */
 function migrateLegacyPending(db: Database.Database, provider: string, sessionId: string, pending: boolean): void {
@@ -192,11 +282,13 @@ function migrateLegacyPending(db: Database.Database, provider: string, sessionId
   if (!exists) throw new Error('会话不存在');
   db.prepare(`
     INSERT INTO session_attention_ack (
-      provider, session_id, handled_revision, manual_pending, legacy_pending_migrated, updated_at
-    ) VALUES (?, ?, 0, ?, 1, CURRENT_TIMESTAMP)
+      provider, session_id, handled_revision, manual_pending, legacy_pending_migrated,
+      conversation_revision_migrated, updated_at
+    ) VALUES (?, ?, 0, ?, 1, 1, CURRENT_TIMESTAMP)
     ON CONFLICT(provider, session_id) DO UPDATE SET
       manual_pending = excluded.manual_pending,
       legacy_pending_migrated = 1,
+      conversation_revision_migrated = 1,
       updated_at = CURRENT_TIMESTAMP
     WHERE session_attention_ack.legacy_pending_migrated = 0
   `).run(provider, sessionId, pending ? 1 : 0);
@@ -214,16 +306,18 @@ function setManualPending(db: Database.Database, provider: string, sessionId: st
   if (!exists) throw new Error('会话不存在');
   db.prepare(`
     INSERT INTO session_attention_ack (
-      provider, session_id, handled_revision, manual_pending, legacy_pending_migrated, updated_at
-    ) VALUES (?, ?, 0, ?, 1, CURRENT_TIMESTAMP)
+      provider, session_id, handled_revision, manual_pending, legacy_pending_migrated,
+      conversation_revision_migrated, updated_at
+    ) VALUES (?, ?, 0, ?, 1, 1, CURRENT_TIMESTAMP)
     ON CONFLICT(provider, session_id) DO UPDATE SET
       manual_pending = excluded.manual_pending,
       legacy_pending_migrated = 1,
+      conversation_revision_migrated = 1,
       updated_at = CURRENT_TIMESTAMP
   `).run(provider, sessionId, pending ? 1 : 0);
 }
 
-const sessionAttentionDb = { ensureSchema, list, markHandled, setManualPending, migrateLegacyPending };
+const sessionAttentionDb = { ensureSchema, list, markHandled, markAllHandled, setManualPending, migrateLegacyPending };
 
 export { sessionAttentionDb };
-export type { AttentionRow, BatchResult, ObservedAttentionIdentity };
+export type { AttentionRow, BatchResult, MarkAllResult, ObservedAttentionIdentity };

@@ -62,7 +62,17 @@ export function registerSessionAttentionRoutes(deps: SessionAttentionRouteDeps):
     }
   };
 
+  const markAllHandledHandler = (_req: any, res: any) => {
+    /** 用服务端单事务确认全部，避免跨设备只保留前端分页状态。 */
+    try {
+      return res.json(sessionAttentionDb.markAllHandled(db));
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || '处理全部待处理会话失败' });
+    }
+  };
+
   app.get('/api/session-attention', authenticateToken, listHandler);
   app.post('/api/session-attention/handled', authenticateToken, markHandledHandler);
+  app.post('/api/session-attention/handled-all', authenticateToken, markAllHandledHandler);
   app.put('/api/session-attention/:provider/:sessionId/pending', authenticateToken, setPendingHandler);
 }

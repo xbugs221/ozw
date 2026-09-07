@@ -164,12 +164,14 @@ test('Codex 和 Pi 索引头提取完整首尾请求', async () => {
     JSON.stringify({ type: 'event_msg', timestamp: '2026-08-30T00:00:01.000Z', payload: { type: 'user_message', message: '首条 Codex 请求\n完整第二行' } }),
     JSON.stringify({ type: 'event_msg', timestamp: '2026-08-30T00:00:02.000Z', payload: { type: 'agent_message', message: '回复' } }),
     JSON.stringify({ type: 'event_msg', timestamp: '2026-08-30T00:00:03.000Z', payload: { type: 'user_message', message: '最新 Codex 请求\n不裁剪' } }),
+    JSON.stringify({ type: 'event_msg', timestamp: '2026-08-30T00:00:04.000Z', payload: { type: 'token_count', info: {} } }),
   ].join('\n') + '\n', 'utf8');
   await fs.writeFile(piPath, [
     JSON.stringify({ type: 'session', id: 'request-copy-pi', cwd: projectPath, timestamp: '2026-08-30T00:00:00.000Z' }),
     JSON.stringify({ type: 'message', timestamp: '2026-08-30T00:00:01.000Z', message: { role: 'user', content: '首条 Pi 请求\n完整第二行' } }),
     JSON.stringify({ type: 'message', timestamp: '2026-08-30T00:00:02.000Z', message: { role: 'assistant', content: '回复' } }),
     JSON.stringify({ type: 'message', timestamp: '2026-08-30T00:00:03.000Z', message: { role: 'user', content: '最新 Pi 请求\n不裁剪' } }),
+    JSON.stringify({ type: 'message', timestamp: '2026-08-30T00:00:04.000Z', message: { role: 'toolResult', toolCallId: 'late-tool', content: '工具补写' } }),
   ].join('\n') + '\n', 'utf8');
 
   const [codexHeader, piHeader] = await Promise.all([
@@ -180,6 +182,10 @@ test('Codex 和 Pi 索引头提取完整首尾请求', async () => {
   assert.equal(codexHeader?.latestRequest, '最新 Codex 请求\n不裁剪');
   assert.equal(piHeader?.firstRequest, '首条 Pi 请求\n完整第二行');
   assert.equal(piHeader?.latestRequest, '最新 Pi 请求\n不裁剪');
+  assert.equal(codexHeader?.lastActivity, '2026-08-30T00:00:03.000Z');
+  assert.equal(piHeader?.lastActivity, '2026-08-30T00:00:03.000Z');
+  assert.equal(codexHeader?.messageCount, 3);
+  assert.equal(piHeader?.messageCount, 3);
 });
 
 test('批量确认只记录观察版本并保留并发新活动', () => {
@@ -252,6 +258,99 @@ test('Claude 文件被触碰但没有新消息时，已完成会话不会重新�
     sessionAttentionDb.list(isolatedDb, { limit: 100 }).some((row) => row.sessionId === sessionId),
     true,
   );
+  isolatedDb.close();
+});
+
+test('Codex 和 Pi 文件指纹变化但对话未变时不会重新出现', () => {
+  /** 后台回填或文件触碰不能把其他设备已确认的旧会话重新标记为待处理。 */
+  for (const provider of ['codex', 'pi']) {
+    const isolatedDb = new Database(':memory:');
+    sessionAttentionDb.ensureSchema(isolatedDb);
+    const sessionId = `${provider}-stable-conversation`;
+    const record = {
+      provider,
+      id: sessionId,
+      projectPath: `/tmp/session-attention/${provider}`,
+      title: `${provider} stable conversation`,
+      latestRequest: '已确认的用户请求',
+      filePath: `/tmp/session-attention/${provider}/${sessionId}.jsonl`,
+      createdAt: '2026-06-18T09:00:00.000Z',
+      lastActivity: '2026-06-18T09:10:00.000Z',
+      messageCount: 4,
+      messageCountKnown: true,
+      fileMtimeMs: 1_781_773_800_000,
+    };
+    providerSessionIndexDb.upsert(isolatedDb, record);
+    const observed = sessionAttentionDb.list(isolatedDb, { limit: 100 })[0];
+    sessionAttentionDb.markHandled(isolatedDb, [{
+      provider: observed.provider,
+      sessionId: observed.sessionId,
+      observedRevision: observed.activityRevision,
+    }]);
+
+    providerSessionIndexDb.upsert(isolatedDb, {
+      ...record,
+      fileMtimeMs: record.fileMtimeMs + 60_000,
+    });
+
+    assert.equal(sessionAttentionDb.list(isolatedDb, { limit: 100 }).length, 0);
+    isolatedDb.close();
+  }
+});
+
+test('历史上被文件指纹误提升的已处理会话会自动隐藏', () => {
+  /** 已处理时间晚于最后真实对话时间，证明后续版本只是旧索引噪声。 */
+  const isolatedDb = new Database(':memory:');
+  providerSessionIndexDb.ensureSchema(isolatedDb);
+  indexActivity('pi', 'legacy-file-fingerprint-revision', Date.parse('2026-06-18T09:10:00.000Z'), undefined, isolatedDb);
+  isolatedDb.exec(`
+    DROP TABLE session_attention_ack;
+    CREATE TABLE session_attention_ack (
+      provider TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      handled_revision INTEGER NOT NULL DEFAULT 0,
+      manual_pending INTEGER NOT NULL DEFAULT 0,
+      legacy_pending_migrated INTEGER NOT NULL DEFAULT 0,
+      handled_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (provider, session_id)
+    );
+  `);
+  isolatedDb.prepare(`
+    INSERT INTO session_attention_ack (
+      provider, session_id, handled_revision, manual_pending, legacy_pending_migrated, handled_at, updated_at
+    ) VALUES ('pi', 'legacy-file-fingerprint-revision', 1, 0, 1, '2026-07-21 15:12:42', '2026-07-21 15:12:42')
+  `).run();
+  isolatedDb.prepare(`
+    UPDATE provider_session_index
+    SET activity_revision = activity_revision + 1
+    WHERE provider = 'pi' AND session_id = 'legacy-file-fingerprint-revision'
+  `).run();
+
+  sessionAttentionDb.ensureSchema(isolatedDb);
+  assert.equal(sessionAttentionDb.list(isolatedDb, { limit: 100 }).length, 0);
+  const migrated = isolatedDb.prepare(`
+    SELECT handled_revision, conversation_revision_migrated
+    FROM session_attention_ack
+    WHERE provider = 'pi' AND session_id = 'legacy-file-fingerprint-revision'
+  `).get() as { handled_revision: number; conversation_revision_migrated: number };
+  assert.deepEqual(migrated, { handled_revision: 2, conversation_revision_migrated: 1 });
+  isolatedDb.close();
+});
+
+test('全部处理完成会一次确认超过首页上限的待处理会话', () => {
+  /** 按钮语义是全部，不应只处理首次查询返回的 100 条。 */
+  const isolatedDb = new Database(':memory:');
+  sessionAttentionDb.ensureSchema(isolatedDb);
+  for (let index = 0; index < 235; index += 1) {
+    indexActivity('codex', `mark-all-${index}`, 1_750_100_000_000 + index, 1_750_100_000_000 + index, isolatedDb);
+  }
+
+  assert.equal(sessionAttentionDb.list(isolatedDb, { limit: 100 }).length, 100);
+  const result = sessionAttentionDb.markAllHandled(isolatedDb);
+
+  assert.equal(result.handledCount, 235);
+  assert.equal(sessionAttentionDb.list(isolatedDb, { limit: 100 }).length, 0);
   isolatedDb.close();
 });
 

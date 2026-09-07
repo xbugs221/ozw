@@ -11,8 +11,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 const REPO_ROOT = process.cwd();
-const EXPECTED_SCHEMA_VERSION = 1;
-const EXPECTED_SCHEMA_SHA256 = '23b054813a76b2bba5f8e87ce3645cf922dbc0ddd03ca30fd4efd553836321ab';
+const EXPECTED_SCHEMA_VERSION = 2;
+const EXPECTED_SCHEMA_SHA256 = '28a8745de250bc26d15d960a192ab142202abdb38957974e0638f3a9e96efd9c';
 
 type DatabaseProbe = {
   schemaReadCount: number;

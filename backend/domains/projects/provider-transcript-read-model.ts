@@ -21,6 +21,12 @@ type JsonlReadResult = {
   totalLines: number;
 };
 
+type JsonlLineIndex = {
+  byteSize: number;
+  mtimeMs: number;
+  lineStarts: number[];
+};
+
 type CodexRecordContext = {
   goalCompletionTurnIds: Set<string>;
 };
@@ -34,6 +40,7 @@ type CodexTokenUsage = {
 };
 
 const jsonlCursorCache = new Map<string, JsonlCursor>();
+const jsonlLineIndexCache = new Map<string, JsonlLineIndex>();
 const claudeSessionFileCache = new Map<string, string>();
 const CLAUDE_HISTORY_READ_CHUNK_BYTES = 64 * 1024;
 const CLAUDE_HISTORY_MAX_READ_BYTES = 256 * 1024;
@@ -44,6 +51,15 @@ const CLAUDE_HISTORY_OVERSIZED_STATE_BASE = 500_000;
 const CLAUDE_HISTORY_DEFAULT_LIMIT = 50;
 const CLAUDE_HISTORY_MAX_LIMIT = 500;
 const CLAUDE_HEADER_TAIL_READ_BYTES = 256 * 1024;
+const JSONL_LINE_INDEX_CHUNK_BYTES = 256 * 1024;
+const JSONL_HISTORY_BATCH_LINES = 128;
+let lastJsonlHistoryReadStats = {
+  filePath: '',
+  totalLines: 0,
+  parsedLines: 0,
+  pageBytesRead: 0,
+  indexBytesRead: 0,
+};
 let lastClaudeHistoryReadStats = {
   filePath: '',
   bytesRead: 0,
@@ -93,6 +109,34 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
   let sourceSessionId = '';
   let origin = '';
   let hasSessionMeta = false;
+  let lastConversationTimestamp = '';
+  let previousConversation: { role: string; content: string; timestampMs: number | null } | null = null;
+
+  /** Count visible conversation once when Codex persists paired event/response echoes. */
+  const recordConversation = (role: 'user' | 'assistant', rawContent: unknown, timestamp: unknown): void => {
+    /** Tool, token and context rows never advance homepage attention state. */
+    const content = role === 'user'
+      ? cleanCodexUserContent(stringifyMessageContent(rawContent))
+      : stringifyMessageContent(rawContent).trim();
+    if (!content || (role === 'user' && isCodexInternalUserContent(content))) return;
+    const timestampText = typeof timestamp === 'string' ? timestamp : '';
+    const timestampMs = timestampText && !Number.isNaN(new Date(timestampText).getTime())
+      ? new Date(timestampText).getTime()
+      : null;
+    const isDuplicate = previousConversation?.role === role
+      && previousConversation.content === content
+      && previousConversation.timestampMs !== null
+      && timestampMs !== null
+      && Math.abs(timestampMs - previousConversation.timestampMs) <= 5000;
+    if (!isDuplicate) messageCount += 1;
+    previousConversation = { role, content, timestampMs };
+    if (timestampText) lastConversationTimestamp = timestampText;
+    if (role === 'user') {
+      firstUserMessage ||= content;
+      latestUserMessage = content;
+    }
+  };
+
   for await (const record of readJsonlRecords(filePath)) {
     if (typeof record.timestamp === 'string') {
       firstTimestamp ||= record.timestamp;
@@ -112,32 +156,13 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
       cwd = record.cwd;
     }
     if (record.type === 'event_msg' && record.payload?.type === 'user_message') {
-      const content = cleanCodexUserContent(stringifyMessageContent(record.payload.message));
-      if (content && !isCodexInternalUserContent(content)) {
-        messageCount += 1;
-        firstUserMessage ||= content;
-        latestUserMessage = content;
-      }
-    }
-    if (record.type === 'response_item' && record.payload?.type === 'message') {
-      messageCount += 1;
-    }
-    /**
-     * docstring: 0.147+ Codex rollouts persist user turns only as
-     * response_item.message.role=user, without emitting event_msg.user_message.
-     * Extract the first visible user request from that shape too, otherwise
-     * newly created sessions fall back to "Codex Session" until they are
-     * reformatted by a later Codex version.
-     */
-    if (
-      record.type === 'response_item'
-      && record.payload?.type === 'message'
-      && record.payload?.role === 'user'
-    ) {
-      const content = cleanCodexUserContent(stringifyMessageContent(record.payload.content));
-      if (content && !isCodexInternalUserContent(content)) {
-        firstUserMessage ||= content;
-        latestUserMessage = content;
+      recordConversation('user', record.payload.message, record.timestamp);
+    } else if (record.type === 'event_msg' && record.payload?.type === 'agent_message') {
+      recordConversation('assistant', record.payload.message, record.timestamp);
+    } else if (record.type === 'response_item' && record.payload?.type === 'message') {
+      const role = record.payload.role;
+      if (role === 'user' || role === 'assistant') {
+        recordConversation(role, record.payload.content, record.timestamp);
       }
     }
   }
@@ -156,8 +181,8 @@ export async function parseCodexSessionHeader(filePath = ''): Promise<LooseRecor
     projectPath: cwd,
     model,
     createdAt: firstTimestamp || lastTimestamp || new Date().toISOString(),
-    lastActivity: lastTimestamp || firstTimestamp || new Date().toISOString(),
-    updated_at: lastTimestamp || firstTimestamp || new Date().toISOString(),
+    lastActivity: lastConversationTimestamp || lastTimestamp || firstTimestamp || new Date().toISOString(),
+    updated_at: lastConversationTimestamp || lastTimestamp || firstTimestamp || new Date().toISOString(),
     summary: hasSessionMeta ? 'Codex Session' : fallbackTitle,
     title: fallbackTitle,
     routeTitle: firstUserRouteTitle || fallbackTitle,
@@ -218,11 +243,12 @@ export async function parsePiSessionHeader(filePath = ''): Promise<LooseRecord |
   let latestUserMessage = '';
   for await (const record of readJsonlRecords(filePath)) {
     firstRecord ||= record;
-    if (typeof record.timestamp === 'string') {
-      lastTimestamp = record.timestamp;
-    }
     if (record.type === 'message') {
-      messageCount += 1;
+      const conversationRows = piRecordToMessages(record, '', 0).filter(isConversationPaginationAnchor);
+      if (conversationRows.length > 0) {
+        messageCount += conversationRows.length;
+        if (typeof record.timestamp === 'string') lastTimestamp = record.timestamp;
+      }
       if (record.message?.role === 'user') {
         const content = stringifyMessageContent(record.message?.content).trim();
         firstUserMessage ||= content;
@@ -349,12 +375,31 @@ export async function getCodexSessionMessages(
   if (!filePath) {
     return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextMessageOffset: 0, nextRawLineOffset: 0 };
   }
+  const normalizedLimit = limit === null || limit === undefined ? null : Math.max(0, Number(limit) || 0);
+  const normalizedOffset = Math.max(0, Number(offset) || 0);
+  if (normalizeAfterLine(afterLine) === null && normalizedLimit !== null) {
+    return readIndexedJsonlHistoryPage(
+      filePath,
+      normalizedLimit,
+      normalizedOffset,
+      (records) => convertCodexMessageRecords(records, String(sessionId)),
+    );
+  }
+  const transcript = await readJsonlRecordsForMessages(filePath, afterLine);
+  const messages = convertCodexMessageRecords(transcript.records, String(sessionId));
+  return paginateMessages(messages, limit, offset, transcript.totalLines);
+}
+
+/**
+ * Convert one bounded Codex record window into chronological visible rows.
+ */
+function convertCodexMessageRecords(records: JsonlReadResult['records'], sessionId: string): LooseRecord[] {
+  /** Keep duplicate suppression and usage enrichment local to the selected window. */
   const messages: LooseRecord[] = [];
   const userEchoKeys = new Set<string>();
-  const transcript = await readJsonlRecordsForMessages(filePath, afterLine);
-  const codexContext = buildCodexRecordContext(transcript.records);
-  for (const { record, lineNumber } of transcript.records) {
-    for (const message of codexRecordToMessages(record, String(sessionId), lineNumber, codexContext)) {
+  const codexContext = buildCodexRecordContext(records);
+  for (const { record, lineNumber } of records) {
+    for (const message of codexRecordToMessages(record, sessionId, lineNumber, codexContext)) {
       if (message.type === 'user') {
         const content = String(message.message?.content || '').trim();
         if (content && userEchoKeys.has(content)) {
@@ -370,8 +415,8 @@ export async function getCodexSessionMessages(
       messages.push(message);
     }
   }
-  enrichCodexTurnsWithUsage(transcript.records, messages);
-  return paginateMessages(messages, limit, offset, transcript.totalLines);
+  enrichCodexTurnsWithUsage(records, messages);
+  return messages;
 }
 
 /**
@@ -521,12 +566,31 @@ export async function getPiSessionMessages(
   if (!filePath) {
     return { messages: [], total: 0, hasMore: false, offset: 0, limit, nextMessageOffset: 0, nextRawLineOffset: 0 };
   }
-  const messages: LooseRecord[] = [];
-  const transcript = await readJsonlRecordsForMessages(filePath, afterLine);
-  for (const { record, lineNumber } of transcript.records) {
-    messages.push(...piRecordToMessages(record, String(sessionId), lineNumber));
+  const normalizedLimit = limit === null || limit === undefined ? null : Math.max(0, Number(limit) || 0);
+  const normalizedOffset = Math.max(0, Number(offset) || 0);
+  if (normalizeAfterLine(afterLine) === null && normalizedLimit !== null) {
+    return readIndexedJsonlHistoryPage(
+      filePath,
+      normalizedLimit,
+      normalizedOffset,
+      (records) => convertPiMessageRecords(records, String(sessionId)),
+    );
   }
+  const transcript = await readJsonlRecordsForMessages(filePath, afterLine);
+  const messages = convertPiMessageRecords(transcript.records, String(sessionId));
   return paginateMessages(messages, limit, offset, transcript.totalLines);
+}
+
+/**
+ * Convert one bounded Pi record window into chronological visible rows.
+ */
+function convertPiMessageRecords(records: JsonlReadResult['records'], sessionId: string): LooseRecord[] {
+  /** Pi records are self-contained, so a history window needs no global transcript context. */
+  const messages: LooseRecord[] = [];
+  for (const { record, lineNumber } of records) {
+    messages.push(...piRecordToMessages(record, sessionId, lineNumber));
+  }
+  return messages;
 }
 
 /** Read Claude history only for an explicit messages request. */
@@ -1463,6 +1527,169 @@ function normalizeAfterLine(afterLine: unknown): number | null {
 }
 
 /**
+ * Build or reuse byte offsets for every JSONL row without parsing full payloads.
+ */
+async function getJsonlLineIndex(filePath: string): Promise<{ index: JsonlLineIndex; bytesRead: number }> {
+  /** Byte-only indexing keeps large tool payloads out of JSON.parse during tail pagination. */
+  const stat = await fs.stat(filePath);
+  const cached = jsonlLineIndexCache.get(filePath);
+  if (cached && cached.byteSize === stat.size && cached.mtimeMs === stat.mtimeMs) {
+    return { index: cached, bytesRead: 0 };
+  }
+
+  const lineStarts: number[] = stat.size > 0 ? [0] : [];
+  const handle = await fs.open(filePath, 'r');
+  const buffer = Buffer.alloc(JSONL_LINE_INDEX_CHUNK_BYTES);
+  let position = 0;
+  try {
+    while (position < stat.size) {
+      const requested = Math.min(buffer.length, stat.size - position);
+      const { bytesRead } = await handle.read(buffer, 0, requested, position);
+      if (bytesRead <= 0) break;
+      for (let index = 0; index < bytesRead; index += 1) {
+        if (buffer[index] !== 0x0a) continue;
+        const nextLineStart = position + index + 1;
+        if (nextLineStart < stat.size) lineStarts.push(nextLineStart);
+      }
+      position += bytesRead;
+    }
+  } finally {
+    await handle.close();
+  }
+
+  const index = { byteSize: stat.size, mtimeMs: stat.mtimeMs, lineStarts };
+  jsonlLineIndexCache.set(filePath, index);
+  jsonlCursorCache.set(filePath, { lineCount: lineStarts.length, byteSize: stat.size });
+  return { index, bytesRead: position };
+}
+
+/**
+ * Read and parse one indexed inclusive range of JSONL rows.
+ */
+async function readIndexedJsonlRange(
+  filePath: string,
+  index: JsonlLineIndex,
+  startLine: number,
+  endLine: number,
+): Promise<{ records: JsonlReadResult['records']; bytesRead: number }> {
+  /** Direct byte ranges make every history continuation proportional to its page. */
+  if (startLine > endLine || startLine < 1 || endLine > index.lineStarts.length) {
+    return { records: [], bytesRead: 0 };
+  }
+  const startByte = index.lineStarts[startLine - 1];
+  const endByte = endLine < index.lineStarts.length ? index.lineStarts[endLine] : index.byteSize;
+  const byteLength = Math.max(0, endByte - startByte);
+  const data = Buffer.alloc(byteLength);
+  const handle = await fs.open(filePath, 'r');
+  let position = 0;
+  try {
+    while (position < byteLength) {
+      const result = await handle.read(data, position, byteLength - position, startByte + position);
+      if (result.bytesRead <= 0) break;
+      position += result.bytesRead;
+    }
+  } finally {
+    await handle.close();
+  }
+
+  const lines = data.subarray(0, position).toString('utf8').split(/\r?\n/);
+  const records: JsonlReadResult['records'] = [];
+  const expectedLines = endLine - startLine + 1;
+  for (let offset = 0; offset < expectedLines; offset += 1) {
+    const line = lines[offset] || '';
+    if (!line.trim()) continue;
+    try {
+      const record = JSON.parse(line);
+      if (record && typeof record === 'object' && !Array.isArray(record)) {
+        records.push({ record, lineNumber: startLine + offset });
+      }
+    } catch {
+      // Malformed provider rows advance the raw cursor but remain invisible.
+    }
+  }
+  return { records, bytesRead: position };
+}
+
+/**
+ * Decide whether a reverse scan contains a complete conversation-sized page.
+ */
+function hasCompleteHistoryPage(messages: LooseRecord[], limit: number): boolean {
+  /** Stop only on a user boundary so folded process rows stay with their turn. */
+  let conversationRows = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isConversationPaginationAnchor(message)) conversationRows += 1;
+    if (conversationRows >= limit && message.type === 'user') return true;
+  }
+  return false;
+}
+
+/**
+ * Read a finite history page from EOF toward older rows using a reusable line index.
+ */
+async function readIndexedJsonlHistoryPage(
+  filePath: string,
+  limit: number,
+  offset: number,
+  convertRecords: (records: JsonlReadResult['records']) => LooseRecord[],
+): Promise<LooseRecord> {
+  /** Parse only enough reverse batches to reach a stable user-turn boundary. */
+  const indexed = await getJsonlLineIndex(filePath);
+  const totalLines = indexed.index.lineStarts.length;
+  const normalizedOffset = Math.max(0, Math.floor(offset));
+  const rawWindowEnd = Math.max(0, totalLines - normalizedOffset);
+  if (limit === 0 || rawWindowEnd === 0) {
+    lastJsonlHistoryReadStats = {
+      filePath,
+      totalLines,
+      parsedLines: 0,
+      pageBytesRead: 0,
+      indexBytesRead: indexed.bytesRead,
+    };
+    return {
+      messages: [],
+      total: totalLines,
+      hasMore: rawWindowEnd > 0,
+      offset: normalizedOffset,
+      limit,
+      nextMessageOffset: normalizedOffset,
+      nextRawLineOffset: normalizedOffset,
+    };
+  }
+
+  let scanEnd = rawWindowEnd;
+  let records: JsonlReadResult['records'] = [];
+  let messages: LooseRecord[] = [];
+  let pageBytesRead = 0;
+  while (scanEnd > 0) {
+    const scanStart = Math.max(1, scanEnd - JSONL_HISTORY_BATCH_LINES + 1);
+    const batch = await readIndexedJsonlRange(filePath, indexed.index, scanStart, scanEnd);
+    pageBytesRead += batch.bytesRead;
+    records = [...batch.records, ...records];
+    messages = convertRecords(records);
+    if (scanStart === 1 || hasCompleteHistoryPage(messages, limit)) break;
+    scanEnd = scanStart - 1;
+  }
+
+  const page = paginateMessages(messages, limit, normalizedOffset, totalLines);
+  page.hasMore = Number(page.nextRawLineOffset) < totalLines;
+  lastJsonlHistoryReadStats = {
+    filePath,
+    totalLines,
+    parsedLines: records.length,
+    pageBytesRead,
+    indexBytesRead: indexed.bytesRead,
+  };
+  return page;
+}
+
+/** Return bounded Codex/Pi history diagnostics for regression tests. */
+export function getJsonlHistoryReadStatsForTest(): typeof lastJsonlHistoryReadStats {
+  /** Expose a copy so callers cannot mutate reader state. */
+  return { ...lastJsonlHistoryReadStats };
+}
+
+/**
  * Read a whole JSONL file for initial loads and cache misses.
  */
 async function readJsonlFull(filePath: string): Promise<JsonlReadResult> {
@@ -2085,30 +2312,60 @@ function piAssistantPartsToMessages(content: unknown[], record: LooseRecord, ses
   return messages;
 }
 
+/** Return whether a normalized row advances the user-visible conversation. */
+function isConversationPaginationAnchor(message: LooseRecord): boolean {
+  /** Folded thinking and tool rows stay attached to a page but never consume its conversation quota. */
+  return message.type === 'user'
+    || (message.type === 'assistant' && message.isTaskNotification !== true);
+}
+
 /**
- * Apply raw JSONL line offset/limit to a message list.
+ * Page backwards by conversation content while retaining a stable raw-line cursor.
  */
 function paginateMessages(messages: LooseRecord[], limit: unknown, offset: unknown, total: number = messages.length): LooseRecord {
   const normalizedOffset = Math.max(0, Number(offset) || 0);
   const normalizedLimit = limit === null || limit === undefined ? null : Math.max(0, Number(limit) || 0);
-  const rawWindowStart = normalizedLimit === null
-    ? 0
-    : Math.max(0, total - normalizedOffset - normalizedLimit);
   const rawWindowEnd = normalizedLimit === null
     ? total
     : Math.max(0, total - normalizedOffset);
-  const offsetMessages = messages.filter((message) => {
+  if (normalizedLimit === 0) {
+    return {
+      messages: [],
+      total,
+      hasMore: false,
+      offset: normalizedOffset,
+      limit: normalizedLimit,
+      nextMessageOffset: normalizedOffset,
+      nextRawLineOffset: normalizedOffset,
+    };
+  }
+
+  let rawWindowStart = 0;
+  if (normalizedLimit !== null) {
+    let conversationRows = 0;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      const rawLine = getMessageRawLineNumber(message);
+      if (rawLine <= 0 || rawLine > rawWindowEnd) continue;
+      rawWindowStart = Math.max(0, rawLine - 1);
+      if (isConversationPaginationAnchor(message)) conversationRows += 1;
+      if (conversationRows >= normalizedLimit && message.type === 'user') break;
+    }
+  }
+
+  const page = messages.filter((message) => {
     const rawLine = getMessageRawLineNumber(message);
     return rawLine > rawWindowStart && rawLine <= rawWindowEnd;
   });
-  const page = normalizedLimit === null
-    ? offsetMessages
-    : offsetMessages;
-  const nextRawLineOffset = normalizedLimit === null ? total : Math.min(total, normalizedOffset + normalizedLimit);
+  const hasMore = normalizedLimit !== null && messages.some((message) => {
+    const rawLine = getMessageRawLineNumber(message);
+    return rawLine > 0 && rawLine <= rawWindowStart;
+  });
+  const nextRawLineOffset = normalizedLimit === null ? total : Math.max(normalizedOffset, total - rawWindowStart);
   return {
     messages: page,
     total,
-    hasMore: normalizedLimit !== null ? total > nextRawLineOffset : false,
+    hasMore,
     offset: normalizedOffset,
     limit: normalizedLimit,
     nextMessageOffset: nextRawLineOffset,
