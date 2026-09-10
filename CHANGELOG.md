@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.8 - 2026-09-10
+
+### Highlights
+- Prevents release pushes with inconsistent tag and package versions.
+- Adds an automatic pre-push guard for safer release operations.
+
+### Changes
+- Release tooling: added pushed-release-tag validation and wired it into the pre-push hook.
+
+### Quality
+- Strengthened release-process coverage with automated local tag/version consistency checks.
+
 本文件记录 ozw 的版本变更。条目由发布流程（`scripts/update-changelog.ts` 与 `release.sh`）在打标签时维护，依据标签区间的真实差异汇总，而非机械罗列提交信息。
 
 ## v1.3.5 - 2026-08-07
