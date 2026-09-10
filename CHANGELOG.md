@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.11 - 2026-09-10
+
+### Highlights
+- npm package auditing now works correctly on Windows.
+- Release verification is more reliable across supported platforms.
+
+### Changes
+- **Packaging:** Updated npm package verification to handle Windows-specific audit behavior.
+
+### Quality
+- Strengthened release-process coverage through the npm package audit verification path.
+
 ## v1.4.10 - 2026-09-10
 
 ### Highlights
