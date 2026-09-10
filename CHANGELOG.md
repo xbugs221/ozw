@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.12 - 2026-09-10
+
+### Highlights
+- Improved Windows npm distribution launcher coverage.
+- Increased confidence in Windows global CLI installation behavior.
+
+### Changes
+- **npm distribution:** Corrected launcher test coverage for Windows packaging scenarios.
+
+### Quality
+- Updated `npm-global-distribution` specification tests to validate the Windows launcher path.
+
 ## v1.4.11 - 2026-09-10
 
 ### Highlights
