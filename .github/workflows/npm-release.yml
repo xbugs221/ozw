@@ -138,7 +138,7 @@ jobs:
           OZW_TEST_PREFIX: ${{ runner.temp }}/ozw-global
         run: >-
           npm install --global --prefix "${{ env.OZW_TEST_PREFIX }}"
-          "${{ steps.candidate.outputs.tarball }}"
+          "${{ github.workspace }}/${{ steps.candidate.outputs.tarball }}"
 
       - name: Exercise native modules, user state, and startup
         env:
@@ -371,7 +371,7 @@ jobs:
         run: node scripts/verify-npm-package.mjs "${{ steps.candidate.outputs.tarball }}"
 
       - name: Publish the same tested tarball
-        run: npm publish "${{ steps.candidate.outputs.tarball }}" --access public
+        run: npm publish "${{ github.workspace }}/${{ steps.candidate.outputs.tarball }}" --access public
 
   verify-published:
     name: Verify public registry package
@@ -415,6 +415,6 @@ jobs:
           published_tarball="$(node --input-type=module -e "import fs from 'node:fs'; import path from 'node:path'; const result = JSON.parse(fs.readFileSync('published/npm-pack.json', 'utf8')); const candidate = result[0]; if (result.length !== 1 || candidate.name !== 'ozw' || candidate.version !== process.argv[1]) throw new Error('Public package identity mismatch'); process.stdout.write(path.join('published', candidate.filename))" "${PACKAGE_VERSION}")"
           node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; const manifest = JSON.parse(fs.readFileSync('candidate/npm-package.sha256.json', 'utf8')); const actual = crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'); if (actual !== manifest.sha256) throw new Error('Public registry tarball differs from tested candidate')" "${published_tarball}"
           node scripts/verify-npm-package.mjs "${published_tarball}"
-          npm install --global "${published_tarball}"
+          npm install --global "${GITHUB_WORKSPACE}/${published_tarball}"
           test "$(ozw --version)" = "${PACKAGE_VERSION}"
           ozw --help
