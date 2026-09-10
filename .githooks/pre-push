@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# PURPOSE: Run release-tag consistency checks before Git pushes refs.
+set -euo pipefail
+
+exec ./scripts/check-pushed-release-tags.sh
