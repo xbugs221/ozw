@@ -106,7 +106,12 @@ function readPackMetadata(tarballPath) {
   const stdout = execFileSync(
     npmCommand,
     ['pack', tarballPath, '--dry-run', '--ignore-scripts', '--json'],
-    { cwd: repositoryRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
+    },
   );
   const result = JSON.parse(stdout);
   if (!Array.isArray(result) || result.length !== 1 || !Array.isArray(result[0]?.files)) {
