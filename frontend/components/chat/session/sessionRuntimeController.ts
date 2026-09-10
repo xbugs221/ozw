@@ -322,7 +322,14 @@ export function useChatSessionState({
   );
 
   const loadSessionMessages = useCallback(
-    async (projectName: string, sessionId: string, loadMore = false, provider: string = 'codex', projectPath: string = '') => {
+    async (
+      projectName: string,
+      sessionId: string,
+      loadMore = false,
+      provider: string = 'codex',
+      projectPath: string = '',
+      requestGeneration = sessionLoadGenRef.current,
+    ) => {
       const isInitialLoad = !loadMore;
       if (isInitialLoad) {
         setIsLoadingSessionMessages(true);
@@ -350,6 +357,12 @@ export function useChatSessionState({
           projectPath,
           loadMore ? historySnapshotRawLineOffsetRef.current : null,
         );
+        if (!isCurrentSessionLoadGeneration({
+          current: sessionLoadGenRef.current,
+          incoming: requestGeneration,
+        })) {
+          return [];
+        }
         if (result.historySnapshotRawLineOffset !== null) {
           historySnapshotRawLineOffsetRef.current = result.historySnapshotRawLineOffset;
           setHistorySnapshotRawLineOffset(result.historySnapshotRawLineOffset);
@@ -393,10 +406,15 @@ export function useChatSessionState({
         messagesOffsetRef.current = result.nextMessageOffset ?? result.nextRawLineOffset ?? messages.length;
         return messages;
       } finally {
-        if (isInitialLoad) {
-          setIsLoadingSessionMessages(false);
-        } else {
-          setIsLoadingMoreMessages(false);
+        if (isCurrentSessionLoadGeneration({
+          current: sessionLoadGenRef.current,
+          incoming: requestGeneration,
+        })) {
+          if (isInitialLoad) {
+            setIsLoadingSessionMessages(false);
+          } else {
+            setIsLoadingMoreMessages(false);
+          }
         }
       }
     },
@@ -949,6 +967,7 @@ export function useChatSessionState({
             false,
             sessionProvider,
             sessionProjectPath,
+            gen,
           );
           // Discard stale result: another session switch happened while we were loading.
           if (!isCurrentSessionLoadGeneration({ current: sessionLoadGenRef.current, incoming: gen })) {
