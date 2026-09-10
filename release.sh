@@ -60,14 +60,23 @@ const path = 'package.json';
 const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
 pkg.version = '$package_version';
 fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+const shrinkwrapPath = 'npm-shrinkwrap.json';
+if (fs.existsSync(shrinkwrapPath)) {
+  const shrinkwrap = JSON.parse(fs.readFileSync(shrinkwrapPath, 'utf8'));
+  shrinkwrap.version = '$package_version';
+  if (shrinkwrap.packages && shrinkwrap.packages['']) {
+    shrinkwrap.packages[''].version = '$package_version';
+  }
+  fs.writeFileSync(shrinkwrapPath, JSON.stringify(shrinkwrap, null, 2) + '\n');
+}
 "
 
   if [[ -n "$(git tag --list)" ]]; then
     pnpm run changelog:update -- --version "$tag_name"
-    git add package.json CHANGELOG.md
+    git add package.json npm-shrinkwrap.json CHANGELOG.md
   else
     echo "Skipping CHANGELOG for first release tag $tag_name."
-    git add package.json
+    git add package.json npm-shrinkwrap.json
   fi
 
   if git diff --cached --quiet; then

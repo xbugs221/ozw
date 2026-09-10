@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.4.9 - 2026-09-10
+
+### Highlights
+- Corrected npm shrinkwrap release metadata for version 1.4.9.
+- Improved consistency of the published package version.
+
+### Changes
+- **Release packaging**
+  - Updated `npm-shrinkwrap.json` to match the 1.4.9 release version.
+
+### Quality
+- Release metadata was aligned across the npm package artifacts.
+
 ## v1.4.8 - 2026-09-10
 
 ### Highlights
