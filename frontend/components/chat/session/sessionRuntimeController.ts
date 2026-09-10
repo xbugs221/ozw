@@ -60,6 +60,7 @@ import {
   isCurrentSessionLoadGeneration,
   nextSessionLoadGeneration,
 } from './terminalReconcileController';
+import { runGenerationFencedSessionLoad } from './sessionLoadGenerationFence';
 import {
   getSessionLoadId,
   getSessionViewIdentityKey,
@@ -338,85 +339,85 @@ export function useChatSessionState({
         setIsLoadingMoreMessages(true);
       }
 
-      try {
-        const currentOffset = loadMore ? messagesOffsetRef.current : 0;
-        const requestWindow = loadMore
-          ? createOlderSessionMessageWindow(currentOffset)
-          : createInitialSessionMessageWindow();
-        const requestedHistoryCursor = provider === 'hermes' && loadMore
-          ? oldestHistoryCursorRef.current
-          : requestWindow.afterCursor;
-        const result = await fetchSessionMessages(
-          projectName,
-          sessionId,
-          requestWindow.limit,
-          requestWindow.offset,
-          provider,
-          requestWindow.afterLine,
-          requestedHistoryCursor,
-          projectPath,
-          loadMore ? historySnapshotRawLineOffsetRef.current : null,
-        );
-        if (!isCurrentSessionLoadGeneration({
+      return runGenerationFencedSessionLoad({
+        load: async () => {
+          const currentOffset = loadMore ? messagesOffsetRef.current : 0;
+          const requestWindow = loadMore
+            ? createOlderSessionMessageWindow(currentOffset)
+            : createInitialSessionMessageWindow();
+          const requestedHistoryCursor = provider === 'hermes' && loadMore
+            ? oldestHistoryCursorRef.current
+            : requestWindow.afterCursor;
+          const result = await fetchSessionMessages(
+            projectName,
+            sessionId,
+            requestWindow.limit,
+            requestWindow.offset,
+            provider,
+            requestWindow.afterLine,
+            requestedHistoryCursor,
+            projectPath,
+            loadMore ? historySnapshotRawLineOffsetRef.current : null,
+          );
+          return { currentOffset, requestedHistoryCursor, result };
+        },
+        isCurrent: () => isCurrentSessionLoadGeneration({
           current: sessionLoadGenRef.current,
           incoming: requestGeneration,
-        })) {
-          return [];
-        }
-        if (result.historySnapshotRawLineOffset !== null) {
-          historySnapshotRawLineOffsetRef.current = result.historySnapshotRawLineOffset;
-          setHistorySnapshotRawLineOffset(result.historySnapshotRawLineOffset);
-        }
-        if (result.appendCursor !== null) {
-          latestAppendCursorRef.current = result.appendCursor;
-        }
-        if (provider === 'hermes') {
-          oldestHistoryCursorRef.current = result.nextCursor;
-        }
-        if (isInitialLoad && result.tokenUsage) {
-          setTokenBudget(result.tokenUsage);
-        }
-        if (isInitialLoad && result.error) {
-          setSessionMessagesError(result.error);
-        }
-        advanceLatestRawLineCursor(result.messages, result.nextRawLineOffset);
+        }),
+        commit: ({ currentOffset, requestedHistoryCursor, result }) => {
+          if (result.historySnapshotRawLineOffset !== null) {
+            historySnapshotRawLineOffsetRef.current = result.historySnapshotRawLineOffset;
+            setHistorySnapshotRawLineOffset(result.historySnapshotRawLineOffset);
+          }
+          if (result.appendCursor !== null) {
+            latestAppendCursorRef.current = result.appendCursor;
+          }
+          if (provider === 'hermes') {
+            oldestHistoryCursorRef.current = result.nextCursor;
+          }
+          if (isInitialLoad && result.tokenUsage) {
+            setTokenBudget(result.tokenUsage);
+          }
+          if (isInitialLoad && result.error) {
+            setSessionMessagesError(result.error);
+          }
+          advanceLatestRawLineCursor(result.messages, result.nextRawLineOffset);
 
-        if (result.total > 0 || result.hasMore) {
-          const loadedCount = result.messages.length;
-          const nextOffset = result.nextMessageOffset ?? result.nextRawLineOffset ?? (currentOffset + loadedCount);
-          const moreAvailable = provider === 'hermes'
-            ? canContinueSessionHistory({
-              provider,
-              hasMore: result.hasMore,
-              nextCursor: result.nextCursor,
-              currentCursor: requestedHistoryCursor,
-            })
-            : (result.total > 0 ? result.total > nextOffset : result.hasMore);
-          hasMoreMessagesRef.current = moreAvailable;
-          setHasMoreMessages(moreAvailable);
-          setTotalMessages(result.total > 0 ? result.total : loadedCount);
-          messagesOffsetRef.current = nextOffset;
-          return result.messages;
-        }
+          if (result.total > 0 || result.hasMore) {
+            const loadedCount = result.messages.length;
+            const nextOffset = result.nextMessageOffset ?? result.nextRawLineOffset ?? (currentOffset + loadedCount);
+            const moreAvailable = provider === 'hermes'
+              ? canContinueSessionHistory({
+                provider,
+                hasMore: result.hasMore,
+                nextCursor: result.nextCursor,
+                currentCursor: requestedHistoryCursor,
+              })
+              : (result.total > 0 ? result.total > nextOffset : result.hasMore);
+            hasMoreMessagesRef.current = moreAvailable;
+            setHasMoreMessages(moreAvailable);
+            setTotalMessages(result.total > 0 ? result.total : loadedCount);
+            messagesOffsetRef.current = nextOffset;
+            return result.messages;
+          }
 
-        const messages = result.messages;
-        hasMoreMessagesRef.current = false;
-        setHasMoreMessages(false);
-        setTotalMessages(messages.length);
-        messagesOffsetRef.current = result.nextMessageOffset ?? result.nextRawLineOffset ?? messages.length;
-        return messages;
-      } finally {
-        if (isCurrentSessionLoadGeneration({
-          current: sessionLoadGenRef.current,
-          incoming: requestGeneration,
-        })) {
+          const messages = result.messages;
+          hasMoreMessagesRef.current = false;
+          setHasMoreMessages(false);
+          setTotalMessages(messages.length);
+          messagesOffsetRef.current = result.nextMessageOffset ?? result.nextRawLineOffset ?? messages.length;
+          return messages;
+        },
+        finish: () => {
           if (isInitialLoad) {
             setIsLoadingSessionMessages(false);
           } else {
             setIsLoadingMoreMessages(false);
           }
-        }
-      }
+        },
+        staleResult: [],
+      });
     },
     [advanceLatestRawLineCursor, fetchSessionMessages],
   );
