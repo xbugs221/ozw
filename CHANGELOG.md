@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.10 - 2026-09-10
+
+### Highlights
+- Fixed npm release tarball paths in the automated publishing workflow.
+- Improved reliability of global npm package publication for operators.
+
+### Changes
+- **Release workflow:** Corrected tarball path handling in `.github/workflows/npm-release.yml`.
+
+### Quality
+- npm global distribution behavior remains documented and covered by the tracked distribution specification tests.
+
 ## v1.4.9 - 2026-09-10
 
 ### Highlights
