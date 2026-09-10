@@ -1,12 +1,12 @@
 {
   "name": "ozw",
-  "version": "1.4.0",
+  "version": "1.4.8",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "ozw",
-      "version": "1.4.0",
+      "version": "1.4.8",
       "license": "GPL-3.0",
       "dependencies": {
         "@earendil-works/pi-coding-agent": "^0.75.5",
