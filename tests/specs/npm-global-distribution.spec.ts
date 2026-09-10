@@ -59,6 +59,7 @@ async function run(command: string, args: string[], options: { cwd?: string; env
     env: options.env ?? process.env,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
+    shell: process.platform === 'win32',
   });
 }
 
@@ -197,6 +198,7 @@ async function startInstalledServer(
     cwd: target.root,
     env: targetEnvironment(target, overrides),
     stdio: ['ignore', 'pipe', 'pipe'],
+    shell: process.platform === 'win32',
   });
   child.stdout.on('data', chunk => { stdout += String(chunk); });
   child.stderr.on('data', chunk => { stderr += String(chunk); });
