@@ -1,3 +1,4 @@
+# PURPOSE: Keep local commits fast while enforcing full Node and isolated browser checks on GitHub.
 name: CI
 
 on:
@@ -30,10 +31,15 @@ jobs:
       - name: Node spec tests
         run: pnpm run test:ci
 
-  browser-checks:
-    name: Browser specs
+  browser-specs:
+    name: Browser specs (${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      # A failed shard must not cancel the other shards or hide their results.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     steps:
       - name: Check out repository
@@ -56,4 +62,32 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Browser specification tests
-        run: pnpm run test:spec:browser
+        # Each runner owns its HOME, database and servers; retain one worker per runner.
+        # Leave time for teardown and report upload before the job's hard deadline.
+        run: pnpm exec playwright test --config=playwright.ci.config.ts --shard=${{ matrix.shard }}/8 --global-timeout=900000 --reporter=line,html
+        env:
+          PLAYWRIGHT_HTML_OPEN: never
+
+      - name: Upload browser results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-results-${{ matrix.shard }}
+          path: |
+            playwright-report/
+            tests/test-results/
+          retention-days: 7
+
+  browser-checks:
+    name: Browser specs
+    needs: browser-specs
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every browser shard to pass
+        env:
+          BROWSER_RESULT: ${{ needs.browser-specs.result }}
+        run: |
+          echo "Browser shards: $BROWSER_RESULT"
+          test "$BROWSER_RESULT" = success
