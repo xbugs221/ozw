@@ -234,8 +234,18 @@ export async function openFixtureProject(page, options = {}) {
   }
 
   await expect(page.getByRole('button', { name: /sign in/i })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^fixture-project\b/i }).first()).toBeVisible();
-  await page.getByRole('button', { name: /^fixture-project\b/i }).first().click();
+  const fixtureProjectButton = page.getByRole('button', { name: /^fixture-project\b/i }).first();
+  if (await fixtureProjectButton.count() === 0) {
+    const inactiveProjects = page.getByTestId('sidebar-inactive-projects');
+    if (await inactiveProjects.count() > 0) {
+      const inactiveToggle = inactiveProjects.getByRole('button').first();
+      if (await inactiveToggle.getAttribute('aria-expanded') !== 'true') {
+        await inactiveToggle.click();
+      }
+    }
+  }
+  await expect(fixtureProjectButton).toBeVisible();
+  await fixtureProjectButton.click();
   await expect(page.locator('body')).not.toContainText('Loading...');
   await expect(page.getByTestId('project-workspace-overview')).toBeVisible();
 }

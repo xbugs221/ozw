@@ -74,8 +74,14 @@ export type CurrentTmuxSessionDependencies = {
   getCodexSessions: (projectPath?: string, options?: LooseRecord) => Promise<LooseRecord[]> | LooseRecord[];
   getPiSessions: (projectPath?: string, options?: LooseRecord) => Promise<LooseRecord[]> | LooseRecord[];
   getClaudeSessions: (projectPath?: string, options?: LooseRecord) => Promise<LooseRecord[]> | LooseRecord[];
-  execFile?: typeof execFileAsync;
+  execFile?: TmuxExecutor;
 };
+
+type TmuxExecutor = (
+  file: string,
+  args?: readonly string[],
+  options?: { timeout?: number },
+) => Promise<{ stdout: string; stderr: string }>;
 
 const ROW_SEPARATOR = '\t';
 const CLIENT_FORMAT = [
@@ -308,7 +314,7 @@ function chooseSession(
 }
 
 async function runTmux(
-  executor: typeof execFileAsync,
+  executor: TmuxExecutor,
   args: string[],
 ): Promise<TmuxCommandResult> {
   /** Execute only bounded, read-only tmux queries for this resolver. */

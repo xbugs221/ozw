@@ -204,8 +204,8 @@ test.describe('项目内需求工作流控制面', () => {
     await expect(page.getByTestId('project-overview-session-bulk-toolbar')).toContainText('已选 2 个');
 
     await page.getByTestId('project-overview-bulk-pending').click();
-    await expect(manualSessionsPanel.getByRole('button', { name: /fixture-project manu.*待处理/ })).toBeVisible();
-    await expect(manualSessionsPanel.getByRole('button', { name: /fixture-project seco.*待处理/ })).toBeVisible();
+    await expect(manualSessionsPanel.getByRole('button', { name: /fixture-project manu.*待办/ })).toBeVisible();
+    await expect(manualSessionsPanel.getByRole('button', { name: /fixture-project seco.*待办/ })).toBeVisible();
 
     await page.getByTestId('project-overview-bulk-hide').click();
     await expect(manualSessionsPanel.getByRole('button', { name: /fixture-project manu/ })).toHaveCount(0);

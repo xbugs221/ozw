@@ -72,19 +72,31 @@ run_affected_tests() {
     esac
   done < <(node scripts/list-staged-tests.mjs "${staged_files[@]}")
 
+  local -a pids=()
+  local failed=0
   if ((${#unit_tests[@]})); then
-    pnpm exec vitest run --config vitest.config.ts "${unit_tests[@]}"
+    pnpm exec vitest run --config vitest.config.ts "${unit_tests[@]}" & pids+=("$!")
   fi
   if ((${#backend_tests[@]})); then
     rm -rf .tmp/test-db/pre-commit-backend
-    DATABASE_PATH=.tmp/test-db/pre-commit-backend/ozw.db pnpm exec tsx --test --test-concurrency=1 "${backend_tests[@]}"
+    DATABASE_PATH=.tmp/test-db/pre-commit-backend/ozw.db pnpm exec tsx --test --test-concurrency=1 "${backend_tests[@]}" & pids+=("$!")
   fi
   if ((${#node_specs[@]})); then
     rm -rf .tmp/test-db/pre-commit-spec
-    DATABASE_PATH=.tmp/test-db/pre-commit-spec/ozw.db pnpm exec tsx --test "${node_specs[@]}"
+    DATABASE_PATH=.tmp/test-db/pre-commit-spec/ozw.db pnpm exec tsx --test "${node_specs[@]}" & pids+=("$!")
+  fi
+  for pid in "${pids[@]}"; do
+    if ! wait "$pid"; then failed=1; fi
+  done
+  if ((failed)); then
+    return 1
   fi
   if ((${#browser_specs[@]})); then
-    pnpm exec playwright test --config=playwright.spec.config.ts "${browser_specs[@]}"
+    if [[ "${OZW_PRECOMMIT_BROWSER:-0}" == "1" ]]; then
+      pnpm exec playwright test --config=playwright.spec.config.ts "${browser_specs[@]}"
+    else
+      echo "[pre-commit] Browser specs deferred to CI (set OZW_PRECOMMIT_BROWSER=1 to run locally)."
+    fi
   fi
   if ((${#e2e_tests[@]})); then
     pnpm exec playwright test "${e2e_tests[@]}"
