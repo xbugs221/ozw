@@ -52,6 +52,23 @@ const PROVIDER_INDEX_HOME_BUDGET_MS = (() => {
 })();
 
 /**
+ * Read the current project activity before a manual row is upserted.
+ */
+function readIndexedProjectActivity(projectPath: string): string | undefined {
+  /** PURPOSE: Preserve recent provider activity when a user pins an existing path manually. */
+  const normalizedPath = normalizeProjectPath(projectPath);
+  if (!normalizedPath) {
+    return undefined;
+  }
+  const existing = projectIndexDb.listRecords(db).find((row) => (
+    normalizeProjectPath(String(row.projectPath || '')) === normalizedPath
+  ));
+  return typeof existing?.lastActivity === 'string' && existing.lastActivity.trim()
+    ? existing.lastActivity
+    : undefined;
+}
+
+/**
  * Test hooks for project discovery filtering behavior.
  */
 export const __projectDiscoveryForTest = {
@@ -177,6 +194,7 @@ export async function getProjects(_progress: unknown = null, options: LooseRecor
  */
 export async function addProjectManually(projectPath = '', displayName: string | null = null): Promise<LooseRecord> {
   const normalizedPath = normalizeProjectPath(projectPath);
+  const indexedActivity = readIndexedProjectActivity(normalizedPath);
   const config = await loadProjectConfig();
   const projectName = createProjectName(normalizedPath, config);
   const displayNameByPath = isPlainRecord(config[DISPLAY_NAME_BY_PATH_KEY])
@@ -200,10 +218,15 @@ export async function addProjectManually(projectPath = '', displayName: string |
     routePath: buildProjectRoutePath(normalizedPath),
     source: 'manual',
     visible: true,
+    lastActivity: indexedActivity || null,
     syncState: 'ready',
   });
   clearProjectDirectoryCache();
-  return buildProjectSummary(projectName, normalizedPath, config, true);
+  const project = buildProjectSummary(projectName, normalizedPath, config, true);
+  if (indexedActivity) {
+    project.lastActivity = indexedActivity;
+  }
+  return project;
 }
 
 /**

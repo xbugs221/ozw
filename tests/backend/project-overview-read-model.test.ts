@@ -6,7 +6,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildProjectOverviewReadModel } from '../../backend/domains/projects/project-overview-read-model.ts';
+import {
+  buildProjectOverviewReadModel,
+  summarizeProjectForList,
+} from '../../backend/domains/projects/project-overview-read-model.ts';
+
+test('project list summary keeps the newest activity from nested project rows', () => {
+  /**
+   * PURPOSE: Keep the sidebar activity cutoff usable when a legacy project
+   * object carries timestamps only on provider sessions or workflows.
+   */
+  const summary = summarizeProjectForList({
+    name: 'activity-project',
+    displayName: 'Activity Project',
+    fullPath: '/tmp/activity-project',
+    lastActivity: '2026-06-17T10:00:00.000Z',
+    codexSessions: [
+      { id: 'old-session', lastActivity: '2026-06-17T11:00:00.000Z' },
+      { id: 'new-session', updated_at: '2026-06-17T13:00:00.000Z' },
+    ],
+    workflows: [{ id: 'run-1', updatedAt: '2026-06-17T12:00:00.000Z' }],
+  });
+
+  assert.equal(summary.lastActivity, '2026-06-17T13:00:00.000Z');
+  assert.equal('codexSessions' in summary, false);
+  assert.equal('workflows' in summary, false);
+});
 
 test('project overview filters workflow-owned sessions from diagnostics sources', async () => {
   /**

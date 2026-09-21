@@ -11,6 +11,7 @@ import type {
     ProjectLike,
     WorkflowLike,
 } from './route-deps.js';
+import { resolveCurrentTmuxSession } from '../current-tmux-session.js';
 
 export interface ProjectRouteDeps {
     app: HttpRouteApp;
@@ -229,6 +230,29 @@ const createProjectHandler = async (req: any, res: any) => {
 
 
     app.get('/api/projects', authenticateToken, listProjectsHandler);
+    app.get('/api/projects/:projectName/current-tmux-session', authenticateToken, async (req: any, res: any) => {
+        /** Resolve the actual focused pane before the Render tab chooses a transcript. */
+        const projectPath = String(req.query?.projectPath || '').trim();
+        if (!projectPath) return res.status(400).json({ error: 'projectPath is required' });
+        try {
+            return res.json(await resolveCurrentTmuxSession(projectPath, {
+                getCodexSessions: getCodexSessions as any,
+                getPiSessions: getPiSessions as any,
+                getClaudeSessions: getClaudeSessions as any,
+            }));
+        } catch (error: any) {
+            console.warn('[projects/current-tmux-session] Resolution failed:', error?.message || error);
+            return res.json({
+                status: 'unresolved',
+                session: null,
+                provider: null,
+                routeSessionId: null,
+                providerSessionId: null,
+                evidence: null,
+                reason: 'resolver-error',
+            });
+        }
+    });
     app.get('/api/hermes/unscoped-sessions', authenticateToken, async (_req: any, res: any) => {
         try {
             res.json(await refreshUnscopedHermes());

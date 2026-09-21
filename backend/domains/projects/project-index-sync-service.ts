@@ -446,6 +446,9 @@ async function backfillManualProjects(config: LooseRecord): Promise<number> {
     if (!projectPath) {
       continue;
     }
+    const existingProject = projectIndexDb.listRecords(db).find((row) => (
+      normalizeProjectPath(String(row.projectPath || '')) === projectPath
+    ));
     const visible = await projectDirectoryExists(projectPath);
     projectIndexDb.upsert(db, {
       projectId: projectPath,
@@ -456,6 +459,9 @@ async function backfillManualProjects(config: LooseRecord): Promise<number> {
       source: 'manual',
       visible,
       visibilityReason: visible ? null : 'manual-path-missing',
+      lastActivity: typeof existingProject?.lastActivity === 'string'
+        ? existingProject.lastActivity
+        : null,
       syncState: visible ? 'ready' : 'hidden',
     });
     if (visible) {

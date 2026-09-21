@@ -1,5 +1,6 @@
 {
   "projects": {
+    "inactive": "非活跃",
     "title": "项目",
     "newProject": "新建项目",
     "deleteProject": "删除项目",

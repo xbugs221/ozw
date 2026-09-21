@@ -353,6 +353,8 @@ export interface Project {
   sessionMeta?: ProjectSessionMeta;
   manualSessionNextRouteIndex?: number;
   hasUnreadActivity?: boolean;
+  lastActivity?: string;
+  updatedAt?: string;
   [key: string]: unknown;
 }
 

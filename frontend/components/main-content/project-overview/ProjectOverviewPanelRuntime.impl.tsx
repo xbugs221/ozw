@@ -423,7 +423,10 @@ export default function ProjectOverviewPanel({
   const visibleSessions = sessionEntries
     .filter((session) => showHiddenItems || (session.hidden !== true && session.archived !== true));
   const hiddenSessionCount = sessionEntries.filter((session) => session.hidden === true || session.archived === true).length;
-  const [workflowExpanded, setWorkflowExpanded] = useState(() => displayMode === 'all' || displayMode === 'workflows');
+  // The project homepage keeps the workflow checklist out of the initial
+  // viewport; a workflow-only view remains expanded because that view is an
+  // explicit request to inspect workflow entries.
+  const [workflowExpanded, setWorkflowExpanded] = useState(() => displayMode === 'workflows');
   const [showAllWorkflowGroups, setShowAllWorkflowGroups] = useState(false);
   const [showAllManualSessionCards, setShowAllManualSessionCards] = useState(false);
   const [sessionExpanded, setSessionExpanded] = useState(() => displayMode === 'all' || displayMode === 'sessions');
@@ -990,6 +993,7 @@ export default function ProjectOverviewPanel({
               type="button"
               className="flex items-center gap-2 text-left"
               onClick={() => setWorkflowExpanded((value) => !value)}
+              aria-expanded={workflowExpanded}
             >
               {workflowExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
               <div>

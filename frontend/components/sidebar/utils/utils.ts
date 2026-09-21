@@ -392,15 +392,19 @@ export const getProjectLastActivity = (
   project: Project,
   additionalSessions: AdditionalSessionsByProject,
 ): Date => {
+  /** Use the lightweight project timestamp even when provider details are not loaded. */
   const sessions = getAllSessions(project, additionalSessions);
-  if (sessions.length === 0) {
-    return new Date(0);
-  }
+  const summaryActivity = normalizeBusinessTimestamp(project.lastActivity) || new Date(0);
 
   return sessions.reduce((latest, session) => {
     const sessionDate = getSessionDate(session);
     return sessionDate > latest ? sessionDate : latest;
-  }, new Date(0));
+  }, summaryActivity);
+};
+
+export const isProjectRecentlyActive = (project: Project, now = Date.now()): boolean => {
+  /** Keep only projects with activity in the rolling last three days in the main list. */
+  return getProjectLastActivity(project, {}).getTime() >= now - 3 * 24 * 60 * 60 * 1000;
 };
 
 export const sortProjects = (

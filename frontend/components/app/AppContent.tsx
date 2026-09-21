@@ -2,7 +2,7 @@
  * Application shell composition.
  * Wires shared WebSocket state, project/session selection, and main layout containers together.
  */
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from '../sidebar/view/Sidebar';
 import MainContent from '../main-content/view/MainContent';
@@ -15,6 +15,7 @@ import { useUiPreferences } from '../../hooks/useUiPreferences';
 import type { Project, ProjectSession, SessionProvider } from '../../types/app';
 import { buildProjectSessionRoute, buildWorkflowChildSessionRoute } from '../../utils/projectRoute';
 import { findWorkflowChildSession, hasWorkflowChildSession } from '../../utils/workflowSessions';
+import { authenticatedFetch } from '../../utils/api';
 
 const ChatHistorySearchDialog = lazy(() => import('../chat/view/ChatHistorySearchDialog'));
 
@@ -125,6 +126,23 @@ export default function AppContent() {
   const handleDesktopSidebarCollapse = useCallback(() => {
     setPreference('sidebarVisible', false);
   }, [setPreference]);
+
+  const renderLocationRef = useRef(location.pathname);
+  renderLocationRef.current = location.pathname;
+  const handleResolveFocusedSession = useCallback(async () => {
+    /** Resolve focus before loading history, and discard responses after navigation. */
+    if (!selectedProject || selectedProject.readOnlyProviderCollection) return false;
+    const requestedLocation = location.pathname;
+    const response = await authenticatedFetch(`/api/projects/${encodeURIComponent(selectedProject.name)}/current-tmux-session?projectPath=${encodeURIComponent(selectedProject.fullPath || selectedProject.path || '')}`, { signal: AbortSignal.timeout(8000) });
+    if (renderLocationRef.current !== requestedLocation) return true;
+    if (!response.ok) throw new Error('无法检测当前终端会话，请重试。');
+    const current = await response.json() as { status: string; session?: ProjectSession | null };
+    if (renderLocationRef.current !== requestedLocation) return true;
+    if (current.status === 'no-tmux') return false;
+    if (!current.session) throw new Error('当前终端尚未识别到可渲染的会话，请在该终端启动会话后重试。');
+    handleSessionSelect(current.session);
+    return true;
+  }, [handleSessionSelect, selectedProject, location.pathname]);
 
   useEffect(() => {
     window.refreshProjects = handleSidebarRefresh;
@@ -379,6 +397,7 @@ export default function AppContent() {
       externalMessageUpdate={externalMessageUpdate}
       renderSnapshotRequestId={renderSnapshotRequestId}
       onRenderSnapshotRequest={() => setRenderSnapshotRequestId((previous) => previous + 1)}
+      onResolveFocusedSession={handleResolveFocusedSession}
     />
   );
 

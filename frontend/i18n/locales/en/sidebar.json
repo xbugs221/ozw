@@ -1,5 +1,6 @@
 {
   "projects": {
+    "inactive": "Inactive",
     "title": "Projects",
     "newProject": "New Project",
     "deleteProject": "Delete Project",

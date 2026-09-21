@@ -1,3 +1,4 @@
+/** PURPOSE: Show workspace navigation and errors from resolving terminal focus. */
 import MobileMenuButton from './MobileMenuButton';
 import MainContentTabSwitcher from './MainContentTabSwitcher';
 import MainContentTitle from './MainContentTitle';
@@ -16,8 +17,10 @@ export default function MainContentHeader({
   dockLayout,
   onRefresh,
   isRenderingSnapshot,
+  renderTargetError,
   readOnlyProviderCollection,
 }: MainContentHeaderProps) {
+  /** Keep focus lookup feedback visible alongside the render control. */
   const showMenuButton = !isSidebarOpen;
 
   return (
@@ -52,6 +55,7 @@ export default function MainContentHeader({
           />
         </div>
       </div>
+      {renderTargetError && <p role="alert" className="mt-1 text-sm text-destructive">{renderTargetError}</p>}
     </div>
   );
 }

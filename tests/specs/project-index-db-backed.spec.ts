@@ -155,6 +155,7 @@ test('轻量项目清单只从 project_index 返回有界摘要', async () => {
       const indexedProject = projects.find((project: Record<string, unknown>) => project.fullPath === projectPath);
 
       assert.ok(indexedProject, 'DB-indexed project must appear in the lightweight project list');
+      assert.equal(indexedProject.lastActivity, '2026-06-17T00:00:00.000Z');
       assert.equal(providerDirectoryScanCount, 0);
       assert.equal(Object.prototype.hasOwnProperty.call(indexedProject, 'codexSessions'), false);
       assert.equal(Object.prototype.hasOwnProperty.call(indexedProject, 'piSessions'), false);
@@ -211,7 +212,13 @@ test('项目索引同步保留可见性、unlink、rename 和 delete 语义', as
             lastActivity: '2026-06-17T00:00:00.000Z',
           });
           const visibleAfterTempProvider = projectIndexDb.listVisible(db).map((project) => project.fullPath);
+          await upsertProjectIndexFromProviderSession({
+            projectPath: process.env.MANUAL_PROJECT_PATH,
+            lastActivity: '2026-06-17T04:00:00.000Z',
+          });
           const added = await addProjectManually(process.env.MANUAL_PROJECT_PATH, 'Original Name');
+          const manualActivity = (await getProjects(null, { lightweightList: true }))
+            .find((project) => project.fullPath === process.env.MANUAL_PROJECT_PATH)?.lastActivity;
           projectIndexDb.upsert(db, {
             projectId: process.env.STALE_MANUAL_PROJECT_PATH,
             name: 'claude-demo',
@@ -245,6 +252,7 @@ test('项目索引同步保留可见性、unlink、rename 和 delete 语义', as
           const afterDelete = await getProjects(null, { lightweightList: true });
           console.log(JSON.stringify({
             visibleAfterTempProvider,
+            manualActivity,
             reconcileResult,
             hiddenRows,
             afterRename: afterRename.map((project) => ({
@@ -269,6 +277,7 @@ test('项目索引同步保留可见性、unlink、rename 和 delete 语义', as
 
       const result = JSON.parse(output.split('\n').filter(Boolean).at(-1) || '{}');
       assert.deepEqual(result.visibleAfterTempProvider, []);
+      assert.equal(result.manualActivity, '2026-06-17T04:00:00.000Z');
       assert.equal(result.reconcileResult.hiddenCount, 2);
       assert.deepEqual(result.hiddenRows, [
         { project_path: staleProviderProjectPath, visibility_reason: 'provider-path-missing' },

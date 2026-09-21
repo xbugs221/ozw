@@ -48,6 +48,7 @@ export type MainContentProps = {
   onShowSettings: () => void;
   onRefresh: () => Promise<void> | void;
   onRenderSnapshotRequest?: () => void;
+  onResolveFocusedSession?: () => Promise<boolean>;
   externalMessageUpdate: number;
   renderSnapshotRequestId?: number;
   headerLeadingContent?: ReactNode;
@@ -74,6 +75,7 @@ export type MainContentHeaderProps = {
   dockLayout?: DockLayoutControl;
   onRefresh?: () => Promise<void> | void;
   isRenderingSnapshot?: boolean;
+  renderTargetError?: string;
   readOnlyProviderCollection?: boolean;
 };
 

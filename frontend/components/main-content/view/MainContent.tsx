@@ -105,12 +105,18 @@ function MainContent({
   externalMessageUpdate,
   renderSnapshotRequestId,
   onRenderSnapshotRequest,
+  onResolveFocusedSession,
   headerLeadingContent,
 }: MainContentProps) {
   /** 主视图由 activeTab 独立拥有，桌面辅助栏只更新各自的布局状态。 */
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom } = preferences;
   const [isRenderingSnapshot, setIsRenderingSnapshot] = React.useState(false);
+  const [isResolvingFocus, setIsResolvingFocus] = React.useState(false);
+  const [renderTargetError, setRenderTargetError] = React.useState('');
+  const renderRequestRef = React.useRef(0);
+  const renderScopeRef = React.useRef('');
+  renderScopeRef.current = `${selectedProject?.fullPath}:${selectedSession?.id}:${activeTab}`;
   const readOnlyProviderCollection = selectedProject?.readOnlyProviderCollection === true;
   const projectSessions = selectedProject ? getAllSessions(selectedProject, {}, true) : [];
   const [revealDirectoryRequest, setRevealDirectoryRequest] = React.useState<{ path: string; requestId: number } | null>(null);
@@ -316,9 +322,35 @@ function MainContent({
 
   // Wrap setActiveTab to handle dock toggle on user clicks without useEffect loops
   const handleSetActiveTab = React.useCallback(
-    (value: React.SetStateAction<AppTab>) => {
+    async (value: React.SetStateAction<AppTab>) => {
+      /** Read live terminal focus before selecting or refreshing rendered history. */
       const nextTab = typeof value === 'function' ? value(activeTab) : value;
+      const requestId = ++renderRequestRef.current;
+      setRenderTargetError('');
       if (readOnlyProviderCollection && nextTab !== 'overview' && nextTab !== 'chat') return;
+
+      if (nextTab === 'chat' && selectedProject && onResolveFocusedSession) {
+        const scope = renderScopeRef.current;
+        setIsResolvingFocus(true);
+        try {
+          const resolved = await onResolveFocusedSession();
+          if (requestId !== renderRequestRef.current) return;
+          if (resolved) {
+            onRenderSnapshotRequest?.();
+            return;
+          }
+          if (scope !== renderScopeRef.current) return;
+        } catch (error) {
+          if (requestId === renderRequestRef.current && scope === renderScopeRef.current) {
+            setRenderTargetError(error instanceof Error ? error.message : '无法检测当前终端会话，请重试。');
+          }
+          return;
+        } finally {
+          if (requestId === renderRequestRef.current) setIsResolvingFocus(false);
+        }
+      } else {
+        setIsResolvingFocus(false);
+      }
 
       if (nextTab === 'overview') {
         if (selectedProject && (selectedSession || selectedWorkflow)) {
@@ -366,7 +398,7 @@ function MainContent({
 
       setActiveTab(nextTab);
     },
-    [activeTab, isMobile, layout.rightDock.activePanel, layout.rightDock.collapsed, layout.lowerPanel.activePanel, layout.lowerPanel.collapsed, onRenderSnapshotRequest, onSelectProjectOverview, onSelectSession, projectSessions, readOnlyProviderCollection, selectedProject, selectedSession, selectedWorkflow, setRightDock, setLowerPanel, setActiveTab],
+    [activeTab, isMobile, layout.rightDock.activePanel, layout.rightDock.collapsed, layout.lowerPanel.activePanel, layout.lowerPanel.collapsed, onRenderSnapshotRequest, onResolveFocusedSession, onSelectProjectOverview, onSelectSession, projectSessions, readOnlyProviderCollection, selectedProject, selectedSession, selectedWorkflow, setRightDock, setLowerPanel, setActiveTab],
   );
 
   const openFilesDock = React.useCallback((directoryPath?: string) => {
@@ -408,7 +440,8 @@ function MainContent({
       onMenuClick={onMenuClick}
       leadingContent={headerLeadingContent}
       onRefresh={onRefresh}
-      isRenderingSnapshot={isRenderingSnapshot}
+      isRenderingSnapshot={isRenderingSnapshot || isResolvingFocus}
+        renderTargetError={renderTargetError}
       readOnlyProviderCollection={readOnlyProviderCollection}
       dockLayout={isMobile ? undefined : {
         rightDockActive: layout.rightDock.activePanel,
@@ -517,7 +550,8 @@ function MainContent({
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
           onRefresh={onRefresh}
-          isRenderingSnapshot={isRenderingSnapshot}
+          isRenderingSnapshot={isRenderingSnapshot || isResolvingFocus}
+        renderTargetError={renderTargetError}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
@@ -596,7 +630,8 @@ function MainContent({
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
           onRefresh={onRefresh}
-          isRenderingSnapshot={isRenderingSnapshot}
+          isRenderingSnapshot={isRenderingSnapshot || isResolvingFocus}
+        renderTargetError={renderTargetError}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
             rightDockCollapsed: layout.rightDock.collapsed,
@@ -697,7 +732,8 @@ function MainContent({
           onMenuClick={onMenuClick}
           leadingContent={headerLeadingContent}
           onRefresh={onRefresh}
-          isRenderingSnapshot={isRenderingSnapshot}
+          isRenderingSnapshot={isRenderingSnapshot || isResolvingFocus}
+        renderTargetError={renderTargetError}
           readOnlyProviderCollection={readOnlyProviderCollection}
           dockLayout={{
             rightDockActive: layout.rightDock.activePanel,
@@ -823,7 +859,8 @@ function MainContent({
         onMenuClick={onMenuClick}
         leadingContent={headerLeadingContent}
         onRefresh={onRefresh}
-        isRenderingSnapshot={isRenderingSnapshot}
+        isRenderingSnapshot={isRenderingSnapshot || isResolvingFocus}
+        renderTargetError={renderTargetError}
         readOnlyProviderCollection={readOnlyProviderCollection}
         dockLayout={{
           rightDockActive: layout.rightDock.activePanel,
