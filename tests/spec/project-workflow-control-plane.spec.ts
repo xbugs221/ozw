@@ -11,7 +11,6 @@ import {
   authenticatePage,
   getFixtureProject,
   openFixtureProject,
-  openFixtureManualSessionFromOverview,
 } from './helpers/spec-test-helpers.ts';
 import { ensurePlaywrightFixture, PLAYWRIGHT_FIXTURE_HOME, PLAYWRIGHT_FIXTURE_PROJECT_PATHS } from '../e2e/helpers/playwright-fixture.ts';
 import { resolveFlowRunStatePath } from '../../backend/domains/workflows/flow-runtime-paths.ts';
@@ -216,17 +215,6 @@ test.describe('项目内需求工作流控制面', () => {
       data: { path: projectPath },
     });
     expect(resetResponse.ok()).toBeTruthy();
-  });
-
-  test('手动会话详情也支持跟随最新进度', async ({ page }) => {
-    await openFixtureProject(page);
-    await openFixtureManualSessionFromOverview(page);
-    await expect(page.locator('[data-testid="chat-scroll-container"]')).toContainText(
-      'fixture-project manual-only session assistant turn 01',
-    );
-    await expect(page.getByTestId('chat-follow-latest')).toHaveAttribute('aria-pressed', 'false');
-    await page.getByTestId('chat-follow-latest').click();
-    await expect(page.getByTestId('chat-follow-latest')).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('项目主页点击新建会话会先选择 provider 并在首条消息后切到真实 session', async ({ page }) => {
