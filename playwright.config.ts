@@ -42,13 +42,16 @@ loadOptionalEnvFile();
 
 const ORIGINAL_HOME = process.env.HOME || process.env.USERPROFILE || process.cwd();
 process.env.PLAYWRIGHT_ORIGINAL_HOME ||= ORIGINAL_HOME;
+const PLAYWRIGHT_SHARD_SUFFIX = process.env.OZW_PLAYWRIGHT_SHARD
+  ? `-shard-${process.env.OZW_PLAYWRIGHT_SHARD}`
+  : '';
 const PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH
   || path.join(ORIGINAL_HOME, '.cache', 'ms-playwright');
 
 process.env.HOME = PLAYWRIGHT_FIXTURE_HOME;
 process.env.USERPROFILE = PLAYWRIGHT_FIXTURE_HOME;
 process.env.DATABASE_PATH = PLAYWRIGHT_FIXTURE_AUTH_DB;
-process.env.XDG_STATE_HOME = path.join(process.cwd(), '.tmp', 'playwright-state-home');
+process.env.XDG_STATE_HOME = path.join(process.cwd(), '.tmp', `playwright-state-home${PLAYWRIGHT_SHARD_SUFFIX}`);
 process.env.PLAYWRIGHT_BROWSERS_PATH = PLAYWRIGHT_BROWSERS_PATH;
 process.env.SHELL = '/bin/bash';
 

@@ -67,6 +67,9 @@ jobs:
         run: pnpm exec playwright test --config=playwright.ci.config.ts --shard=${{ matrix.shard }}/8 --global-timeout=900000 --reporter=line,html
         env:
           PLAYWRIGHT_HTML_OPEN: never
+          OZW_PLAYWRIGHT_SHARD: ${{ matrix.shard }}
+          PLAYWRIGHT_SERVER_PORT: 4100${{ matrix.shard }}
+          PLAYWRIGHT_VITE_PORT: 617${{ matrix.shard }}
 
       - name: Upload browser results
         if: ${{ !cancelled() }}

@@ -10,8 +10,11 @@ import Database from 'better-sqlite3';
 import { resolveFlowRunStatePath } from '../../../backend/domains/workflows/flow-runtime-paths.ts';
 import { getProjectLocalConfigPath } from '../../../backend/project-config-store.ts';
 
-const FIXTURE_ROOT = path.join(process.cwd(), '.tmp', 'playwright-home');
-const FIXTURE_STATE_HOME = path.join(process.cwd(), '.tmp', 'playwright-state-home');
+const PLAYWRIGHT_SHARD_SUFFIX = process.env.OZW_PLAYWRIGHT_SHARD
+  ? `-shard-${process.env.OZW_PLAYWRIGHT_SHARD}`
+  : '';
+const FIXTURE_ROOT = path.join(process.cwd(), '.tmp', `playwright-home${PLAYWRIGHT_SHARD_SUFFIX}`);
+const FIXTURE_STATE_HOME = path.join(process.cwd(), '.tmp', `playwright-state-home${PLAYWRIGHT_SHARD_SUFFIX}`);
 const AUTH_DB_PATH = path.join(FIXTURE_ROOT, '.ozw', 'auth.db');
 const INIT_SQL_PATH = path.join(process.cwd(), 'backend', 'database', 'init.sql');
 const PROJECT_CONF_PATH = path.join(FIXTURE_ROOT, 'workspace', 'fixture-project', '.ozw', 'conf.json');
