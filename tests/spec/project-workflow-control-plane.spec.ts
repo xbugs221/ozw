@@ -155,7 +155,7 @@ test.describe('项目内需求工作流控制面', () => {
   });
 
   test('项目右侧正文展示默认折叠的自动工作流与手动会话入口', async ({ page }) => {
-    await openFixtureProject(page);
+    await openFixtureProject(page, { expandWorkflows: false });
 
     await expect(page.getByRole('button', { name: '工作流操作' })).toBeVisible();
     await expect(page.getByRole('button', { name: /新建会话|New Session/i })).toBeVisible();
@@ -165,6 +165,8 @@ test.describe('项目内需求工作流控制面', () => {
     await expect(workflowsPanel.getByRole('heading', { name: '自动工作流' })).toBeVisible();
     await expect(manualSessionsPanel).toBeVisible();
     await expect(workflowsPanel).toBeVisible();
+    await expect(workflowsPanel.getByRole('button', { name: /登录升级/ })).toHaveCount(0);
+    await workflowsPanel.getByRole('button', { name: /自动工作流/ }).click();
     await expect(workflowsPanel.getByRole('button', { name: /登录升级/ })).toBeVisible();
   });
 

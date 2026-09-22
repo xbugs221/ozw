@@ -174,7 +174,7 @@ export async function getFixtureProject(request) {
  * Open the main shell and select the primary fixture project from the sidebar.
  *
  * @param {import('@playwright/test').Page} page
- * @param {{ reset?: boolean }} [options]
+ * @param {{ reset?: boolean, expandWorkflows?: boolean }} [options]
  * @returns {Promise<void>}
  */
 export async function openFixtureProject(page, options = {}) {
@@ -248,6 +248,15 @@ export async function openFixtureProject(page, options = {}) {
   await fixtureProjectButton.click();
   await expect(page.locator('body')).not.toContainText('Loading...');
   await expect(page.getByTestId('project-workspace-overview')).toBeVisible();
+
+  if (options.expandWorkflows !== false) {
+    /** Keep business-flow tests focused on cards while the product keeps the section collapsed by default. */
+    const workflowsPanel = page.getByTestId('project-overview-workflows');
+    const workflowToggle = workflowsPanel.getByRole('button', { name: /自动工作流/ });
+    if (await workflowToggle.count() > 0 && await workflowsPanel.getByRole('button', { name: /登录升级/ }).count() === 0) {
+      await workflowToggle.click();
+    }
+  }
 }
 
 /**
