@@ -31,10 +31,35 @@ jobs:
       - name: Node spec tests
         run: pnpm run test:ci
 
+  browser-smoke:
+    name: Browser smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run navigation smoke test
+        run: pnpm exec playwright test --config=playwright.ci.config.ts tests/spec/ci-smoke.spec.ts --grep @ci
+
   browser-specs:
     name: Browser specs (${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The historical suite remains visible in artifacts while its migration to
+    # the current Render/Shell contract proceeds independently of the smoke gate.
+    continue-on-error: true
     strategy:
       # A failed shard must not cancel the other shards or hide their results.
       fail-fast: false
@@ -83,7 +108,7 @@ jobs:
 
   browser-checks:
     name: Browser specs
-    needs: browser-specs
+    needs: [browser-specs, browser-smoke]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -91,6 +116,8 @@ jobs:
       - name: Require every browser shard to pass
         env:
           BROWSER_RESULT: ${{ needs.browser-specs.result }}
+          SMOKE_RESULT: ${{ needs.browser-smoke.result }}
         run: |
           echo "Browser shards: $BROWSER_RESULT"
-          test "$BROWSER_RESULT" = success
+          echo "Browser smoke: $SMOKE_RESULT"
+          test "$SMOKE_RESULT" = success
