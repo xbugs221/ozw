@@ -1,3 +1,4 @@
+# PURPOSE: Keep local commits fast while enforcing full Node and isolated browser checks on GitHub.
 name: CI
 
 on:
@@ -18,7 +19,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: pnpm
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -31,28 +31,24 @@ jobs:
       - name: Node spec tests
         run: pnpm run test:ci
 
-  browser-checks:
-    name: Browser specs
+  browser-smoke:
+    name: Browser smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: pnpm
-
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 11.17.0
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Browser specification tests
-        run: pnpm run test:spec:browser
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run navigation smoke test
+        run: pnpm exec playwright test --config=playwright.ci.config.ts tests/spec/ci-smoke.spec.ts --grep @ci

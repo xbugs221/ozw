@@ -1,0 +1,41 @@
+# PURPOSE: Run the broad browser regression suite in isolated parallel shards.
+name: Browser regression
+
+on:
+  workflow_dispatch:
+
+jobs:
+  browser-specs:
+    name: Browser specs (${{ matrix.shard }}/8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Browser specification tests
+        run: pnpm exec playwright test --config=playwright.ci.config.ts --shard=${{ matrix.shard }}/8 --global-timeout=900000 --reporter=line,html
+        env:
+          PLAYWRIGHT_HTML_OPEN: never
+          OZW_PLAYWRIGHT_SHARD: ${{ matrix.shard }}
+          PLAYWRIGHT_SERVER_PORT: 4100${{ matrix.shard }}
+          PLAYWRIGHT_VITE_PORT: 617${{ matrix.shard }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: browser-results-${{ matrix.shard }}
+          path: |
+            playwright-report/
+            tests/test-results/
+          retention-days: 7
