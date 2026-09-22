@@ -88,8 +88,12 @@ export async function authenticatePage(page) {
  * @returns {Promise<void>}
  */
 export async function resetWorkspaceProject() {
-  await fs.rm(PRIMARY_FIXTURE_PROJECT_PATH, { recursive: true, force: true });
+  /** 清空用户工作区，但保留 .ozw 项目登记，否则后续测试会显示 No projects found。 */
   await fs.mkdir(PRIMARY_FIXTURE_PROJECT_PATH, { recursive: true });
+  const entries = await fs.readdir(PRIMARY_FIXTURE_PROJECT_PATH, { withFileTypes: true });
+  await Promise.all(entries
+    .filter((entry) => entry.name !== '.ozw')
+    .map((entry) => fs.rm(path.join(PRIMARY_FIXTURE_PROJECT_PATH, entry.name), { recursive: true, force: true })));
 }
 
 /**
