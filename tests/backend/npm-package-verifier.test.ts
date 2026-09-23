@@ -20,12 +20,12 @@ import {
 /** 构造最小生产依赖锁，专门验证根依赖字段与 optional 标记。 */
 function createProductionShrinkwrap(overrides: Record<string, unknown> = {}) {
   return {
-    name: 'ozw',
+    name: '@xbugs221/ozw',
     version: '1.0.0',
     lockfileVersion: 3,
     packages: {
       '': {
-        name: 'ozw',
+        name: '@xbugs221/ozw',
         version: '1.0.0',
         dependencies: { express: '^4.0.0' },
         optionalDependencies: { 'node-pty': '^1.1.0' },
@@ -42,7 +42,7 @@ function createProductionShrinkwrap(overrides: Record<string, unknown> = {}) {
 }
 
 const verifierPackageJson = {
-  name: 'ozw',
+  name: '@xbugs221/ozw',
   version: '1.0.0',
   dependencies: { express: '^4.0.0' },
   optionalDependencies: { 'node-pty': '^1.1.0' },

@@ -4,7 +4,7 @@ English | [中文](./quickstart.md)
 
 ---
 
-This guide separates GitHub releases, candidate-package acceptance, and source development paths.
+This guide separates npm releases, candidate-package acceptance, and source development paths.
 
 ## 1. Choose an installation path
 
@@ -13,22 +13,22 @@ This guide separates GitHub releases, candidate-package acceptance, and source d
 On a supported platform, only Node.js 24 (24.17.0 or newer) or Node.js 26 (26.4.0 or newer) is required:
 
 ```sh
-npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz && ozw
+npm install -g @xbugs221/ozw && ozw
 ```
 
-The release workflow verifies the package before attaching that same archive to GitHub Releases. Git, pnpm, TypeScript, and frontend build tools are not required. The public NPM package is not available yet; use the GitHub URL above.
+The release workflow verifies the package before publishing the same archive to npm and GitHub Releases. Git, pnpm, TypeScript, and frontend build tools are not required.
 
 ### Candidate-package acceptance (current release testing)
 
-Install only a `.tgz` supplied by the maintainers or built from this repository. Do not download the same name from the public registry:
+Install only a `.tgz` supplied by the maintainers or built from this repository:
 
 ```sh
-npm install -g ./ozw-VERSION.tgz
+npm install -g ./package.tgz
 ozw --version
 ozw
 ```
 
-Replace `VERSION` with the actual version in the candidate tarball filename.
+Replace `package.tgz` with the actual candidate tarball filename.
 
 Candidate packages have not completed release acceptance. When testing an older candidate that predates first-run initialization, pass an explicit 32-character token to that process:
 
@@ -92,31 +92,31 @@ ozw can read repositories, run shells, and access local provider configuration. 
 
 ## 5. Upgrade, rollback, and uninstall
 
-Upgrade to the latest GitHub release with:
+Upgrade to the latest npm release with:
 
 ```sh
-npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz
+npm install -g @xbugs221/ozw
 ```
 
 Install a specific version to roll back the program:
 
 ```sh
-npm install -g https://github.com/xbugs221/ozw/releases/download/vVERSION/ozw.tgz
+npm install -g @xbugs221/ozw@VERSION
 ```
 
 For a candidate build, install the newer `.tgz` over the previous version:
 
 ```sh
-npm install -g ./ozw-NEW_VERSION.tgz
+npm install -g ./package.tgz
 ```
 
 Uninstall the program with:
 
 ```sh
-npm uninstall -g ozw
+npm uninstall -g @xbugs221/ozw
 ```
 
-Upgrade, rollback, and uninstall preserve `~/.ozw` by default. To permanently remove all local configuration, tokens, and databases after uninstalling, back them up first and then explicitly delete that directory yourself; ozw never removes it automatically.
+If you installed the old `ozw` package from a GitHub `.tgz`, run `npm uninstall -g ozw` before installing `@xbugs221/ozw`. Upgrade, rollback, and uninstall preserve `~/.ozw` by default. To permanently remove all local configuration, tokens, and databases after uninstalling, back them up first and then explicitly delete that directory yourself; ozw never removes it automatically.
 
 ## 6. Source development
 

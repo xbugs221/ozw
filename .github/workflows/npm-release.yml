@@ -1,4 +1,4 @@
-# PURPOSE: Build one tested package from a version tag and publish it as a GitHub release.
+# PURPOSE: Build one tested package from a version tag and publish it to npm and GitHub Releases.
 name: Release
 
 on:
@@ -84,9 +84,9 @@ jobs:
           PACKAGE_VERSION: ${{ steps.package.outputs.version }}
         run: |
           npm pack --ignore-scripts --json > npm-pack.json
-          tarball="$(node --input-type=module -e "import fs from 'node:fs'; const result = JSON.parse(fs.readFileSync('npm-pack.json', 'utf8')); const candidate = result[0]; if (result.length !== 1 || candidate.name !== 'ozw' || candidate.version !== process.argv[1]) throw new Error('Packed identity does not match ozw@' + process.argv[1]); process.stdout.write(candidate.filename)" "${PACKAGE_VERSION}")"
+          tarball="$(node --input-type=module -e "import fs from 'node:fs'; const result = JSON.parse(fs.readFileSync('npm-pack.json', 'utf8')); const candidate = result[0]; if (result.length !== 1 || candidate.name !== '@xbugs221/ozw' || candidate.version !== process.argv[1]) throw new Error('Packed identity does not match @xbugs221/ozw@' + process.argv[1]); process.stdout.write(candidate.filename)" "${PACKAGE_VERSION}")"
           pnpm run verify:npm-package -- "${tarball}"
-          node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const file = process.argv[1]; const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); fs.writeFileSync('npm-package.sha256.json', JSON.stringify({ name: 'ozw', version: process.argv[2], filename: path.basename(file), sha256 }, null, 2) + '\n')" "${tarball}" "${PACKAGE_VERSION}"
+          node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const file = process.argv[1]; const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); fs.writeFileSync('npm-package.sha256.json', JSON.stringify({ name: '@xbugs221/ozw', version: process.argv[2], filename: path.basename(file), sha256 }, null, 2) + '\n')" "${tarball}" "${PACKAGE_VERSION}"
           echo "tarball=${tarball}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload immutable candidate
@@ -130,7 +130,7 @@ jobs:
 
       - name: Verify candidate identity and contents
         id: candidate
-        run: node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync(path.join('candidate', 'npm-package.sha256.json'), 'utf8')); if (manifest.name !== 'ozw' || manifest.version !== process.argv[1] || path.basename(manifest.filename) !== manifest.filename || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Invalid candidate manifest'); const tarball = path.join('candidate', manifest.filename); const actual = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'); if (actual !== manifest.sha256) throw new Error('Candidate SHA-256 mismatch'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tarball=' + tarball + '\n')" "${{ needs.candidate.outputs.package_version }}"
+        run: node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync(path.join('candidate', 'npm-package.sha256.json'), 'utf8')); if (manifest.name !== '@xbugs221/ozw' || manifest.version !== process.argv[1] || path.basename(manifest.filename) !== manifest.filename || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Invalid candidate manifest'); const tarball = path.join('candidate', manifest.filename); const actual = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'); if (actual !== manifest.sha256) throw new Error('Candidate SHA-256 mismatch'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tarball=' + tarball + '\n')" "${{ needs.candidate.outputs.package_version }}"
 
       - name: Audit candidate contents
         run: node scripts/verify-npm-package.mjs "${{ steps.candidate.outputs.tarball }}"
@@ -153,7 +153,7 @@ jobs:
           import { pathToFileURL } from 'node:url';
           const installPrefix = path.resolve(process.env.OZW_TEST_PREFIX);
           const globalRoot = process.platform === 'win32' ? path.join(installPrefix, 'node_modules') : path.join(installPrefix, 'lib', 'node_modules');
-          const packageRoot = path.join(globalRoot, 'ozw');
+          const packageRoot = path.join(globalRoot, '@xbugs221', 'ozw');
           const cliPath = path.join(packageRoot, 'dist-node', 'backend', 'cli.js');
           const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ozw-release-'));
           const isolatedHome = path.join(probeRoot, 'home'); const ozwHome = path.join(isolatedHome, '.ozw');
@@ -247,16 +247,10 @@ jobs:
           OZW_TEST_HOME: ${{ runner.temp }}/ozw-without-optional-home
         run: |
           set -euo pipefail
-          tarball="$(node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync('candidate/npm-package.sha256.json', 'utf8')); const file = path.join('candidate', manifest.filename); const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); if (manifest.name !== 'ozw' || manifest.version !== process.env.EXPECTED_VERSION || sha256 !== manifest.sha256) throw new Error('Candidate identity mismatch'); process.stdout.write(file)")"
-          package_root="${OZW_TEST_PREFIX}/lib/node_modules/ozw"
+          tarball="$(node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync('candidate/npm-package.sha256.json', 'utf8')); const file = path.join('candidate', manifest.filename); const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); if (manifest.name !== '@xbugs221/ozw' || manifest.version !== process.env.EXPECTED_VERSION || sha256 !== manifest.sha256) throw new Error('Candidate identity mismatch'); process.stdout.write(file)")"
+          package_root="${OZW_TEST_PREFIX}/lib/node_modules/@xbugs221/ozw"
           mkdir -p "${OZW_TEST_HOME}"
-          mkdir -p "$(dirname "${package_root}")"
-          (
-            cd "$(dirname "${package_root}")"
-            npm install --omit=optional "${GITHUB_WORKSPACE}/${tarball}"
-          )
-          mkdir -p "${OZW_TEST_PREFIX}/bin"
-          ln -s "${package_root}/dist-node/backend/cli.js" "${OZW_TEST_PREFIX}/bin/ozw"
+          npm install --global --prefix "${OZW_TEST_PREFIX}" --omit=optional "${GITHUB_WORKSPACE}/${tarball}"
           cli_path="${package_root}/dist-node/backend/cli.js"
           test -f "${cli_path}"
           test ! -d "${package_root}/node_modules/node-pty"
@@ -277,7 +271,7 @@ jobs:
 
   github-release:
     name: Publish GitHub release
-    needs: [candidate, install-matrix, optional-dependency-health]
+    needs: [candidate, install-matrix, optional-dependency-health, verify-published]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -300,7 +294,7 @@ jobs:
           import path from 'node:path';
           const manifestPath = 'candidate/npm-package.sha256.json';
           const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-          if (manifest.name !== 'ozw' || manifest.version !== process.env.PACKAGE_VERSION ||
+          if (manifest.name !== '@xbugs221/ozw' || manifest.version !== process.env.PACKAGE_VERSION ||
               path.basename(manifest.filename) !== manifest.filename) {
             throw new Error('Release candidate identity mismatch');
           }
@@ -320,7 +314,7 @@ jobs:
           Install and start (Node.js 24.17+ or 26.4+ required):
 
           ```sh
-          npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz && ozw
+          npm install -g @xbugs221/ozw && ozw
           ```
 
           The first start creates local configuration and prints the login address. See the repository quick start for details.
@@ -332,10 +326,11 @@ jobs:
     name: Prepare verified publish input
     needs: [candidate, install-matrix]
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      github.ref_type == 'tag' &&
-      github.ref_name == format('v{0}', needs.candidate.outputs.package_version) &&
-      inputs.confirm_version == needs.candidate.outputs.package_version
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref_type == 'tag' &&
+       github.ref_name == format('v{0}', needs.candidate.outputs.package_version) &&
+       inputs.confirm_version == needs.candidate.outputs.package_version)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -367,7 +362,7 @@ jobs:
 
       - name: Verify candidate identity
         id: candidate
-        run: node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync(path.join('candidate', 'npm-package.sha256.json'), 'utf8')); if (manifest.name !== 'ozw' || manifest.version !== process.argv[1] || path.basename(manifest.filename) !== manifest.filename || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Invalid candidate manifest'); const tarball = path.join('candidate', manifest.filename); const actual = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'); if (actual !== manifest.sha256) throw new Error('Candidate SHA-256 mismatch'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tarball=' + tarball + '\n')" "${{ needs.candidate.outputs.package_version }}"
+        run: node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync(path.join('candidate', 'npm-package.sha256.json'), 'utf8')); if (manifest.name !== '@xbugs221/ozw' || manifest.version !== process.argv[1] || path.basename(manifest.filename) !== manifest.filename || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Invalid candidate manifest'); const tarball = path.join('candidate', manifest.filename); const actual = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'); if (actual !== manifest.sha256) throw new Error('Candidate SHA-256 mismatch'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tarball=' + tarball + '\n')" "${{ needs.candidate.outputs.package_version }}"
 
       - name: Audit candidate contents
         run: node scripts/verify-npm-package.mjs "${{ steps.candidate.outputs.tarball }}"
@@ -383,15 +378,15 @@ jobs:
           retention-days: 14
 
   publish:
-    name: Publish approved candidate
+    name: Publish tested candidate to npm
     needs: [candidate, prepare-publish, optional-dependency-health]
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      github.ref_type == 'tag' &&
-      github.ref_name == format('v{0}', needs.candidate.outputs.package_version) &&
-      inputs.confirm_version == needs.candidate.outputs.package_version
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref_type == 'tag' &&
+       github.ref_name == format('v{0}', needs.candidate.outputs.package_version) &&
+       inputs.confirm_version == needs.candidate.outputs.package_version)
     runs-on: ubuntu-latest
-    environment: npm-release
     permissions:
       contents: read
       id-token: write
@@ -423,7 +418,7 @@ jobs:
 
       - name: Verify candidate identity
         id: candidate
-        run: node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync(path.join('candidate', 'npm-package.sha256.json'), 'utf8')); if (manifest.name !== 'ozw' || manifest.version !== process.argv[1] || path.basename(manifest.filename) !== manifest.filename || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Invalid candidate manifest'); const tarball = path.join('candidate', manifest.filename); const actual = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'); if (actual !== manifest.sha256) throw new Error('Candidate SHA-256 mismatch'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tarball=' + tarball + '\n')" "${{ needs.candidate.outputs.package_version }}"
+        run: node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync(path.join('candidate', 'npm-package.sha256.json'), 'utf8')); if (manifest.name !== '@xbugs221/ozw' || manifest.version !== process.argv[1] || path.basename(manifest.filename) !== manifest.filename || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Invalid candidate manifest'); const tarball = path.join('candidate', manifest.filename); const actual = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'); if (actual !== manifest.sha256) throw new Error('Candidate SHA-256 mismatch'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tarball=' + tarball + '\n')" "${{ needs.candidate.outputs.package_version }}"
 
       - name: Audit candidate contents
         run: node scripts/verify-npm-package.mjs "${{ steps.candidate.outputs.tarball }}"
@@ -461,7 +456,7 @@ jobs:
         run: |
           mkdir published
           for attempt in 1 2 3 4 5; do
-            if npm pack "ozw@${PACKAGE_VERSION}" --ignore-scripts --json --pack-destination published > published/npm-pack.json; then
+            if npm pack "@xbugs221/ozw@${PACKAGE_VERSION}" --ignore-scripts --json --pack-destination published > published/npm-pack.json; then
               break
             fi
             if [[ "${attempt}" == "5" ]]; then
@@ -470,7 +465,7 @@ jobs:
             fi
             sleep 5
           done
-          published_tarball="$(node --input-type=module -e "import fs from 'node:fs'; import path from 'node:path'; const result = JSON.parse(fs.readFileSync('published/npm-pack.json', 'utf8')); const candidate = result[0]; if (result.length !== 1 || candidate.name !== 'ozw' || candidate.version !== process.argv[1]) throw new Error('Public package identity mismatch'); process.stdout.write(path.join('published', candidate.filename))" "${PACKAGE_VERSION}")"
+          published_tarball="$(node --input-type=module -e "import fs from 'node:fs'; import path from 'node:path'; const result = JSON.parse(fs.readFileSync('published/npm-pack.json', 'utf8')); const candidate = result[0]; if (result.length !== 1 || candidate.name !== '@xbugs221/ozw' || candidate.version !== process.argv[1]) throw new Error('Public package identity mismatch'); process.stdout.write(path.join('published', candidate.filename))" "${PACKAGE_VERSION}")"
           node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; const manifest = JSON.parse(fs.readFileSync('candidate/npm-package.sha256.json', 'utf8')); const actual = crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'); if (actual !== manifest.sha256) throw new Error('Public registry tarball differs from tested candidate')" "${published_tarball}"
           node scripts/verify-npm-package.mjs "${published_tarball}"
           npm install --global "${GITHUB_WORKSPACE}/${published_tarball}"

@@ -56,7 +56,6 @@ const c = {
 // Load package.json for version info
 const packageJsonPath = path.join(PKG_ROOT, 'package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-const RELEASES_URL = 'https://github.com/xbugs221/ozw/releases/latest';
 
 // Get the effective database path after user-state initialization.
 function getDatabasePath() {
@@ -186,13 +185,13 @@ function showVersion() {
 // Show update guidance without performing network or installation work.
 function showUpdateInstructions() {
     /**
-     * PURPOSE: Keep update behavior explicit and distribution-neutral. The
-     * public npm package is unavailable, so the CLI must not query or mutate it.
+     * PURPOSE: Show the package-name upgrade command without changing the
+     * current installation or requiring registry access during startup.
      */
     console.log(`${c.info('[INFO]')} Automatic CLI updates are not supported.`);
     console.log(`${c.info('[INFO]')} Current version: ${c.bright(packageJson.version)}`);
-    console.log(`${c.tip('[TIP]')} Download the latest release from:`);
-    console.log(`      ${RELEASES_URL}`);
+    console.log(`${c.tip('[TIP]')} Upgrade with:`);
+    console.log('      npm install -g @xbugs221/ozw');
 }
 
 // Start the server
