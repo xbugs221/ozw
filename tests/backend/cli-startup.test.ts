@@ -14,16 +14,16 @@ test('start path has no package-registry or child-process update check', () => {
    * 直接锁定整个 CLI 不依赖外部进程，避免更新查询以后以其他名称重新混入启动热路径。
    */
   const source = readFileSync(CLI_SOURCE_PATH, 'utf8');
-  assert.doesNotMatch(source, /child_process|npm\s+(?:show|view|update|install)/);
+  assert.doesNotMatch(source, /child_process|npm\s+(?:show|view|update)/);
 
   const startBody = source.match(/async function startServer\(\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
   assert.match(startBody, /import\(['"]\.\/index\.js['"]\)/);
   assert.doesNotMatch(startBody, /checkForUpdates|execSync|spawnSync|npm\s/i);
 });
 
-test('explicit update command returns local release guidance without npm access', () => {
+test('explicit update command returns local npm guidance without registry access', () => {
   /**
-   * 更新命令保留可发现性，但只读取本地版本并指向独立发布页。
+   * 更新命令保留可发现性，但只读取本地版本并提示用户手动升级。
    */
   const output = execFileSync(process.execPath, ['--import', 'tsx', CLI_SOURCE_PATH, 'update'], {
     cwd: process.cwd(),
@@ -33,6 +33,6 @@ test('explicit update command returns local release guidance without npm access'
 
   assert.match(output, /Automatic CLI updates are not supported/);
   assert.match(output, /Current version:.*\d+\.\d+\.\d+/s);
-  assert.match(output, /github\.com\/xbugs221\/ozw\/releases\/latest/);
+  assert.match(output, /npm install -g @xbugs221\/ozw/);
   assert.doesNotMatch(output, /E404|npm error|Checking for updates/);
 });
