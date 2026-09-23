@@ -108,6 +108,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node: ['24.17.0', '26.4.0']
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
 
     steps:
       - name: Check out verifier
@@ -216,7 +217,10 @@ jobs:
           if (!/^OZW_ACCESS_TOKEN=.{32}$/mu.test(envContents)) throw new Error('Persisted access token is invalid');
           if (installDigest() !== beforeDigest) throw new Error('Runtime modified the global installation'); }
           finally { if (child && child.exitCode === null) child.kill('SIGKILL');
-          fs.rmSync(probeRoot, { recursive: true, force: true }); }"
+          fs.rmSync(probeRoot, { recursive: true, force: true }); }
+          console.log('Installed release passed native-module, user-state, and startup checks');
+          /* Windows ConPTY can retain worker handles after a successful PTY probe. */
+          process.exit(0)"
 
   optional-dependency-health:
     name: Base runtime without optional dependencies
