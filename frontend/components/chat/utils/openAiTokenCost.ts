@@ -29,6 +29,21 @@ export const USD_CNY_REFERENCE_RATE = 6.7722;
  */
 const MODEL_PRICES: Array<{ matches: RegExp; label: string; price: ModelPrice }> = [
   {
+    matches: /^gpt-6-astra(?:-|$)/i,
+    label: 'GPT-6 Astra',
+    price: { inputUsdPerMillion: 10, cachedInputUsdPerMillion: 1, cacheWriteUsdPerMillion: 12.5, outputUsdPerMillion: 50 },
+  },
+  {
+    matches: /^gpt-6-sol(?:-|$)/i,
+    label: 'GPT-6 Sol',
+    price: { inputUsdPerMillion: 2, cachedInputUsdPerMillion: 0.2, cacheWriteUsdPerMillion: 2.5, outputUsdPerMillion: 10 },
+  },
+  {
+    matches: /^gpt-6-luna(?:-|$)/i,
+    label: 'GPT-6 Luna',
+    price: { inputUsdPerMillion: 0.1, cachedInputUsdPerMillion: 0.01, cacheWriteUsdPerMillion: 0.125, outputUsdPerMillion: 0.5 },
+  },
+  {
     matches: /^gpt-5\.6-sol(?:-|$)/i,
     label: 'GPT-5.6 Sol',
     price: { inputUsdPerMillion: 5, cachedInputUsdPerMillion: 0.5, cacheWriteUsdPerMillion: 6.25, outputUsdPerMillion: 30 },
