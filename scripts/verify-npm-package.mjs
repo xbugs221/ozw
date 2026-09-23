@@ -22,7 +22,7 @@ const MAX_FILE_COUNT = 1200;
 const MAX_TAR_BYTES = MAX_UNPACKED_BYTES + (MAX_FILE_COUNT + 4) * 512;
 const MAX_JS_ENTRY_BYTES = 1024 * 1024;
 const MAX_JS_SOURCE_BYTES = 4 * 1024 * 1024;
-const EXPECTED_PACKAGE_NAME = 'ozw';
+const EXPECTED_PACKAGE_NAME = '@xbugs221/ozw';
 const FORBIDDEN_INSTALL_SCRIPTS = [
   'preinstall',
   'install',

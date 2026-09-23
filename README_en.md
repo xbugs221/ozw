@@ -34,16 +34,16 @@ ozw turns your coding tasks into persistent, resumable Web sessions. When combin
 
 ### Quick Start
 
-Version tags publish tested packages to GitHub Releases. Install and start with one command (Node.js 24.17+ or 26.4+ required):
+Version tags publish tested packages to npm and GitHub Releases. Install and start with one command (Node.js 24.17+ or 26.4+ required):
 
 ```sh
-npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz && ozw
+npm install -g @xbugs221/ozw && ozw
 ```
 
 To install a specific version:
 
 ```sh
-npm install -g https://github.com/xbugs221/ozw/releases/download/vVERSION/ozw.tgz && ozw
+npm install -g @xbugs221/ozw@VERSION && ozw
 ```
 
 The first run creates `~/.ozw`, generates a 32-character `OZW_ACCESS_TOKEN`, and prints the login URL. An interactive terminal prints a newly generated token once; non-interactive runs such as systemd or redirected output never write it to logs. Read it from `~/.ozw/.env`. The default URL is `http://127.0.0.1:3001` and is local-only.
@@ -57,11 +57,11 @@ Remote access requires an explicit bind-address change and a trusted HTTPS rever
 Upgrade and uninstall with:
 
 ```sh
-npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz
-npm uninstall -g ozw
+npm install -g @xbugs221/ozw
+npm uninstall -g @xbugs221/ozw
 ```
 
-Both upgrade and uninstall preserve configuration and databases under `~/.ozw`. See the [Quick Start](docs/quickstart_en.md) for source development, candidate-package acceptance, remote access, and data removal; see [Troubleshooting](docs/troubleshooting_en.md) for common failures and [CHANGELOG.md](CHANGELOG.md) for release changes.
+If you previously installed the GitHub `.tgz` under the old `ozw` package name, run `npm uninstall -g ozw` before installing `@xbugs221/ozw`. Upgrade and uninstall preserve configuration and databases under `~/.ozw`. See the [Quick Start](docs/quickstart_en.md) for source development, candidate-package acceptance, remote access, and data removal; see [Troubleshooting](docs/troubleshooting_en.md) for common failures and [CHANGELOG.md](CHANGELOG.md) for release changes.
 
 When accessed over HTTPS, the PWA can be added to a phone's home screen.
 

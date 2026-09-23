@@ -69,7 +69,7 @@ async function resolveInstalledPaths(prefix: string): Promise<{ executable: stri
     ? path.join(prefix, 'ozw.cmd')
     : path.join(prefix, 'bin', 'ozw');
   const { stdout } = await run(NPM, ['root', '--global', '--prefix', prefix]);
-  return { executable, packageRoot: path.join(stdout.trim(), 'ozw') };
+  return { executable, packageRoot: path.join(stdout.trim(), '@xbugs221', 'ozw') };
 }
 
 /** Install one real tarball into an isolated global npm prefix. */
@@ -523,7 +523,7 @@ test('全局升级和卸载保留用户数据', async () => {
 
     await run(NPM, [
       'uninstall', '--global', '--prefix', target.prefix, '--cache', target.npmCache,
-      '--no-audit', '--no-fund', 'ozw',
+      '--no-audit', '--no-fund', '@xbugs221/ozw',
     ], { cwd: target.root, env: targetEnvironment(target) });
     assert.equal(fs.existsSync(target.executable), false, '卸载必须移除全局命令');
     assert.equal(fs.existsSync(target.packageRoot), false, '卸载必须移除全局包');
