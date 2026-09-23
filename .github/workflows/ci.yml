@@ -1,4 +1,4 @@
-# PURPOSE: Keep local commits fast while enforcing full Node and isolated browser checks on GitHub.
+# PURPOSE: Select required PR checks by changed area while retaining full checks for shared or unknown changes.
 name: CI
 
 on:
@@ -8,7 +8,46 @@ on:
       - main
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.classify.outputs.scope }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Classify changed files
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "${BASE_SHA}"
+          fi
+          git diff --name-only -z "${BASE_SHA}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/changed-files"
+          scope=docs
+          while IFS= read -r -d '' file; do
+            case "${file}" in
+              README.md|README_en.md|CHANGELOG.md|CONTRIBUTING.md|CONTRIBUTING_en.md|SECURITY.md|LICENSE|docs/*|.github/ISSUE_TEMPLATE/*|.github/pull_request_template.md) ;;
+              frontend/*|public/*|index.html)
+                if [[ "${scope}" == backend ]]; then scope=full; break; fi
+                scope=frontend
+                ;;
+              backend/*)
+                if [[ "${scope}" == frontend ]]; then scope=full; break; fi
+                scope=backend
+                ;;
+              *) scope=full; break ;;
+            esac
+          done < "${RUNNER_TEMP}/changed-files"
+          echo "scope=${scope}" >> "${GITHUB_OUTPUT}"
+          echo "Selected check scope: ${scope}"
+
   node-checks:
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.scope != 'docs') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -28,11 +67,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Node spec tests
-        run: pnpm run test:ci
+      - name: Run checks for changed area
+        env:
+          CHECK_SCOPE: ${{ needs.changes.outputs.scope }}
+        run: |
+          case "${CHECK_SCOPE}" in
+            frontend)
+              pnpm run typecheck:web
+              pnpm run typecheck:test
+              pnpm run test:vitest
+              ;;
+            backend)
+              pnpm run typecheck:node
+              pnpm run typecheck:test
+              pnpm run test:vitest
+              pnpm run test:server
+              pnpm run test:spec:node
+              ;;
+            *) pnpm run test:ci ;;
+          esac
 
   browser-smoke:
     name: Browser smoke
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.scope != 'docs') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
