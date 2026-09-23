@@ -248,12 +248,13 @@ jobs:
         run: |
           set -euo pipefail
           tarball="$(node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; const manifest = JSON.parse(fs.readFileSync('candidate/npm-package.sha256.json', 'utf8')); const file = path.join('candidate', manifest.filename); const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); if (manifest.name !== '@xbugs221/ozw' || manifest.version !== process.env.EXPECTED_VERSION || sha256 !== manifest.sha256) throw new Error('Candidate identity mismatch'); process.stdout.write(file)")"
-          package_root="${OZW_TEST_PREFIX}/lib/node_modules/@xbugs221/ozw"
+          package_root="${OZW_TEST_PREFIX}/node_modules/@xbugs221/ozw"
           mkdir -p "${OZW_TEST_HOME}"
-          npm install --global --prefix "${OZW_TEST_PREFIX}" --omit=optional "${GITHUB_WORKSPACE}/${tarball}"
+          npm install --prefix "${OZW_TEST_PREFIX}" --omit=optional "${GITHUB_WORKSPACE}/${tarball}"
           cli_path="${package_root}/dist-node/backend/cli.js"
           test -f "${cli_path}"
           test ! -d "${package_root}/node_modules/node-pty"
+          test ! -d "${OZW_TEST_PREFIX}/node_modules/node-pty"
           chmod 700 "${OZW_TEST_HOME}"
           port="$(node -e "const server = require('node:net').createServer(); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => console.log(port)); })")"
           HOME="${OZW_TEST_HOME}" OZW_HOME="${OZW_TEST_HOME}/.ozw" HOST=127.0.0.1 PORT="${port}" node "${cli_path}" start > server.log 2>&1 &
