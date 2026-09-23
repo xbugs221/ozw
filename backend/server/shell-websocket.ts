@@ -431,8 +431,8 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                     const {
                         routeSessionId,
                         ptyIdentity,
-                        legacyPtyIdentities
                     } = identity;
+                    const legacyPtyIdentities = [...identity.legacyPtyIdentities];
                     let providerSessionId = identity.providerSessionId;
                     let resumeSessionId = identity.resumeSessionId;
                     const provider = normalizeShellProvider(data.provider);
@@ -442,6 +442,11 @@ export function handleShellConnection(deps: any, ws: WebSocket): void {
                         if (persistedBinding?.provider === provider) {
                             providerSessionId = persistedBinding.providerSessionId;
                             resumeSessionId = persistedBinding.providerSessionId;
+                        }
+                        // A provider-only card may already own a window before it gains a cN route.
+                        // Keep that window as a reconnect candidate so the same conversation is not started twice.
+                        if (providerSessionId) {
+                            legacyPtyIdentities.push(`provider:${providerSessionId}`);
                         }
                     }
                     const forceHandoffRequested = data.forceHandoff === true;

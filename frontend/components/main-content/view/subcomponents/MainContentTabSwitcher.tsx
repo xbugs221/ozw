@@ -7,6 +7,7 @@ const Terminal = ({ className: cls, strokeWidth: sw }: { className?: string; str
 const Folder = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>;
 const Home = ({ className: cls, strokeWidth: sw }: { className?: string; strokeWidth?: number }) => <svg className={cls || "w-4 h-4"} stroke="currentColor" strokeWidth={sw || "2"} fill="none" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>;
 import Tooltip from '../../../ui/Tooltip';
+import { useNavigate } from 'react-router-dom';
 import type { AppTab } from '../../../../types/app';
 import type { Dispatch, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -43,6 +44,7 @@ export default function MainContentTabSwitcher({
   readOnlyProviderCollection = false,
 }: MainContentTabSwitcherProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
 
   const tabs = readOnlyProviderCollection
     ? BASE_TABS.filter((tab) => tab.id === 'overview' || tab.id === 'chat')
@@ -72,7 +74,7 @@ export default function MainContentTabSwitcher({
 
   const handleTabClick = (tabId: AppTab) => {
     if (tabId === 'overview') {
-      setActiveTab('overview');
+      navigate('/');
     } else if (tabId === 'chat') {
       setActiveTab('chat');
       // Focus chat input or scroll to chat area could be added here

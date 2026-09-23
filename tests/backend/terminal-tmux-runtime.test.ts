@@ -70,6 +70,74 @@ test('同名项目路径和特殊会话标识不会产生 tmux 冲突', () => {
   assert.ok(left.windowName.length <= 48);
 });
 
+test('卡片获得路由编号后继续复用原 provider window', async (t) => {
+  /**
+   * 真实 tmux 中预置 provider 身份的 window，模拟同一会话后来获得 cN 路由。
+   */
+  if (process.platform === 'win32') return t.skip('tmux lifecycle is POSIX-only');
+  try {
+    await execFileAsync('tmux', ['-V']);
+  } catch {
+    return t.skip('tmux is not installed');
+  }
+
+  const projectPath = await mkdtemp(path.join(tmpdir(), 'ozw-tmux-reuse-'));
+  const providerSessionId = 'provider-reuse-123';
+  const providerKey = `${projectPath}_pi_provider:${providerSessionId}`;
+  const runtime = createTmuxTerminalRuntime(providerKey);
+  const handlers = new Map<string, (...args: any[]) => any>();
+  const ptySessionsMap = new Map();
+  let launchedCommand = '';
+  const fakePty = {
+    pid: 99,
+    write() { /** The scenario does not send terminal input. */ },
+    resize() { /** The scenario keeps its initial dimensions. */ },
+    kill() { /** Cleanup is handled by the isolated tmux session. */ },
+    onData() { /** No process output is required for identity selection. */ },
+    onExit() { /** The fake relay stays active during the assertion. */ },
+  };
+  const socket = {
+    readyState: 1,
+    on(event: string, handler: (...args: any[]) => any) {
+      /** Expose WebSocket callbacks so the test can drive init. */
+      handlers.set(event, handler);
+    },
+    send() { /** The terminal welcome frame does not affect window selection. */ },
+  };
+
+  try {
+    const createArgs = runtime.createSession('sleep 30');
+    await execFileAsync(createArgs[0], createArgs.slice(1));
+    handleShellConnection({
+      ptySessionsMap,
+      PTY_SESSION_TIMEOUT: 300_000,
+      SHELL_URL_PARSE_BUFFER_LIMIT: 1024,
+      stripAnsiSequences: (value: string) => value,
+      normalizeDetectedUrl: () => null,
+      extractUrlsFromText: () => [],
+      shouldAutoOpenUrlFromOutput: () => false,
+      os: { platform: () => 'linux', homedir: () => projectPath },
+      WebSocket: { OPEN: 1 },
+      loadNodePtyRuntime: async () => ({ spawn: (_shell: string, args: string[]) => {
+        /** Capture the command selected for the real tmux relay. */
+        launchedCommand = args[1];
+        return fakePty;
+      } }),
+    }, socket as any);
+    await handlers.get('message')?.(JSON.stringify({
+      type: 'init', provider: 'pi', projectPath, routeSessionId: 'c9',
+      providerSessionId, riskConfirmed: true,
+    }));
+
+    assert.equal(ptySessionsMap.get(providerKey)?.tmuxTarget, runtime.target);
+    assert.match(launchedCommand, /tmux attach-session -t/);
+    assert.equal((await execFileAsync('tmux', ['list-windows', '-t', runtime.sessionName, '-F', '#{window_id}'])).stdout.trim().split('\n').length, 1);
+  } finally {
+    await execFileAsync('tmux', ['kill-session', '-t', runtime.sessionName]).catch(() => undefined);
+    await rm(projectPath, { recursive: true, force: true });
+  }
+});
+
 test('断开且静默的 window 在宽限期后自动回收', async (t) => {
   /**
    * 使用隔离 tmux 会话和缩短宽限期，验证真实回收命令而非字符串契约。
