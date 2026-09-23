@@ -34,20 +34,16 @@ ozw turns your coding tasks into persistent, resumable Web sessions. When combin
 
 ### Quick Start
 
-> **Release status:** `ozw` is the current candidate package name. The public NPM package has not been published, and package ownership and release acceptance are still pending. The registry commands below are the **post-release interface**; do not install the same name from the public registry yet.
-
-After publication, use the global install path:
+Version tags publish tested packages to GitHub Releases. Install and start with one command (Node.js 24.17+ or 26.4+ required):
 
 ```sh
-npm install -g ozw
-ozw
+npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz && ozw
 ```
 
-Before publication, install only a candidate tarball supplied by the maintainers:
+To install a specific version:
 
 ```sh
-npm install -g ./ozw-VERSION.tgz
-ozw
+npm install -g https://github.com/xbugs221/ozw/releases/download/vVERSION/ozw.tgz && ozw
 ```
 
 The first run creates `~/.ozw`, generates a 32-character `OZW_ACCESS_TOKEN`, and prints the login URL. An interactive terminal prints a newly generated token once; non-interactive runs such as systemd or redirected output never write it to logs. Read it from `~/.ozw/.env`. The default URL is `http://127.0.0.1:3001` and is local-only.
@@ -61,7 +57,7 @@ Remote access requires an explicit bind-address change and a trusted HTTPS rever
 Upgrade and uninstall with:
 
 ```sh
-npm update -g ozw
+npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz
 npm uninstall -g ozw
 ```
 

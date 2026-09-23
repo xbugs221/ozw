@@ -34,20 +34,16 @@
 
 ### 快速开始
 
-> **发布状态：** `ozw` 是当前候选包名，公共 NPM 包尚未发布，包名所有权和发行验收仍待完成。下面的注册表命令是**发布后的正式入口**，现在请勿从公共注册表安装同名包。
-
-发布后，首选全局安装：
+正式版由 Git 标签自动发布到 GitHub Releases。安装并启动只需一条命令（需要 Node.js 24.17+ 或 26.4+）：
 
 ```sh
-npm install -g ozw
-ozw
+npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz && ozw
 ```
 
-公开发布前，只使用维护者提供的候选包：
+若需要安装指定版本：
 
 ```sh
-npm install -g ./ozw-VERSION.tgz
-ozw
+npm install -g https://github.com/xbugs221/ozw/releases/download/vVERSION/ozw.tgz && ozw
 ```
 
 首次运行会创建 `~/.ozw`、生成 32 字符的 `OZW_ACCESS_TOKEN`，并输出登录地址。交互式终端仅在新生成时显示令牌；systemd、重定向等非交互运行不会把令牌写入日志，请从 `~/.ozw/.env` 查看。默认地址为 `http://127.0.0.1:3001`，只允许本机访问。
@@ -61,7 +57,7 @@ ozw
 升级与卸载：
 
 ```sh
-npm update -g ozw
+npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz
 npm uninstall -g ozw
 ```
 

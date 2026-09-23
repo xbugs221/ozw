@@ -15,6 +15,22 @@ import { resolveCurrentTmuxSession } from '../../backend/server/current-tmux-ses
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * 等待 tmux client 真正 attach 并聚焦目标 window，避免在慢速 CI 上抢先切换。
+ */
+async function waitForClientWindow(sessionName: string, windowName: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const { stdout } = await execFileAsync('tmux', [
+      'list-clients', '-t', sessionName, '-F', '#{window_name}',
+    ]);
+    if (stdout.split(/\r?\n/).includes(windowName)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const clients = await execFileAsync('tmux', ['list-clients', '-F', '#{session_name}:#{window_name}']);
+  throw new Error(`tmux client did not focus ${windowName}; clients: ${clients.stdout.trim()}`);
+}
+
 test('解析 attached client 当前聚焦 window，而不是第一个 route window', async (t) => {
   if (process.platform === 'win32') {
     t.skip('tmux is POSIX-only');
@@ -33,12 +49,12 @@ test('解析 attached client 当前聚焦 window，而不是第一个 route wind
   let terminal: pty.IPty | null = null;
   try {
     await execFileAsync('tmux', [
-      'new-session', '-d', '-s', codexRuntime.sessionName, '-n', codexRuntime.windowName,
-      'bash', '-lc', `cd ${JSON.stringify(projectPath)}; exec bash`,
+      'new-session', '-d', '-c', projectPath, '-s', codexRuntime.sessionName,
+      '-n', codexRuntime.windowName, 'sleep 120',
     ]);
     await execFileAsync('tmux', [
-      'new-window', '-d', '-t', codexRuntime.sessionName, '-n', piRuntime.windowName,
-      'bash', '-lc', `cd ${JSON.stringify(projectPath)}; exec bash`,
+      'new-window', '-d', '-c', projectPath, '-t', codexRuntime.sessionName,
+      '-n', piRuntime.windowName, 'sleep 120',
     ]);
     terminal = pty.spawn('bash', ['-lc', `tmux attach-session -t ${codexRuntime.sessionName}:${codexRuntime.windowName}`], {
       name: 'xterm-256color',
@@ -47,9 +63,9 @@ test('解析 attached client 当前聚焦 window，而不是第一个 route wind
       cwd: projectPath,
       env: process.env,
     });
-    await new Promise((resolve) => setTimeout(resolve, 180));
+    await waitForClientWindow(codexRuntime.sessionName, codexRuntime.windowName);
     await execFileAsync('tmux', ['select-window', '-t', `${codexRuntime.sessionName}:${piRuntime.windowName}`]);
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForClientWindow(codexRuntime.sessionName, piRuntime.windowName);
 
     const resolution = await resolveCurrentTmuxSession(projectPath, {
       getCodexSessions: async () => [{ id: 'codex-session', routeIndex: 1, projectPath, title: 'c1' }],

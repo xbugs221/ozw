@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PURPOSE: Prepare a release commit with agent-written CHANGELOG content, then tag it.
+# PURPOSE: Prepare a release commit for PR review; tag the merged main commit afterward.
 set -euo pipefail
 
 usage() {
@@ -12,7 +12,8 @@ Examples:
   ./release.sh 1.1.0
 
 The script updates package.json, asks an agent to update CHANGELOG.md,
-creates a release commit, and tags that commit. Override the agent with:
+and creates a release commit for a PR. After merging, tag the main commit
+with the same version to trigger the release workflow. Override the agent with:
   CHANGELOG_AGENT_CMD='codex exec --ephemeral --ask-for-approval never --sandbox read-only -'
 USAGE
 }
@@ -85,8 +86,9 @@ if (fs.existsSync(shrinkwrapPath)) {
   fi
 
   git commit -m "Release $tag_name"
-  git tag -a "$tag_name" -m "Release $tag_name"
-  echo "Created release tag $tag_name"
+  echo "Created release commit for $tag_name. Merge it through a PR, then tag the merged main commit:"
+  echo "  git tag -a $tag_name -m 'Release $tag_name'"
+  echo "  git push origin $tag_name"
 }
 
 main "$@"

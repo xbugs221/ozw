@@ -1,4 +1,5 @@
-name: NPM release
+# PURPOSE: Build one tested package from a version tag and publish it as a GitHub release.
+name: Release
 
 on:
   push:
@@ -269,6 +270,59 @@ jobs:
           done
           cat server.log >&2
           exit 1
+
+  github-release:
+    name: Publish GitHub release
+    needs: [candidate, install-matrix, optional-dependency-health]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download tested candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-candidate
+          path: candidate
+
+      - name: Verify and name the one-command install asset
+        env:
+          PACKAGE_VERSION: ${{ needs.candidate.outputs.package_version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const manifestPath = 'candidate/npm-package.sha256.json';
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          if (manifest.name !== 'ozw' || manifest.version !== process.env.PACKAGE_VERSION ||
+              path.basename(manifest.filename) !== manifest.filename) {
+            throw new Error('Release candidate identity mismatch');
+          }
+          const tarball = path.join('candidate', manifest.filename);
+          const sha256 = crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex');
+          if (sha256 !== manifest.sha256) throw new Error('Release candidate SHA-256 mismatch');
+          fs.copyFileSync(tarball, 'candidate/ozw.tgz');
+          fs.writeFileSync(manifestPath, JSON.stringify({ ...manifest, filename: 'ozw.tgz' }, null, 2) + '\n');
+          NODE
+
+      - name: Publish the tested package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          Install and start (Node.js 24.17+ or 26.4+ required):
+
+          ```sh
+          npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz && ozw
+          ```
+
+          The first start creates local configuration and prints the login address. See the repository quick start for details.
+          EOF
+          gh release create "${GITHUB_REF_NAME}" candidate/ozw.tgz candidate/npm-package.sha256.json \
+            --verify-tag --title "ozw ${GITHUB_REF_NAME}" --notes-file release-notes.md
 
   prepare-publish:
     name: Prepare verified publish input
