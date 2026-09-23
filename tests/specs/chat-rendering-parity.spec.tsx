@@ -878,6 +878,22 @@ test('assistant body before trailing tool activity stays directly visible', asyn
   );
 });
 
+test('process activity around one assistant body shares one disclosure', () => {
+  /** A delayed tool result must not create a second elapsed-time bar below the answer. */
+  const blocks = buildTurnDisplayBlocks([
+    row({ type: 'user', timestamp: '2026-06-10T12:00:00.000Z', content: '检查', messageKey: 'one-group-user' }),
+    row({ type: 'assistant', timestamp: '2026-06-10T12:00:10.000Z', content: '正在检查', isThinking: true, messageKey: 'one-group-thinking' }),
+    row({ type: 'assistant', timestamp: '2026-06-10T12:00:20.000Z', content: '完成', messageKey: 'one-group-body' }),
+    row({ type: 'assistant', timestamp: '2026-06-10T12:00:25.000Z', isToolUse: true, toolCallId: 'one-group-tool', messageKey: 'one-group-tool' }),
+  ]);
+  const groups = blocks.filter((block) => block.kind === 'turn-non-body-group');
+
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0].items.map((item) => item.kind), ['thinking-group', 'tool-group']);
+  assert.equal(groups[0].processedDurationMs, 25_000);
+  assert.equal(blocks[1], groups[0], 'one disclosure stays before the visible answer');
+});
+
 test('Codex commentary phase history collapses before the final answer body', async () => {
   /**
    * Codex JSONL replays commentary as assistant text with phase metadata. Those

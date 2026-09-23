@@ -258,15 +258,29 @@ export function buildTurnDisplayBlocks(
     const processingStartedAtMs = getTimestampMs(processingStartedAt);
     const processingCompletedAtMs = getTimestampMs(completedAt ?? getLastPendingTimestamp(pendingItems));
     const isProcessing = shouldDefaultOpen && (forceDefaultOpen || hasLiveProcess);
+    const processedDurationMs = processingStartedAtMs !== null && processingCompletedAtMs !== null
+      ? Math.max(0, processingCompletedAtMs - processingStartedAtMs)
+      : undefined;
+    const existingGroup = blocks.find((block): block is TurnNonBodyGroupBlock =>
+      block.kind === 'turn-non-body-group' && block.turnKey === currentTurnKey,
+    );
+    if (existingGroup) {
+      existingGroup.items.push(...pendingItems.map((item) => ({ ...item, defaultOpen: shouldDefaultOpen })));
+      existingGroup.defaultOpen ||= shouldDefaultOpen;
+      existingGroup.isProcessing ||= isProcessing;
+      existingGroup.processedDurationMs = processedDurationMs ?? existingGroup.processedDurationMs;
+      existingGroup.model ||= billingMessage?.model;
+      existingGroup.tokenUsage ||= billingMessage?.tokenUsage;
+      pendingItems = [];
+      return;
+    }
     blocks.push({
       kind: 'turn-non-body-group',
       turnKey: currentTurnKey,
       defaultOpen: shouldDefaultOpen,
       isProcessing,
       processingStartedAt,
-      processedDurationMs: processingStartedAtMs !== null && processingCompletedAtMs !== null
-        ? Math.max(0, processingCompletedAtMs - processingStartedAtMs)
-        : undefined,
+      processedDurationMs,
       model: billingMessage?.model,
       tokenUsage: billingMessage?.tokenUsage,
       items: pendingItems.map((item) => ({ ...item, defaultOpen: shouldDefaultOpen })),
