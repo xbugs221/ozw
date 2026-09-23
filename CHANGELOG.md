@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.19 - 2026-09-23
+
+### Distribution
+- 使用 npm 可信发布者从标签流水线自动发布，并核对公开 registry 安装包。
+
 ## v1.4.18 - 2026-09-23
 
 ### Distribution
