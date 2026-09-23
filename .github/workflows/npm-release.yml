@@ -399,7 +399,6 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26.4.0
-          registry-url: https://registry.npmjs.org
 
       - name: Require a Trusted Publishing capable npm CLI
         run: >-
@@ -455,15 +454,15 @@ jobs:
           PACKAGE_VERSION: ${{ needs.candidate.outputs.package_version }}
         run: |
           mkdir published
-          for attempt in 1 2 3 4 5; do
-            if npm pack "@xbugs221/ozw@${PACKAGE_VERSION}" --ignore-scripts --json --pack-destination published > published/npm-pack.json; then
+          for attempt in {1..24}; do
+            if npm pack "@xbugs221/ozw@${PACKAGE_VERSION}" --prefer-online --ignore-scripts --json --pack-destination published > published/npm-pack.json; then
               break
             fi
-            if [[ "${attempt}" == "5" ]]; then
+            if [[ "${attempt}" == "24" ]]; then
               echo "Published package did not become readable from the public registry" >&2
               exit 1
             fi
-            sleep 5
+            sleep 10
           done
           published_tarball="$(node --input-type=module -e "import fs from 'node:fs'; import path from 'node:path'; const result = JSON.parse(fs.readFileSync('published/npm-pack.json', 'utf8')); const candidate = result[0]; if (result.length !== 1 || candidate.name !== '@xbugs221/ozw' || candidate.version !== process.argv[1]) throw new Error('Public package identity mismatch'); process.stdout.write(path.join('published', candidate.filename))" "${PACKAGE_VERSION}")"
           node --input-type=module -e "import crypto from 'node:crypto'; import fs from 'node:fs'; const manifest = JSON.parse(fs.readFileSync('candidate/npm-package.sha256.json', 'utf8')); const actual = crypto.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'); if (actual !== manifest.sha256) throw new Error('Public registry tarball differs from tested candidate')" "${published_tarball}"
