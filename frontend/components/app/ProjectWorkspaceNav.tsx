@@ -14,10 +14,10 @@ const Workflow = ({ className: cls, strokeWidth: sw }: { className?: string; str
 import { useTranslation } from 'react-i18next';
 import type { Project, ProjectSession, ProjectWorkflow, SessionProvider } from '../../types/app';
 import { api } from '../../utils/api';
+import { buildProjectRoute } from '../../utils/projectRoute';
 import { formatTimeAgo } from '../../utils/dateUtils';
 import { createSessionViewModel, getAllSessions, sortSessions } from '../sidebar/utils/utils';
 import type { SessionWithProvider } from '../sidebar/types/types';
-import { buildProjectRoute } from '../../utils/projectRoute';
 import { isWorkflowOwnedSession } from '../../utils/workflowSessions';
 import { getSessionRouteNumber } from '../../utils/sessionCardDisplay';
 import type { NewSessionHandler } from '../main-content/types/types';
