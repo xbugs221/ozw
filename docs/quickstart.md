@@ -4,23 +4,19 @@
 
 ---
 
-本指南区分正式发行、候选包验收和源码开发。普通用户在正式发布后应使用 NPM 全局安装。
+本指南区分 GitHub 正式发行、候选包验收和源码开发。
 
 ## 1. 选择安装方式
 
-### 正式发行版（发布后首选）
-
-> **当前状态：** `ozw` 是候选包名，公共 NPM 包尚未发布，包名所有权和发行验收仍待完成。以下命令是发布后的正式入口；现在请勿从公共注册表安装同名包。
+### 正式发行版
 
 在受支持的平台，只需要 Node.js 24（最低 24.17.0）或 Node.js 26（最低 26.4.0）：
 
 ```sh
-npm install -g ozw
-ozw --version
-ozw
+npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz && ozw
 ```
 
-无需 Git、pnpm、TypeScript 或前端构建工具。
+发布流水线会先验证安装包，再把同一个包附到 GitHub Release。无需 Git、pnpm、TypeScript 或前端构建工具。公共 NPM 包尚未发布，请使用上面的 GitHub 地址。
 
 ### 候选包验收（当前发行测试）
 
@@ -96,16 +92,16 @@ ozw 可以读取仓库、运行 shell，并访问本地 provider 配置；不要
 
 ## 5. 升级、回滚与卸载
 
-正式发布后升级到最新版：
+升级到最新 GitHub 发行版：
 
 ```sh
-npm update -g ozw
+npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz
 ```
 
 安装指定版本可用于回滚程序：
 
 ```sh
-npm install -g ozw@VERSION
+npm install -g https://github.com/xbugs221/ozw/releases/download/vVERSION/ozw.tgz
 ```
 
 候选包使用新版 `.tgz` 覆盖安装：

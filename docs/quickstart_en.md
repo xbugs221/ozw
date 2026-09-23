@@ -4,23 +4,19 @@ English | [中文](./quickstart.md)
 
 ---
 
-This guide separates the stable release, candidate-package acceptance, and source development paths. After publication, regular users should install ozw globally from NPM.
+This guide separates GitHub releases, candidate-package acceptance, and source development paths.
 
 ## 1. Choose an installation path
 
-### Stable release (preferred after publication)
-
-> **Current status:** `ozw` is the candidate package name. The public NPM package has not been published, and package ownership and release acceptance are still pending. The commands below are the post-release interface; do not install the same name from the public registry yet.
+### Stable release
 
 On a supported platform, only Node.js 24 (24.17.0 or newer) or Node.js 26 (26.4.0 or newer) is required:
 
 ```sh
-npm install -g ozw
-ozw --version
-ozw
+npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz && ozw
 ```
 
-Git, pnpm, TypeScript, and frontend build tools are not required.
+The release workflow verifies the package before attaching that same archive to GitHub Releases. Git, pnpm, TypeScript, and frontend build tools are not required. The public NPM package is not available yet; use the GitHub URL above.
 
 ### Candidate-package acceptance (current release testing)
 
@@ -96,16 +92,16 @@ ozw can read repositories, run shells, and access local provider configuration. 
 
 ## 5. Upgrade, rollback, and uninstall
 
-After publication, upgrade to the latest version with:
+Upgrade to the latest GitHub release with:
 
 ```sh
-npm update -g ozw
+npm install -g https://github.com/xbugs221/ozw/releases/latest/download/ozw.tgz
 ```
 
 Install a specific version to roll back the program:
 
 ```sh
-npm install -g ozw@VERSION
+npm install -g https://github.com/xbugs221/ozw/releases/download/vVERSION/ozw.tgz
 ```
 
 For a candidate build, install the newer `.tgz` over the previous version:
