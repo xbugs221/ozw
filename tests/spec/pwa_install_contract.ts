@@ -61,7 +61,9 @@ describe('ozw PWA install contract', () => {
     match(html, /<link rel="manifest" href="\/manifest\.webmanifest" \/>/);
     match(html, /name="mobile-web-app-capable" content="yes"/);
     match(html, /name="apple-mobile-web-app-capable" content="yes"/);
-    match(html, /rel="apple-touch-icon" href="\/pwa\/icon-192\.png"/);
+    match(html, /rel="icon" href="\/pwa\/icon\.svg\?v=[^"]+" type="image\/svg\+xml"/);
+    match(html, /rel="apple-touch-icon" href="\/pwa\/icon-192\.png\?v=[^"]+"/);
+    ok(await repoFileExists('public/pwa/icon.svg'), 'SVG favicon must exist');
     match(html, /src="\/frontend\/main\.tsx"/);
     ok(!html.includes('/favicon.ico'), 'index.html must not request the removed favicon.ico');
   });
@@ -82,9 +84,12 @@ describe('ozw PWA install contract', () => {
     for (const icon of manifest.icons) {
       equal(icon.type, 'image/png');
       match(icon.purpose ?? '', /maskable/);
+      const iconUrl = new URL(icon.src, 'https://ozw.local');
+      equal(iconUrl.origin, 'https://ozw.local');
+      ok(iconUrl.searchParams.has('v'), 'manifest icon URL must refresh installed app caches');
       ok(
-        await repoFileExists(`public${icon.src}`),
-        `manifest icon must exist: public${icon.src}`,
+        await repoFileExists(`public${iconUrl.pathname}`),
+        `manifest icon must exist: public${iconUrl.pathname}`,
       );
     }
   });
