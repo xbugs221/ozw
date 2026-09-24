@@ -1,0 +1,16 @@
+<!-- OZW logo concept: a command starts a three-stage progress track. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">OZW · 轨道</title>
+  <desc id="desc">终端命令延伸为三个连续的工作流节点。</desc>
+  <rect width="128" height="128" rx="29" fill="#19212F"/>
+  <rect x="17" y="19" width="94" height="90" rx="16" fill="#273248" stroke="#91D5D1" stroke-width="3.5"/>
+  <path d="M17 40h94" stroke="#5B7885" stroke-width="3"/>
+  <circle cx="29" cy="30" r="3" fill="#F5BD73"/>
+  <circle cx="40" cy="30" r="3" fill="#91D5D1"/>
+  <path d="m29 56 10 8-10 8M45 72h19" fill="none" stroke="#F3FAF8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M31 90h66" stroke="#91D5D1" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="34" cy="90" r="6" fill="#F5BD73"/>
+  <circle cx="64" cy="90" r="6" fill="#91D5D1"/>
+  <circle cx="94" cy="90" r="6" fill="#91D5D1"/>
+  <path d="M77 56h20M77 66h14" stroke="#8EAAB9" stroke-width="3" stroke-linecap="round"/>
+</svg>
