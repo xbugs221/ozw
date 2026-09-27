@@ -18,6 +18,14 @@ npm install -g @xbugs221/ozw && ozw
 
 The release workflow verifies the package before publishing the same archive to npm and GitHub Releases. Git, pnpm, TypeScript, and frontend build tools are not required.
 
+### Publish a new version
+
+There is no local file edit, release branch, or version PR. In GitHub, open **Actions → Release → Run workflow**, select `main`, enter a version (for example, `1.4.23`; `v1.4.23` is also accepted), and start the run.
+
+The workflow verifies that it started from the latest `main`, sets the candidate package's `package.json` and npm lockfile to the requested version, and lists first-parent commit messages since the previous release in the new CHANGELOG entry and GitHub Release notes. After the candidate passes all checks and is published to npm, the workflow creates a version tag and GitHub Release for that `main` commit.
+
+Alternatively, run `pnpm run release -- 1.4.23` locally to push a version tag after checking that `main` is current and the working tree is clean.
+
 ### Candidate-package acceptance (current release testing)
 
 Install only a `.tgz` supplied by the maintainers or built from this repository:

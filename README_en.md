@@ -34,7 +34,7 @@ ozw turns your coding tasks into persistent, resumable Web sessions. When combin
 
 ### Quick Start
 
-Version tags publish tested packages to npm and GitHub Releases. Install and start with one command (Node.js 24.17+ or 26.4+ required):
+Run the Release workflow from `main` with a `X.Y.Z` version to publish the tested package to npm and GitHub Releases. Install and start with one command (Node.js 24.17+ or 26.4+ required):
 
 ```sh
 npm install -g @xbugs221/ozw && ozw

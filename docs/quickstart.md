@@ -18,6 +18,14 @@ npm install -g @xbugs221/ozw && ozw
 
 发布流水线会先验证安装包，再把同一个包发布到 npm 并附到 GitHub Release。无需 Git、pnpm、TypeScript 或前端构建工具。
 
+### 发布新版本
+
+发布无需本地改文件、单独开分支或创建版本 PR。在 GitHub 打开 **Actions → Release → Run workflow**，选择 `main`，输入版本号（例如 `1.4.23`，也可输入 `v1.4.23`）并启动。
+
+流水线会确认运行基于最新 `main`，在发布候选包中把 `package.json` 和 npm 锁文件同步到输入版本；再把上一个正式版本之后的主线 commit message 写进本次 CHANGELOG 和 GitHub Release 说明。候选包通过完整验证并发布到 npm 后，流水线会为本次 `main` 提交创建版本标签和 GitHub Release。
+
+本地也可以运行 `pnpm run release -- 1.4.23`，确认 `main` 最新且工作区干净后直接推送版本标签。
+
 ### 候选包验收（当前发行测试）
 
 只安装维护者提供或从本仓库构建的 `.tgz`：
