@@ -7,6 +7,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/manual',
   testMatch: [
+    'codex-shared-app-server-handoff.spec.ts',
     'manual-session-identity-real.spec.ts',
     'oz-flow-session-render-real.spec.ts',
     'render-history-scroll-interaction-real.spec.ts',

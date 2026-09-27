@@ -26,6 +26,10 @@ The workflow verifies that it started from the latest `main`, sets the candidate
 
 Alternatively, run `pnpm run release -- 1.4.23` locally to push a version tag after checking that `main` is current and the working tree is clean.
 
+Before publishing, all type checks, Vitest/backend/Node specification tests, full browser specification and E2E tests (eight shards), build and package checks, Linux/macOS/Windows installation checks on Node.js 24/26, and startup checks without optional dependencies must pass. Any failure or timeout blocks npm publishing and the GitHub Release. Browser failure reports are available as Actions artifacts. Run **Browser regression** manually to check browsers without publishing a version.
+
+Automation excludes acceptance tests under `tests/manual` that require real accounts, external services, or a manually prepared environment, such as real Codex daemon handoff. Run these separately with the required environment.
+
 ### Candidate-package acceptance (current release testing)
 
 Install only a `.tgz` supplied by the maintainers or built from this repository:

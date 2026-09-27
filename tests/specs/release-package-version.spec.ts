@@ -7,6 +7,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { parse } from 'yaml';
 import { parseReleaseTag, prepareReleasePackage } from '../../scripts/prepare-release-package.mjs';
 
 test('parseReleaseTag accepts stable version tags', () => {
@@ -77,4 +78,31 @@ test('prepareReleasePackage updates npm manifests from the tag version', async (
   } finally {
     await rm(tempDirectory, { recursive: true, force: true });
   }
+});
+
+test('Release cannot publish until the full browser gate succeeds', async () => {
+  // Guard the publication dependency chain and reject failure-tolerant browser gates.
+  const release = parse(await readFile('.github/workflows/npm-release.yml', 'utf8'));
+  const browser = parse(await readFile('.github/workflows/browser-regression.yml', 'utf8'));
+  const gate = release.jobs['browser-regression'];
+  assert.equal(gate.uses, './.github/workflows/browser-regression.yml');
+  assert.equal(gate.if, undefined);
+  assert.equal(gate['continue-on-error'], undefined);
+  assert.ok(release.jobs['prepare-publish'].needs.includes('browser-regression'));
+  assert.ok(release.jobs.publish.needs.includes('prepare-publish'));
+  assert.ok(release.jobs['github-release'].needs.includes('verify-published'));
+  assert.ok(release.jobs['verify-published'].needs.includes('publish'));
+  for (const name of ['prepare-publish', 'publish', 'verify-published', 'github-release']) {
+    assert.equal(release.jobs[name].if, undefined, `${name} must require successful dependencies`);
+    assert.equal(release.jobs[name]['continue-on-error'], undefined);
+  }
+  assert.ok(Object.hasOwn(browser.on, 'workflow_call'));
+  const job = browser.jobs['browser-specs'];
+  assert.equal(job['continue-on-error'], undefined);
+  assert.equal(job.if, undefined);
+  const check = job.steps.find((step: { run?: string }) => step.run?.includes('playwright test'));
+  assert.match(check.run, /--config=playwright\.spec\.config\.ts/);
+  assert.match(check.run, /--forbid-only/);
+  assert.equal(check['continue-on-error'], undefined);
+  assert.equal(check.if, undefined);
 });

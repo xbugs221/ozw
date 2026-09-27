@@ -26,6 +26,10 @@ npm install -g @xbugs221/ozw && ozw
 
 本地也可以运行 `pnpm run release -- 1.4.23`，确认 `main` 最新且工作区干净后直接推送版本标签。
 
+发布前必须通过：类型检查、全部 Vitest/后端/Node 规格测试、完整浏览器规格与 E2E 回归（8 个分片）、构建和包内容检查，以及 Linux/macOS/Windows × Node.js 24/26 的安装运行验证、缺少可选依赖时的启动验证。任一检查失败或超时都会阻止 npm 发布和 GitHub Release；浏览器失败报告可从 Actions 下载。手动运行 **Browser regression** 可单独检查浏览器，不会发布版本。
+
+自动检查不包含 `tests/manual` 中依赖真实账号、外部服务或人工环境的验收，例如真实 Codex daemon 接管；这些检查仍需配置对应环境后单独执行。
+
 ### 候选包验收（当前发行测试）
 
 只安装维护者提供或从本仓库构建的 `.tgz`：
