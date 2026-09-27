@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.22 - 2026-09-27
+
+### Highlights
+- Workspace file links now work with Windows-style paths from WSL environments.
+
+### Changes
+- **Chat workspace links:** Improved path normalization so WSL workspace file links resolve correctly.
+- **Documentation:** Updated the README and chat rendering parity specification.
+
+### Quality
+- Added a workspace-link specification test covering path handling.
+
 ## v1.4.21 - 2026-09-25
 
 ### Highlights
