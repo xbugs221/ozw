@@ -14,6 +14,10 @@
 
 `pnpm test` 委托 `pnpm run test:full`，默认入口仍代表完整保护，不因为新增快速入口而缩水。
 
+Release 将同一提交的全量自动化检查拆成并行任务：候选包任务运行 `test:ci`（类型、Vitest、后端和 Node 规格）；复用 Browser regression，按 `playwright.spec.config.ts` 发现完整浏览器规格与 E2E，分成 8 片执行，每条用例无需重复运行。所有分片必须成功，不允许忽略失败；发现 `test.only` 也会失败。发布任务同时等待浏览器、候选包及跨平台安装验证，任何失败、取消或超时都会阻断发布。
+
+Browser regression 支持单独手动运行，不会发布。报告包含失败截图、trace 和 HTML 报告。`tests/manual` 不属于自动化全量范围；真实 Codex daemon 接管验收在 `playwright.real.config.ts` 中，需要预先准备真实服务与账号后单独执行。
+
 ## 耗时基线
 
 `pnpm run qa:test:timing` 运行 `scripts/collect-test-timings.ts`，默认采集 `typecheck`、`test:vitest` 和 `test:server:smoke` 的真实耗时与退出码，并写入 `test-results/test-performance/latest.json`。

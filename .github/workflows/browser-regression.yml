@@ -1,15 +1,18 @@
-# PURPOSE: Run the broad browser regression suite in isolated parallel shards.
+# PURPOSE: Block releases on any failure in the complete automated browser suite.
 name: Browser regression
 
 on:
   workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   browser-specs:
     name: Browser specs (${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -24,8 +27,8 @@ jobs:
           version: 11.17.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Browser specification tests
-        run: pnpm exec playwright test --config=playwright.ci.config.ts --shard=${{ matrix.shard }}/8 --global-timeout=900000 --reporter=line,html
+      - name: Full browser regression (specifications and end-to-end)
+        run: pnpm exec playwright test --config=playwright.spec.config.ts --shard=${{ matrix.shard }}/8 --global-timeout=900000 --forbid-only --reporter=line,html
         env:
           PLAYWRIGHT_HTML_OPEN: never
           OZW_PLAYWRIGHT_SHARD: ${{ matrix.shard }}

@@ -20,6 +20,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  browser-regression:
+    name: Required full browser regression
+    uses: ./.github/workflows/browser-regression.yml
+
   candidate:
     name: Build candidate once
     runs-on: ubuntu-latest
@@ -333,7 +337,7 @@ jobs:
 
   prepare-publish:
     name: Prepare verified publish input
-    needs: [candidate, install-matrix, optional-dependency-health]
+    needs: [candidate, install-matrix, optional-dependency-health, browser-regression]
     runs-on: ubuntu-latest
     permissions:
       contents: read
