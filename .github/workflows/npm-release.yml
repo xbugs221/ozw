@@ -1,38 +1,37 @@
-# PURPOSE: Build one tested package from a version tag and publish it to npm and GitHub Releases.
+# PURPOSE: Build and publish one tested package from a workflow version input or release tag.
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish (for example, 1.4.23; the v prefix is optional)
+        required: true
+        type: string
   push:
     tags:
       - 'v*.*.*'
-  workflow_dispatch:
-    inputs:
-      confirm_version:
-        description: Exact package version to publish (for example, 1.3.5)
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: npm-release-${{ github.ref }}
+  group: npm-release
   cancel-in-progress: false
 
 jobs:
   candidate:
     name: Build candidate once
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' &&
-       startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     outputs:
       package_version: ${{ steps.package.outputs.version }}
+      release_tag: ${{ steps.package.outputs.tag }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
@@ -44,32 +43,47 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Check latest main and prepare tag version
+        id: package
+        shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          git fetch --no-tags origin main
+          tag_commit="$(git rev-parse HEAD)"
+          main_commit="$(git rev-parse FETCH_HEAD)"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ "${GITHUB_REF_TYPE}" != "branch" || "${GITHUB_REF_NAME}" != "main" ]]; then
+              echo "Run the Release workflow from the main branch." >&2
+              exit 1
+            fi
+            if [[ "${tag_commit}" != "${main_commit}" ]]; then
+              echo "main advanced after this run started; start a new run from the latest main." >&2
+              exit 1
+            fi
+            version_input="${RELEASE_VERSION_INPUT}"
+          else
+            if ! git merge-base --is-ancestor "${tag_commit}" "${main_commit}"; then
+              echo "Release tag ${GITHUB_REF_NAME} must point to a commit already merged into origin/main." >&2
+              exit 1
+            fi
+            version_input="${GITHUB_REF_NAME}"
+          fi
+
+          package_version="$(node scripts/prepare-release-package.mjs "${version_input}")"
+          release_tag="v${package_version}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]] && git show-ref --verify --quiet "refs/tags/${release_tag}"; then
+            echo "Release tag already exists: ${release_tag}" >&2
+            exit 1
+          fi
+          echo "version=${package_version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Run quality gate
         run: pnpm run test:ci
-
-      - name: Check release version and tag
-        id: package
-        shell: bash
-        env:
-          CONFIRM_VERSION: ${{ inputs.confirm_version }}
-        run: |
-          package_version="$(node --input-type=module -e "import pkg from './package.json' with { type: 'json' }; process.stdout.write(pkg.version)")"
-          if [[ "${GITHUB_REF_TYPE}" != "tag" || "${GITHUB_REF_NAME}" != "v${package_version}" ]]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match package version ${package_version}" >&2
-            exit 1
-          fi
-          if [[ ! "${package_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release version must be stable SemVer (x.y.z): ${package_version}" >&2
-            exit 1
-          fi
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${CONFIRM_VERSION}" != "${package_version}" ]]; then
-            echo "Confirmed version ${CONFIRM_VERSION} does not match package version ${package_version}" >&2
-            exit 1
-          fi
-          echo "version=${package_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build production assets once
         run: pnpm run build
@@ -96,6 +110,8 @@ jobs:
           path: |
             ${{ steps.pack.outputs.tarball }}
             npm-package.sha256.json
+            release-notes.md
+            CHANGELOG.md
           if-no-files-found: error
           retention-days: 14
 
@@ -273,7 +289,6 @@ jobs:
   github-release:
     name: Publish GitHub release
     needs: [candidate, install-matrix, optional-dependency-health, verify-published]
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -310,28 +325,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.candidate.outputs.release_tag }}
         run: |
-          cat > release-notes.md <<'EOF'
-          Install and start (Node.js 24.17+ or 26.4+ required):
-
-          ```sh
-          npm install -g @xbugs221/ozw && ozw
-          ```
-
-          The first start creates local configuration and prints the login address. See the repository quick start for details.
-          EOF
-          gh release create "${GITHUB_REF_NAME}" candidate/ozw.tgz candidate/npm-package.sha256.json \
-            --verify-tag --title "ozw ${GITHUB_REF_NAME}" --notes-file release-notes.md
+          gh release create "${RELEASE_TAG}" candidate/ozw.tgz candidate/npm-package.sha256.json candidate/CHANGELOG.md \
+            --target "${GITHUB_SHA}" --title "ozw ${RELEASE_TAG}" \
+            --notes-file candidate/release-notes.md
 
   prepare-publish:
     name: Prepare verified publish input
-    needs: [candidate, install-matrix]
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.ref_type == 'tag' &&
-       github.ref_name == format('v{0}', needs.candidate.outputs.package_version) &&
-       inputs.confirm_version == needs.candidate.outputs.package_version)
+    needs: [candidate, install-matrix, optional-dependency-health]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -381,12 +383,6 @@ jobs:
   publish:
     name: Publish tested candidate to npm
     needs: [candidate, prepare-publish, optional-dependency-health]
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.ref_type == 'tag' &&
-       github.ref_name == format('v{0}', needs.candidate.outputs.package_version) &&
-       inputs.confirm_version == needs.candidate.outputs.package_version)
     runs-on: ubuntu-latest
     permissions:
       contents: read

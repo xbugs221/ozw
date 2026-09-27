@@ -1,94 +1,63 @@
 #!/usr/bin/env bash
-# PURPOSE: Prepare a release commit for PR review; tag the merged main commit afterward.
+# PURPOSE: Tag and push the latest clean main commit to start the release workflow.
 set -euo pipefail
 
 usage() {
-  # PURPOSE: Show the supported release command shape.
+  # PURPOSE: Show the one-command stable release flow.
   cat <<'USAGE'
 Usage: ./release.sh <version>
 
-Examples:
-  ./release.sh v1.0
-  ./release.sh 1.1.0
+Example:
+  ./release.sh 1.4.23
 
-The script updates package.json, asks an agent to update CHANGELOG.md,
-and creates a release commit for a PR. After merging, tag the main commit
-with the same version to trigger the release workflow. Override the agent with:
-  CHANGELOG_AGENT_CMD='codex exec --ephemeral --ask-for-approval never --sandbox read-only -'
+The command tags and pushes the current main commit. The release workflow
+sets the package version from that tag and publishes the tested package.
 USAGE
 }
 
-normalize_package_version() {
-  # PURPOSE: Convert a release tag such as v1.0 into an npm-compatible package version.
-  local raw="${1#v}"
-  local dot_count
-  dot_count="$(grep -o '\.' <<<"$raw" | wc -l | tr -d ' ')"
-  if [[ "$dot_count" == "1" ]]; then
-    printf '%s.0\n' "$raw"
-  else
-    printf '%s\n' "$raw"
-  fi
-}
-
 main() {
-  # PURPOSE: Run the complete local release workflow.
+  # PURPOSE: Validate release intent before creating or pushing a release tag.
   if [[ "${1:-}" == "" || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     usage
     exit 0
   fi
 
-  local release_input="$1"
-  local tag_name="v${release_input#v}"
-  local package_version
-  package_version="$(normalize_package_version "$release_input")"
+  local tag_name="v${1#v}"
+  if [[ ! "${tag_name}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Release version must be stable SemVer (x.y.z): ${1}" >&2
+    exit 1
+  fi
 
   local repo_root
   repo_root="$(git rev-parse --show-toplevel)"
-  cd "$repo_root"
+  cd "${repo_root}"
 
-  if ! git diff --quiet || ! git diff --cached --quiet; then
+  if [[ "$(git branch --show-current)" != "main" ]]; then
+    echo "Switch to main before releasing." >&2
+    exit 1
+  fi
+  if [[ -n "$(git status --porcelain)" ]]; then
     echo "Working tree must be clean before release." >&2
     exit 1
   fi
-  if git rev-parse -q --verify "refs/tags/$tag_name" >/dev/null; then
-    echo "Tag already exists: $tag_name" >&2
+
+  local local_main remote_main
+  local_main="$(git rev-parse HEAD)"
+  remote_main="$(git ls-remote --heads origin refs/heads/main | awk 'NR == 1 { print $1 }')"
+  if [[ -z "${remote_main}" || "${local_main}" != "${remote_main}" ]]; then
+    echo "Update main from origin/main before releasing." >&2
     exit 1
   fi
 
-  node -e "
-const fs = require('fs');
-const path = 'package.json';
-const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-pkg.version = '$package_version';
-fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
-const shrinkwrapPath = 'npm-shrinkwrap.json';
-if (fs.existsSync(shrinkwrapPath)) {
-  const shrinkwrap = JSON.parse(fs.readFileSync(shrinkwrapPath, 'utf8'));
-  shrinkwrap.version = '$package_version';
-  if (shrinkwrap.packages && shrinkwrap.packages['']) {
-    shrinkwrap.packages[''].version = '$package_version';
-  }
-  fs.writeFileSync(shrinkwrapPath, JSON.stringify(shrinkwrap, null, 2) + '\n');
-}
-"
-
-  if [[ -n "$(git tag --list)" ]]; then
-    pnpm run changelog:update -- --version "$tag_name"
-    git add package.json npm-shrinkwrap.json CHANGELOG.md
-  else
-    echo "Skipping CHANGELOG for first release tag $tag_name."
-    git add package.json npm-shrinkwrap.json
-  fi
-
-  if git diff --cached --quiet; then
-    echo "No release changes were produced." >&2
+  if git rev-parse -q --verify "refs/tags/${tag_name}" >/dev/null || \
+    [[ -n "$(git ls-remote --tags origin "refs/tags/${tag_name}" "refs/tags/${tag_name}^{}")" ]]; then
+    echo "Tag already exists: ${tag_name}" >&2
     exit 1
   fi
 
-  git commit -m "Release $tag_name"
-  echo "Created release commit for $tag_name. Merge it through a PR, then tag the merged main commit:"
-  echo "  git tag -a $tag_name -m 'Release $tag_name'"
-  echo "  git push origin $tag_name"
+  git tag -a "${tag_name}" -m "Release ${tag_name}"
+  git push origin "${tag_name}"
+  echo "Pushed ${tag_name}; GitHub Actions will build and publish the release."
 }
 
 main "$@"
