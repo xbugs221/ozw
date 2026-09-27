@@ -15,6 +15,7 @@ const HASH_LINE_SUFFIX_PATTERN = /#L(\d+)(?:C(\d+))?$/i;
 const COLON_LINE_SUFFIX_PATTERN = /:(\d+)(?::(\d+))?$/;
 const URI_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
+const WSL_MOUNT_PATH_PATTERN = /^\/mnt\/([a-z])(?:\/|$)/i;
 const FILE_EXTENSION_PATTERN = /(?:^|[\\/])[^\\/]+\.[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/;
 
 /**
@@ -80,6 +81,11 @@ function normalizePosixPath(inputPath: string): string {
   }
 
   return normalizedPath || '.';
+}
+
+/** Convert a WSL drive mount to its Windows drive spelling for root matching. */
+function toWindowsDrivePath(inputPath: string): string {
+  return inputPath.replace(/^\/mnt\/([a-z])(?=\/|$)/i, (_match, drive: string) => `${drive.toUpperCase()}:`);
 }
 
 /**
@@ -180,14 +186,20 @@ export function parseWorkspaceFileReference(
   }
 
   if (isAbsoluteWorkspacePath(normalizedFilePath)) {
+    const comparableProjectRoot = WSL_MOUNT_PATH_PATTERN.test(normalizedProjectRoot)
+      ? toWindowsDrivePath(normalizedProjectRoot)
+      : normalizedProjectRoot;
+    const comparableFilePath = WSL_MOUNT_PATH_PATTERN.test(normalizedFilePath)
+      ? toWindowsDrivePath(normalizedFilePath)
+      : normalizedFilePath;
     if (
-      normalizedFilePath !== normalizedProjectRoot &&
-      !normalizedFilePath.startsWith(`${normalizedProjectRoot}/`)
+      comparableFilePath !== comparableProjectRoot &&
+      !comparableFilePath.startsWith(`${comparableProjectRoot}/`)
     ) {
       return null;
     }
 
-    const relativePath = normalizedFilePath.slice(normalizedProjectRoot.length).replace(/^\/+/, '');
+    const relativePath = comparableFilePath.slice(comparableProjectRoot.length).replace(/^\/+/, '');
     if (!relativePath) {
       return null;
     }
