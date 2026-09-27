@@ -8,6 +8,7 @@
 | Codex 响应必须晚于绿色用户气泡 | 用户气泡仍为 sent 时隐藏同 turn live response | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `mergePersistedAndOptimisticMessages` 和 `reduceNativeRuntimeEvent` | session message merge、native runtime reducer | sent 阶段不显示 live assistant；persisted echo 到达后 user 为 persisted 且 assistant 排在其后 | 多窗口 late duplicate 继续由聊天归并内核规格覆盖 |
 | Pi 与 Codex 命令工具卡结构一致 | 相同命令工具共享卡片结构 | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `MessageComponent` 和 `ToolRenderer` SSR 渲染 | MessageComponent 工具分支、ToolRenderer | 两者都渲染为 `data-testid="codex-tool-card"`，命令、输出 anchor 和结构指纹一致 | 其它工具族需按风险补充专门规格 |
 | 文件型工具卡片路径统一可打开 | view_image/Read/Edit/FileChanges 路径复用 open-file 配置 | `tests/specs/chat-rendering-parity.spec.tsx`、`tests/spec/chat-composer-runtime.spec.ts` | 真实 `ToolRenderer`、tool config 和浏览器文件预览 | `openFileToolConfig`、`ToolRenderer`、workspace file open | 路径渲染为可点击控件，点击后调用 workspace 文件打开；图片路径打开图片预览 | 文件不存在时沿用现有 editor error UI |
+| 聊天文件链接兼容 WSL 盘符挂载 | `/mnt/c/...` 与 `C:\\...` 可按同一项目根解析 | `tests/specs/workspace-links.spec.ts`、`tests/spec/chat-file-links-open-in-editor.spec.ts` | 生产 `workspaceLinks` 解析器 | markdown link、selected project root、workspace file open | WSL 与 Windows 路径形式跨平台匹配为项目内相对路径；项目外路径不可打开 | 真实 Windows/WSL 文件系统的路径访问由运行环境提供 |
 | 回复正文开始后折叠非正文内容 | 工具调用及其间的过程说明进入 turn 级折叠组，纯工具调用合并为工具次数折叠组 | `tests/specs/chat-rendering-parity.spec.tsx` | 真实 `ChatMessage` 字段组合和 turn display block 构建入口 | `buildTurnDisplayBlocks`、`ChatMessagesPane`、`TurnNonBodyGroup` | 正文出现后非正文组默认折叠，正文直接可见；工具调用前后夹杂的过程说明也折叠；仅 live 执行默认展开，历史或非 live 执行默认折叠；纯工具块只显示“工具调用N次”汇总按钮，展开后平铺工具卡且不重复 Codex/时间戳；子任务步骤不显示具体工具类型 | 浏览器截图证据保留在对应归档提案中，长期规格测试固定核心状态合同 |
 | Codex/Pi 聊天默认 TUI-first | 打开会话先显示终端 TUI，渲染视图由用户主动触发 | `tests/specs/chat-tui-session-boundary.spec.ts` | 真实聊天入口源码和 TUI session key 模块 | `ChatInterface`、`chatTuiSessionKey`、`shell-websocket` | 默认可进入 TUI 面板；提供渲染快照和返回 TUI 入口；TUI 会话键区分 Provider 与 route/provider session 身份 | 真实浏览器截图证据保留在对应归档提案中 |
 | JSONL 渲染视图是冻结快照 | 点击渲染读取一次，自动刷新事件不改写快照 | `tests/specs/chat-render-snapshot-controller.spec.ts` | 生产 `renderSnapshotController` 纯逻辑 | `renderSnapshotController`、`sessionRuntimeController` | 默认模式为 TUI；点击渲染生成 snapshot version；`projects_updated`、`codex-complete`、`pi-complete`、`externalMessageUpdate` 不自动刷新；重新渲染才替换快照 | Provider JSONL flush 延迟只影响用户点击当刻可读内容 |
@@ -116,6 +117,12 @@
 - 真实数据来源：通过 Vite SSR 加载生产 `MessageComponent`、`ThemeProvider`、生产 `sessionMessageMerge`、`nativeRuntimeTranscript` 和 `buildTurnDisplayBlocks`，输入使用真实 `ChatMessage` 字段组合与真实 Codex runtime event shape。
 - 入口路径：`pnpm exec tsx --test tests/specs/chat-rendering-parity.spec.tsx`
 - 用户可见断言：以 SSR HTML 和 transcript 顺序检查用户能看到的正文、元信息、气泡顺序、工具卡 anchor 与卡片结构。
+
+### `tests/specs/workspace-links.spec.ts`
+
+- 覆盖核心业务契约：WSL `/mnt/<drive>/...` 和 Windows `<drive>:\\...` 绝对路径可与所选项目根互相匹配；项目外路径仍拒绝解析。
+- 真实数据来源：生产 `workspaceLinks` 解析器。
+- 入口路径：`pnpm exec tsx --test tests/specs/workspace-links.spec.ts`
 
 ### `tests/specs/chat-tui-session-boundary.spec.ts`
 
